@@ -7,6 +7,8 @@ import { useRoutingGraph } from "@/flow/use-routing-graph";
 import type { KeyStatus } from "@/lib/routing";
 import "./app.css";
 
+const CHAT_OPEN_STORAGE_KEY = "router:chat-open";
+
 async function readKeyStatus(): Promise<KeyStatus> {
 	const response = await fetch("/api/status", { cache: "no-store" });
 	if (!response.ok) throw new Error("Could not read key status");
@@ -14,7 +16,13 @@ async function readKeyStatus(): Promise<KeyStatus> {
 }
 
 function App() {
-	const [chatOpen, setChatOpen] = useState(true);
+	const [chatOpen, setChatOpen] = useState(
+		() => localStorage.getItem(CHAT_OPEN_STORAGE_KEY) !== "false",
+	);
+	const onChatOpenChange = useCallback((open: boolean) => {
+		localStorage.setItem(CHAT_OPEN_STORAGE_KEY, String(open));
+		setChatOpen(open);
+	}, []);
 	const graph = useRoutingGraph();
 	const {
 		data: status,
@@ -44,13 +52,13 @@ function App() {
 				messages={chat.messages}
 				draft={chat.draft}
 				chatOpen={chatOpen}
-				onOpenChat={() => setChatOpen(true)}
+				onOpenChat={() => onChatOpenChange(true)}
 				onDuplicateNode={duplicateNode}
 				onRemoveNode={removeNode}
 			/>
 			<ChatPanel
 				open={chatOpen}
-				onClose={() => setChatOpen(false)}
+				onClose={() => onChatOpenChange(false)}
 				draft={chat.draft}
 				onDraftChange={chat.setDraft}
 				messages={chat.messages}

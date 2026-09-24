@@ -30,7 +30,7 @@ The default models are `gemini-3.5-flash-lite` and `gpt-5-mini`. Select a model 
 
 The playground caps model output at 1,400 tokens. GPT-5 mini uses minimal reasoning effort in this preview. This affects response latency and length, not Jev's classification.
 
-Drag a connection from a Jev output to empty canvas to create and connect a model node. Drag a connection to an existing model node to reroute that branch. Each Jev output has one active model connection; replacing it removes an unused old model node. The connected nodes and their selected models determine execution. Canvas layout and the light/dark theme persist in browser local storage. Chat messages remain in memory until the page reloads or the conversation is cleared. The chat panel can be collapsed and reopened without losing the current conversation.
+Drag a connection from a Jev output to empty canvas to create and connect a model node. Drag a connection to an existing model node to reroute that branch. Each Jev output has one active model connection; replacing it removes an unused old model node. The connected nodes and their selected models determine execution. Canvas layout, the light/dark theme, and whether chat is expanded persist in browser local storage. Chat messages remain in memory until the page reloads or the conversation is cleared. The chat panel can be collapsed and reopened without losing the current conversation.
 
 ## Commands
 
