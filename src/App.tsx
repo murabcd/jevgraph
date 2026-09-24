@@ -1,21 +1,68 @@
-import { Button } from "@/components/ui/button"
+import { useCallback, useState } from "react";
+import useSWR from "swr";
+import { ChatPanel } from "@/chat/chat-panel";
+import { useRouteChat } from "@/chat/use-route-chat";
+import { RoutingCanvas } from "@/flow/routing-canvas";
+import { useRoutingGraph } from "@/flow/use-routing-graph";
+import type { KeyStatus } from "@/lib/routing";
+import "./app.css";
 
-export function App() {
-  return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
-      </div>
-    </div>
-  )
+async function readKeyStatus(): Promise<KeyStatus> {
+	const response = await fetch("/api/status", { cache: "no-store" });
+	if (!response.ok) throw new Error("Could not read key status");
+	return response.json() as Promise<KeyStatus>;
 }
 
-export default App
+function App() {
+	const [chatOpen, setChatOpen] = useState(true);
+	const graph = useRoutingGraph();
+	const {
+		data: status,
+		error: statusError,
+		mutate: refreshStatus,
+	} = useSWR<KeyStatus>("/api/status", readKeyStatus);
+	const onRequestStarted = useCallback(() => {
+		void refreshStatus();
+	}, [refreshStatus]);
+	const chat = useRouteChat(graph.routes, onRequestStarted);
+
+	const duplicateNode = (nodeId: string) => {
+		if (!chat.running) graph.onDuplicateNode(nodeId);
+	};
+	const removeNode = (nodeId: string) => {
+		if (chat.running) return;
+		graph.onRemoveNode(nodeId);
+		chat.clearResultForNode(nodeId);
+	};
+
+	return (
+		<main className="studio">
+			<RoutingCanvas
+				graph={graph}
+				result={chat.result}
+				running={chat.running}
+				messages={chat.messages}
+				draft={chat.draft}
+				chatOpen={chatOpen}
+				onOpenChat={() => setChatOpen(true)}
+				onDuplicateNode={duplicateNode}
+				onRemoveNode={removeNode}
+			/>
+			<ChatPanel
+				open={chatOpen}
+				onClose={() => setChatOpen(false)}
+				draft={chat.draft}
+				onDraftChange={chat.setDraft}
+				messages={chat.messages}
+				error={chat.error}
+				running={chat.running}
+				status={status}
+				statusUnavailable={Boolean(statusError)}
+				onSend={() => void chat.run()}
+				onClear={chat.clearChat}
+			/>
+		</main>
+	);
+}
+
+export default App;
