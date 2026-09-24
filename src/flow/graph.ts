@@ -6,7 +6,12 @@ import {
 	jevQuestionSchema,
 	questionOutputs,
 } from "@/lib/jev-question";
-import { defaultConfig, type JevRoutes, type Routes } from "@/lib/routing";
+import {
+	defaultConfig,
+	type JevRoutes,
+	MAX_REQUEST_PROMPT_LENGTH,
+	type Routes,
+} from "@/lib/routing";
 
 export type NodeKind = "input" | "jev" | "google" | "openai";
 export type CreatableNodeKind = "input" | "jev" | "model";
@@ -17,7 +22,6 @@ export type FlowNode = Node<
 		model?: string;
 		question?: JevQuestion;
 		prompt?: string;
-		draft?: string;
 		decision?: string;
 		usedBranch?: string;
 		step?: string;
@@ -84,7 +88,10 @@ const persistedNodeSchema = z.object({
 	id: z.string(),
 	position: z.object({ x: z.number().finite(), y: z.number().finite() }),
 	data: z.discriminatedUnion("kind", [
-		z.object({ kind: z.literal("input") }),
+		z.object({
+			kind: z.literal("input"),
+			prompt: z.string().max(MAX_REQUEST_PROMPT_LENGTH).optional(),
+		}),
 		z.object({ kind: z.literal("jev"), question: jevQuestionSchema }),
 		z.object({ kind: z.literal("google"), model: z.string().optional() }),
 		z.object({ kind: z.literal("openai"), model: z.string().optional() }),
@@ -176,6 +183,7 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 				position: node.position,
 				data: {
 					kind: node.data.kind,
+					...(node.data.kind === "input" ? { prompt: node.data.prompt } : {}),
 					model: node.data.model,
 					question: node.data.question,
 				},

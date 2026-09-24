@@ -7,6 +7,7 @@ export type Provider = z.infer<typeof providerSchema>;
 export type KeyStatus = { jev: boolean; openai: boolean; google: boolean };
 
 export const JEV_MODEL_ID = "jev-latest";
+export const MAX_REQUEST_PROMPT_LENGTH = 12000;
 
 export const routingConfigSchema = z.object({
 	openaiModel: z
@@ -79,6 +80,7 @@ export const chatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 export const routeRequestSchema = z.object({
+	requestPrompt: z.string().trim().max(MAX_REQUEST_PROMPT_LENGTH),
 	messages: z
 		.array(chatMessageSchema)
 		.min(1)

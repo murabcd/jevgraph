@@ -46,6 +46,9 @@ export function useRoutingGraph() {
 	const [pendingConnection, setPendingConnection] =
 		useState<PendingConnection | null>(null);
 	const question = nodes.find((node) => node.id === "jev")?.data.question;
+	const requestPrompt =
+		nodes.find((node) => node.id === "input" && node.data.kind === "input")
+			?.data.prompt ?? "";
 	const outputs = useMemo(
 		() => (question ? questionOutputs(question) : []),
 		[question],
@@ -62,6 +65,19 @@ export function useRoutingGraph() {
 				current.map((node) =>
 					node.id === nodeId
 						? { ...node, data: { ...node.data, kind: provider, model } }
+						: node,
+				),
+			);
+		},
+		[setNodes],
+	);
+
+	const onPromptChange = useCallback(
+		(prompt: string) => {
+			setNodes((current) =>
+				current.map((node) =>
+					node.id === "input" && node.data.kind === "input"
+						? { ...node, data: { ...node.data, prompt } }
 						: node,
 				),
 			);
@@ -340,11 +356,13 @@ export function useRoutingGraph() {
 
 	return {
 		nodes,
+		requestPrompt,
 		outputs,
 		graphEdges,
 		onNodesChange,
 		onEdgesChange,
 		onModelChange,
+		onPromptChange,
 		onQuestionChange,
 		onDuplicateNode,
 		onRemoveNode,

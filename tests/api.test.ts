@@ -10,6 +10,7 @@ describe("route API", () => {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					messages: [{ role: "user", content: "Hello" }],
+					requestPrompt: "",
 					config: defaultConfig,
 					routes: {
 						kind: "direct",

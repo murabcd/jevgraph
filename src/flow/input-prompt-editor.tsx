@@ -11,6 +11,7 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { MAX_REQUEST_PROMPT_LENGTH } from "@/lib/routing";
 
 type Props = {
 	value: string;
@@ -35,11 +36,17 @@ export function InputPromptEditor({
 				<ScrollArea className="min-h-0 flex-1">
 					<FieldGroup className="px-4 pb-4">
 						<Field>
-							<FieldLabel htmlFor="input-prompt">Prompt</FieldLabel>
+							<FieldLabel
+								htmlFor="input-prompt"
+								className="text-xs text-muted-foreground"
+							>
+								Prompt
+							</FieldLabel>
 							<Textarea
 								id="input-prompt"
 								className="min-h-[60dvh] max-h-[75dvh]"
 								placeholder="Write a prompt..."
+								maxLength={MAX_REQUEST_PROMPT_LENGTH}
 								value={draft}
 								onChange={(event) => setDraft(event.target.value)}
 								autoFocus

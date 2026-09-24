@@ -15,7 +15,9 @@ These files own the principal runtime and UI contracts.
 
 ## State boundaries
 
-Model connections and canvas layout live in browser local storage. The theme also persists there. Chat messages live only in memory. API keys belong in `.env.local` on the server and never enter the browser bundle.
+The canvas graph and theme live in browser local storage. Chat state lives only in memory.
+
+The graph includes model connections, node positions, and the Input node's reusable prompt. Canvas pan and zoom persist separately. Chat state includes messages and the current draft. API keys belong in `.env.local` on the server and never enter the browser bundle.
 
 ## Validation
 

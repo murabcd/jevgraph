@@ -8,9 +8,8 @@ import {
 	useReactFlow,
 } from "@xyflow/react";
 import { Zap } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
-import type { ChatTurn } from "@/chat/types";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +19,12 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+	maxCanvasZoom,
+	minCanvasZoom,
+	readCanvasViewport,
+	saveCanvasViewport,
+} from "@/flow/canvas-viewport";
 import {
 	type CreatableNodeKind,
 	canConnectNodes,
@@ -43,9 +48,6 @@ type RoutingCanvasProps = {
 	graph: ReturnType<typeof useRoutingGraph>;
 	result: RouteResult | null;
 	running: boolean;
-	messages: ChatTurn[];
-	draft: string;
-	onDraftChange: (value: string) => void;
 	chatOpen: boolean;
 	onDuplicateNode: (nodeId: string) => void;
 	onRemoveNode: (nodeId: string) => void;
@@ -56,9 +58,6 @@ export function RoutingCanvas({
 	graph,
 	result,
 	running,
-	messages,
-	draft,
-	onDraftChange,
 	chatOpen,
 	onDuplicateNode,
 	onRemoveNode,
@@ -67,6 +66,7 @@ export function RoutingCanvas({
 	const { theme } = useTheme();
 	const canvasRef = useRef<HTMLElement>(null);
 	const shouldFitAfterAdd = useRef(false);
+	const [initialViewport] = useState(readCanvasViewport);
 	const { screenToFlowPosition, fitView } = useReactFlow();
 	const {
 		nodes,
@@ -74,6 +74,7 @@ export function RoutingCanvas({
 		onNodesChange,
 		onEdgesChange,
 		onModelChange,
+		onPromptChange,
 		onQuestionChange,
 		connect,
 		connectStart,
@@ -93,8 +94,7 @@ export function RoutingCanvas({
 				...node.data,
 				onModelChange,
 				onQuestionChange,
-				onPromptChange: onDraftChange,
-				draft: node.id === "input" ? draft : undefined,
+				onPromptChange,
 				onDuplicateNode,
 				onRemoveNode,
 				editingDisabled: running,
@@ -106,11 +106,6 @@ export function RoutingCanvas({
 				),
 				usedBranch: node.id === "jev" ? result?.finalBranch : undefined,
 				step: stepLabels.get(node.id),
-				prompt:
-					node.id === "input"
-						? draft.trim() ||
-							messages.findLast((message) => message.role === "user")?.content
-						: undefined,
 				decision:
 					node.id === "jev" && result?.jev
 						? `${node.data.question ? (questionOutputs(node.data.question).find((output) => output.id === result.jev?.branch)?.label ?? result.jev.branch) : result.jev.branch} · ${Math.round(result.jev.confidence * 100)}%`
@@ -150,9 +145,7 @@ export function RoutingCanvas({
 		onDuplicateNode,
 		onRemoveNode,
 		running,
-		messages,
-		draft,
-		onDraftChange,
+		onPromptChange,
 		pendingConnection,
 		createPendingNode,
 		dismissPendingConnection,
@@ -305,10 +298,12 @@ export function RoutingCanvas({
 				panOnScroll
 				selectionOnDrag
 				zoomOnDoubleClick={false}
-				fitView
+				defaultViewport={initialViewport ?? undefined}
+				fitView={!initialViewport}
 				fitViewOptions={{ padding: 0.12 }}
-				minZoom={0.4}
-				maxZoom={1.5}
+				minZoom={minCanvasZoom}
+				maxZoom={maxCanvasZoom}
+				onMoveEnd={(_, viewport) => saveCanvasViewport(viewport)}
 				proOptions={{ hideAttribution: true }}
 			>
 				<Background

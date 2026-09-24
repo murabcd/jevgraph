@@ -1,6 +1,8 @@
 # Chat
 
-Chat keeps the conversation in memory and follows the current graph for each turn. The chosen model receives recent history. See [[routing]] for server events and [[canvas]] for graph behavior.
+Chat keeps the conversation in memory and follows the current graph for each turn. See [[routing]] for server events and [[canvas]] for graph behavior.
+
+The chosen model receives recent history and the Input node's reusable instructions. The chat composer contains only the current message and does not edit the node prompt.
 
 A direct path keeps the selected model; a Jev path evaluates each turn independently.
 

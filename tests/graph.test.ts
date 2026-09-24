@@ -93,6 +93,22 @@ describe("editable routing graph", () => {
 		expect(readGraph()).toEqual({ nodes: [], edges: [] });
 	});
 
+	test("persists the Request node prompt across graph reloads", () => {
+		const prompt = "Answer every message in one sentence.";
+		saveGraph(
+			[
+				{
+					id: "input",
+					type: "route",
+					position: { x: 0, y: 0 },
+					data: { kind: "input", active: false, prompt },
+				},
+			],
+			[],
+		);
+		expect(readGraph().nodes[0].data.prompt).toBe(prompt);
+	});
+
 	test("loads valid graph entries without trusting malformed persisted data", () => {
 		stored.set(
 			"router:graph:v2",

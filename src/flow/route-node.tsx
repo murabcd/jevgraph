@@ -71,7 +71,7 @@ import { cn } from "@/lib/utils";
 const nodeMeta = {
 	input: {
 		title: "Request",
-		subtitle: "Prompt source",
+		subtitle: "Reusable instructions",
 		footerLabel: "PROMPT",
 	},
 	jev: {
@@ -95,7 +95,7 @@ const nodeMeta = {
 >;
 
 function nodeFooterValue(data: FlowNode["data"]) {
-	if (data.kind === "input") return data.prompt || "Waiting for input";
+	if (data.kind === "input") return data.prompt || "No prompt";
 	if (data.kind === "jev")
 		return data.question
 			? questionTypeLabels[data.question.type]
@@ -126,7 +126,7 @@ function RouteNodeToolbar({
 		>
 			{data.kind === "input" && editOpen && (
 				<InputPromptEditor
-					value={data.draft ?? ""}
+					value={data.prompt ?? ""}
 					open={editOpen}
 					onOpenChange={setEditOpen}
 					onSave={(prompt) => data.onPromptChange?.(prompt)}

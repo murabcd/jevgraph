@@ -96,6 +96,7 @@ describe("routing policy", () => {
 
 	test("accepts a conversation only when the latest turn is from the user", () => {
 		const request = {
+			requestPrompt: "Answer in one sentence.",
 			config: defaultConfig,
 			routes,
 			messages: [
@@ -104,7 +105,15 @@ describe("routing policy", () => {
 				{ role: "user", content: "What is my name?" },
 			],
 		};
-		expect(routeRequestSchema.safeParse(request).success).toBe(true);
+		const parsed = routeRequestSchema.parse(request);
+		expect(parsed.requestPrompt).toBe("Answer in one sentence.");
+		expect(parsed.messages.at(-1)?.content).toBe("What is my name?");
+		expect(
+			routeRequestSchema.safeParse({
+				...request,
+				requestPrompt: undefined,
+			}).success,
+		).toBe(false);
 		expect(
 			routeRequestSchema.safeParse({
 				...request,
@@ -124,24 +133,22 @@ describe("routing policy", () => {
 			kind: "direct",
 			target: routes.targets.deep,
 		};
+		const request = {
+			requestPrompt: "",
+			messages: [{ role: "user", content: "Hello" }],
+			config: defaultConfig,
+			routes: direct,
+		};
+		expect(routeRequestSchema.safeParse(request).success).toBe(true);
 		expect(
 			routeRequestSchema.safeParse({
-				messages: [{ role: "user", content: "Hello" }],
-				config: defaultConfig,
-				routes: direct,
-			}).success,
-		).toBe(true);
-		expect(
-			routeRequestSchema.safeParse({
-				messages: [{ role: "user", content: "Hello" }],
-				config: defaultConfig,
+				...request,
 				routes: { ...direct, target: undefined },
 			}).success,
 		).toBe(false);
 		expect(
 			routeRequestSchema.safeParse({
-				messages: [{ role: "user", content: "Hello" }],
-				config: defaultConfig,
+				...request,
 				routes: { ...direct, question: routes.question },
 			}).success,
 		).toBe(false);

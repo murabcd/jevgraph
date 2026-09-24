@@ -29,6 +29,9 @@ type Keys = {
 	GOOGLE_GENERATIVE_AI_API_KEY?: string;
 };
 
+const modelInstructions =
+	"You are a helpful assistant in a live conversation. Answer the latest user message in context. Be clear and concise, and preserve important details.";
+
 async function classify(
 	prompt: string,
 	key: string,
@@ -63,6 +66,7 @@ async function classify(
 
 async function runModel(
 	messages: ChatMessage[],
+	requestPrompt: string,
 	target: RouteTarget,
 	keys: Keys,
 	onDelta: (text: string) => void,
@@ -82,8 +86,9 @@ async function runModel(
 			: createGoogle({ apiKey: key })(modelId);
 	const result = streamText({
 		model,
-		instructions:
-			"You are a helpful assistant in a live conversation. Answer the latest user message in context. Be clear and concise, and preserve important details.",
+		instructions: requestPrompt
+			? `${modelInstructions}\n\nRequest node instructions:\n${requestPrompt}`
+			: modelInstructions,
 		messages,
 		maxOutputTokens: 1400,
 		...(provider === "openai" && modelId === "gpt-5-mini"
@@ -116,6 +121,7 @@ async function runModel(
 
 async function routeDirectPrompt(
 	messages: ChatMessage[],
+	requestPrompt: string,
 	target: RouteTarget,
 	keys: Keys,
 	emit: (event: RouteStreamEvent) => void,
@@ -133,8 +139,12 @@ async function routeDirectPrompt(
 		reason: "Direct model",
 	};
 	emit({ type: "route", route });
-	const response = await runModel(messages, target, keys, (text) =>
-		emit({ type: "delta", text }),
+	const response = await runModel(
+		messages,
+		requestPrompt,
+		target,
+		keys,
+		(text) => emit({ type: "delta", text }),
 	);
 	emit({
 		type: "done",
@@ -148,6 +158,7 @@ async function routeDirectPrompt(
 
 async function routeJevPrompt(
 	messages: ChatMessage[],
+	requestPrompt: string,
 	config: RoutingConfig,
 	routes: JevRoutes,
 	keys: Keys,
@@ -159,10 +170,12 @@ async function routeJevPrompt(
 	try {
 		if (!keys.TYPESAFE_API_KEY)
 			throw new Error("TYPESAFE_API_KEY is not configured");
-		const routingContext = messages
-			.slice(-6)
-			.map((message) => `${message.role}: ${message.content}`)
-			.join("\n");
+		const routingContext = [
+			...(requestPrompt ? [`request instructions: ${requestPrompt}`] : []),
+			...messages
+				.slice(-6)
+				.map((message) => `${message.role}: ${message.content}`),
+		].join("\n");
 		jev = await classify(
 			routingContext,
 			keys.TYPESAFE_API_KEY,
@@ -197,7 +210,7 @@ async function routeJevPrompt(
 	let response: Awaited<ReturnType<typeof runModel>>;
 	let streamedText = "";
 	try {
-		response = await runModel(messages, target, keys, (text) => {
+		response = await runModel(messages, requestPrompt, target, keys, (text) => {
 			streamedText += text;
 			emit({ type: "delta", text });
 		});
@@ -222,7 +235,7 @@ async function routeJevPrompt(
 		fallbackReason = `${initialProvider} failed: ${message}`;
 		emit({ type: "route", route: routeSelection() });
 		try {
-			response = await runModel(messages, target, keys, (text) =>
+			response = await runModel(messages, requestPrompt, target, keys, (text) =>
 				emit({ type: "delta", text }),
 			);
 		} catch (fallbackError) {
@@ -271,9 +284,16 @@ export async function handleApi(
 					controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 				const processing =
 					input.routes.kind === "direct"
-						? routeDirectPrompt(input.messages, input.routes.target, keys, emit)
+						? routeDirectPrompt(
+								input.messages,
+								input.requestPrompt,
+								input.routes.target,
+								keys,
+								emit,
+							)
 						: routeJevPrompt(
 								input.messages,
+								input.requestPrompt,
 								input.config,
 								input.routes,
 								keys,
