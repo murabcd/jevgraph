@@ -58,6 +58,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
 import type { FlowNode, NodeKind } from "@/flow/graph";
 import { type CostBracket, textModels } from "@/lib/models";
 import { JEV_MODEL_ID } from "@/lib/routing";
@@ -516,6 +517,7 @@ export function CanvasControls() {
 			>
 				<Maximize />
 			</Button>
+			<Separator orientation="vertical" className="mx-1 my-1" />
 			<Button
 				variant="ghost"
 				size="icon-sm"
