@@ -1,14 +1,20 @@
-import { StrictMode } from "react"
-import { createRoot } from "react-dom/client"
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 
-import "./index.css"
-import App from "./App.tsx"
-import { ThemeProvider } from "@/components/theme-provider.tsx"
+import "./index.css";
+import { ReactFlowProvider } from "@xyflow/react";
+import { ThemeProvider } from "@/components/theme-provider";
+import App from "./App.tsx";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ThemeProvider>
-      <App />
-    </ThemeProvider>
-  </StrictMode>
-)
+const root = document.getElementById("root");
+if (!root) throw new Error("Root element not found");
+
+createRoot(root).render(
+	<StrictMode>
+		<ThemeProvider defaultTheme="light" storageKey="router:theme">
+			<ReactFlowProvider>
+				<App />
+			</ReactFlowProvider>
+		</ThemeProvider>
+	</StrictMode>,
+);

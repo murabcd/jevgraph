@@ -1,0 +1,169 @@
+body {
+	margin: 0;
+}
+
+.studio {
+	--route-accent: #f38020;
+	display: flex;
+	width: 100%;
+	height: 100vh;
+	overflow: hidden;
+	color: var(--foreground);
+	background: var(--background);
+}
+
+.canvas-shell {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+}
+
+.canvas-actions {
+	position: absolute;
+	z-index: 5;
+	top: 22px;
+	right: 22px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.canvas-controls {
+	position: absolute;
+	z-index: 5;
+	bottom: 16px;
+	left: 18px;
+}
+
+.react-flow__edge-textbg {
+	fill: var(--muted);
+}
+
+.route-node {
+	position: relative;
+	width: 248px;
+	height: 144px;
+}
+
+.route-node__eyebrow {
+	position: absolute;
+	top: -30px;
+	left: 0;
+	right: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.react-flow__handle.route-handle {
+	z-index: 2;
+	width: 10px;
+	height: 10px;
+	border: 2px solid var(--muted-foreground);
+	background: var(--background);
+}
+
+.react-flow__handle.route-handle--accent {
+	border-color: var(--route-accent);
+}
+
+.workbench {
+	position: relative;
+	width: 400px;
+	flex: none;
+	min-height: 0;
+	overflow: hidden;
+	border-left: 1px solid var(--border);
+	background: var(--background);
+	transition: width 200ms ease-out;
+}
+
+.workbench--closed {
+	width: 0;
+	border-left: 0;
+}
+
+.workbench__inner {
+	position: absolute;
+	inset-block: 0;
+	right: 0;
+	display: flex;
+	flex-direction: column;
+	width: 400px;
+	min-height: 0;
+	background: var(--background);
+	transition: transform 200ms ease-out;
+}
+
+.workbench--closed .workbench__inner {
+	transform: translateX(100%);
+}
+
+.workbench__header {
+	flex: none;
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-end;
+	min-height: 64px;
+	padding: 16px;
+	background: var(--background);
+}
+
+.workbench__footer {
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	padding: 0 8px 16px;
+	background: var(--background);
+}
+
+@media (max-width: 800px) {
+	.studio {
+		height: auto;
+		min-height: 100vh;
+		flex-direction: column;
+		overflow: visible;
+	}
+
+	.canvas-shell {
+		width: 100%;
+		height: 420px;
+		flex: none;
+	}
+
+	.canvas-actions {
+		top: 16px;
+		right: 16px;
+	}
+
+	.workbench {
+		width: 100%;
+		height: min(70vh, 640px);
+		border-left: 0;
+		border-top: 1px solid var(--border);
+		transition: height 200ms ease-out;
+	}
+
+	.workbench--closed {
+		width: 100%;
+		height: 0;
+		border-top: 0;
+	}
+
+	.workbench__inner {
+		width: 100%;
+		height: min(70vh, 640px);
+	}
+
+	.workbench--closed .workbench__inner {
+		transform: translateY(100%);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.workbench,
+	.workbench__inner {
+		transition: none;
+	}
+}
