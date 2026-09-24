@@ -35,17 +35,19 @@ const noulQuestionSchema = z.object({
 	noDescription: description,
 });
 
-const scoreQuestionSchema = z
-	.object({
-		type: z.literal("score"),
-		instructions,
-		levels: z.array(description).min(2).max(10),
-		threshold: z.number().min(0),
-	})
-	.refine((question) => question.threshold <= question.levels.length - 1, {
-		message: "Threshold must be within the score levels",
-		path: ["threshold"],
-	});
+const scoreQuestionSchema = z.object({
+	type: z.literal("score"),
+	instructions,
+	levels: z
+		.array(z.object({ id: z.string().min(1).max(100), description }))
+		.min(2)
+		.max(10)
+		.refine(
+			(levels) =>
+				new Set(levels.map((level) => level.id)).size === levels.length,
+			"Score level IDs must be unique",
+		),
+});
 
 export const jevQuestionSchema = z.union([
 	choiceQuestionSchema,
@@ -56,6 +58,11 @@ export type JevQuestion = z.infer<typeof jevQuestionSchema>;
 export type JevQuestionType = JevQuestion["type"];
 
 export const jevQuestionTypes = ["choice", "noul", "score"] as const;
+export const questionTypeLabels = {
+	choice: "Choice",
+	noul: "Noul",
+	score: "Score",
+} satisfies Record<JevQuestionType, string>;
 
 export function defaultJevQuestion(
 	type: JevQuestionType = "choice",
@@ -73,11 +80,13 @@ export function defaultJevQuestion(
 			type,
 			instructions: "How much reasoning does this request require?",
 			levels: [
-				"A direct response is sufficient.",
-				"Some reasoning is needed.",
-				"Complex, multi-step reasoning is required.",
+				{ id: "score-0", description: "A direct response is sufficient." },
+				{ id: "score-1", description: "Some reasoning is needed." },
+				{
+					id: "score-2",
+					description: "Complex, multi-step reasoning is required.",
+				},
 			],
-			threshold: 1.5,
 		};
 	}
 	return {
@@ -111,10 +120,10 @@ export function questionOutputs(question: JevQuestion) {
 			{ id: "yes", label: "Yes" },
 		];
 	}
-	return [
-		{ id: "low", label: "Low" },
-		{ id: "high", label: "High" },
-	];
+	return question.levels.map((level, index) => ({
+		id: level.id,
+		label: `Level ${index}`,
+	}));
 }
 
 export function questionForJev(
@@ -140,7 +149,7 @@ export function questionForJev(
 	return {
 		type: "score",
 		instructions: question.instructions,
-		criteria: question.levels,
+		criteria: question.levels.map((level) => level.description),
 	};
 }
 
@@ -177,7 +186,7 @@ export function resolveJevAnswer(
 			answer.score > question.levels.length - 1
 		)
 			throw new Error("Jev returned a score outside the rubric");
-		branch = answer.score >= question.threshold ? "high" : "low";
+		branch = question.levels[Math.round(answer.score)].id;
 		value = answer.score;
 		probabilities = answer.probabilities;
 	} else throw new Error("Jev returned the wrong question type");

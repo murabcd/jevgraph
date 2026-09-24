@@ -71,15 +71,19 @@ describe("routing policy", () => {
 		).toEqual(changed.targets.fast);
 	});
 
-	test("routes Noul yes/no and Score low/high through connected models", () => {
+	test("routes Noul and each Score level through connected models", () => {
 		for (const [question, selected] of [
 			[defaultJevQuestion("noul"), "yes"],
-			[defaultJevQuestion("score"), "high"],
+			[defaultJevQuestion("score"), "score-2"],
 		] as const) {
 			const targets =
 				selected === "yes"
 					? { yes: routes.targets.deep, no: routes.targets.fast }
-					: { low: routes.targets.fast, high: routes.targets.deep };
+					: {
+							"score-0": routes.targets.fast,
+							"score-1": routes.targets.fast,
+							"score-2": routes.targets.deep,
+						};
 			expect(
 				selectRoute({ branch: selected, confidence: 0.9 }, defaultConfig, {
 					kind: "jev",

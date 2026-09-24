@@ -7,7 +7,6 @@ import {
 	useUpdateNodeInternals,
 } from "@xyflow/react";
 import {
-	ChevronDown,
 	Copy,
 	Eye,
 	GitFork,
@@ -22,7 +21,7 @@ import {
 	Sun,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { GoogleIcon, OpenAIIcon } from "@/components/icons/provider-icons";
 import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -37,19 +36,10 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import {
-	Command,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
-} from "@/components/ui/command";
-import {
 	Dialog,
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
-	DialogTrigger,
 } from "@/components/ui/dialog";
 import {
 	DropdownMenu,
@@ -60,160 +50,27 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { CreatableNodeKind, FlowNode, NodeKind } from "@/flow/graph";
+import { InputPromptEditor } from "@/flow/input-prompt-editor";
 import { JevQuestionEditor } from "@/flow/jev-question-editor";
-import { ModelCommand } from "@/flow/model-command";
+import { JevQuestionPicker } from "@/flow/jev-question-picker";
+import { ModelPicker } from "@/flow/model-picker";
 import { NodeTypeCommand } from "@/flow/node-type-command";
 import {
 	defaultJevQuestion,
-	type JevQuestion,
-	jevQuestionTypes,
 	questionOutputs,
+	questionTypeLabels,
 } from "@/lib/jev-question";
-import { textModels } from "@/lib/models";
 import { cn } from "@/lib/utils";
-
-const questionTypeLabels = {
-	choice: "Choice",
-	noul: "Noul",
-	score: "Score",
-} satisfies Record<JevQuestion["type"], string>;
-
-function ModelPicker({
-	nodeId,
-	modelId,
-	onChange,
-}: {
-	nodeId: string;
-	modelId: string;
-	onChange?: (nodeId: string, model: string) => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const current = textModels.find((model) => model.id === modelId);
-	return (
-		<Dialog open={open} onOpenChange={setOpen}>
-			<DialogTrigger
-				render={
-					<Button
-						variant="outline"
-						size="sm"
-						className="nodrag nopan w-[200px] min-w-0 justify-between gap-2 rounded-full"
-						aria-label={`Select model, current ${current?.label ?? modelId}`}
-					/>
-				}
-			>
-				{current?.provider === "google" ? (
-					<GoogleIcon className="shrink-0" />
-				) : (
-					<OpenAIIcon className="shrink-0" />
-				)}
-				<span className="truncate">{current?.label ?? modelId}</span>
-				<ChevronDown className="shrink-0" />
-			</DialogTrigger>
-			<DialogContent
-				className="w-[min(440px,calc(100vw-2rem))] gap-0 p-0"
-				showCloseButton={false}
-			>
-				<DialogHeader className="sr-only">
-					<DialogTitle>Select a model</DialogTitle>
-				</DialogHeader>
-				<ModelCommand
-					modelId={modelId}
-					onSelect={(selectedModel) => {
-						onChange?.(nodeId, selectedModel);
-						setOpen(false);
-					}}
-				/>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-function JevQuestionPicker({
-	question,
-	onChange,
-}: {
-	question: JevQuestion;
-	onChange?: (question: JevQuestion) => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const label = questionTypeLabels[question.type];
-	return (
-		<Dialog open={open} onOpenChange={setOpen}>
-			<DialogTrigger
-				render={
-					<Button
-						variant="outline"
-						size="sm"
-						className="nodrag nopan w-[200px] min-w-0 justify-between gap-2 rounded-full"
-						aria-label={`Jev question type: ${label}`}
-					/>
-				}
-			>
-				<Avatar className="size-4 rounded-sm after:hidden">
-					<AvatarImage
-						src="/brands/typesafe.png"
-						alt=""
-						className="object-contain"
-					/>
-					<AvatarFallback className="bg-transparent">
-						<GitFork />
-					</AvatarFallback>
-				</Avatar>
-				<span className="truncate">{label}</span>
-				<ChevronDown className="shrink-0" />
-			</DialogTrigger>
-			<DialogContent
-				className="w-[min(440px,calc(100vw-2rem))] gap-0 p-0"
-				showCloseButton={false}
-			>
-				<DialogHeader className="sr-only">
-					<DialogTitle>Select Jev question type</DialogTitle>
-				</DialogHeader>
-				<Command>
-					<CommandInput placeholder="Search question types…" autoFocus />
-					<CommandList>
-						<CommandEmpty>No matching types.</CommandEmpty>
-						<CommandGroup heading="Jev question types">
-							{jevQuestionTypes.map((type) => (
-								<CommandItem
-									key={type}
-									value={type}
-									data-checked={type === question.type}
-									onSelect={() => {
-										if (type !== question.type)
-											onChange?.(defaultJevQuestion(type));
-										setOpen(false);
-									}}
-								>
-									<Avatar className="size-4 rounded-sm after:hidden">
-										<AvatarImage src="/brands/typesafe.png" alt="" />
-										<AvatarFallback className="bg-transparent">
-											<GitFork />
-										</AvatarFallback>
-									</Avatar>
-									<span className="min-w-0 flex-1 truncate">
-										{questionTypeLabels[type]}
-									</span>
-								</CommandItem>
-							))}
-						</CommandGroup>
-					</CommandList>
-				</Command>
-			</DialogContent>
-		</Dialog>
-	);
-}
 
 const nodeMeta = {
 	input: {
-		title: "Your request",
+		title: "Request",
 		subtitle: "Prompt source",
 		footerLabel: "PROMPT",
 	},
@@ -246,40 +103,6 @@ function nodeFooterValue(data: FlowNode["data"]) {
 	return data.model ?? "";
 }
 
-function PromptEditor({ data }: { data: FlowNode["data"] }) {
-	const promptRef = useRef<HTMLTextAreaElement>(null);
-	useEffect(() => promptRef.current?.focus(), []);
-	return (
-		<CardContent className="min-h-0 flex-1">
-			<Textarea
-				ref={promptRef}
-				className="nodrag nopan nowheel h-full min-h-0 resize-none rounded-none border-0 bg-transparent px-1 py-0.5 text-xs shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
-				aria-label="Prompt"
-				placeholder="Write a prompt..."
-				value={data.draft ?? ""}
-				onChange={(event) => data.onPromptChange?.(event.target.value)}
-			/>
-		</CardContent>
-	);
-}
-
-function routeNodeHeight(data: FlowNode["data"]) {
-	if (data.kind !== "jev") return undefined;
-	return Math.max(
-		144,
-		questionOutputs(data.question ?? defaultJevQuestion()).length * 54,
-	);
-}
-
-function footerDisplay(
-	data: FlowNode["data"],
-	editingPrompt: boolean,
-	value: string,
-) {
-	if (!editingPrompt) return value;
-	return data.draft?.trim() ? "Ready to send" : "Waiting for input";
-}
-
 function RouteNodeToolbar({
 	id,
 	data,
@@ -301,6 +124,22 @@ function RouteNodeToolbar({
 			position={Position.Bottom}
 			className="nodrag nopan flex items-center gap-1 rounded-full border border-border bg-background p-1.5 shadow-sm"
 		>
+			{data.kind === "input" && editOpen && (
+				<InputPromptEditor
+					value={data.draft ?? ""}
+					open={editOpen}
+					onOpenChange={setEditOpen}
+					onSave={(prompt) => data.onPromptChange?.(prompt)}
+				/>
+			)}
+			{data.kind === "jev" && data.question && editOpen && (
+				<JevQuestionEditor
+					question={data.question}
+					open={editOpen}
+					onOpenChange={setEditOpen}
+					onSave={(question) => data.onQuestionChange?.(question)}
+				/>
+			)}
 			{isModel && (
 				<ModelPicker
 					nodeId={id}
@@ -312,15 +151,6 @@ function RouteNodeToolbar({
 				<JevQuestionPicker
 					question={data.question}
 					onChange={data.onQuestionChange}
-				/>
-			)}
-			{data.kind === "jev" && data.question && editOpen && (
-				<JevQuestionEditor
-					key={data.question.type}
-					question={data.question}
-					open={editOpen}
-					onOpenChange={setEditOpen}
-					onSave={(question) => data.onQuestionChange?.(question)}
 				/>
 			)}
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -339,9 +169,9 @@ function RouteNodeToolbar({
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="center" sideOffset={8} className="min-w-40">
 					<DropdownMenuGroup>
-						{data.kind === "jev" && (
+						{!isModel && (
 							<DropdownMenuItem onClick={() => setEditOpen(true)}>
-								<Pencil /> Edit question
+								<Pencil /> Edit
 							</DropdownMenuItem>
 						)}
 						<DropdownMenuItem
@@ -446,24 +276,7 @@ function RouteNodeHandles({
 					position={Position.Left}
 				/>
 			)}
-			{data.kind === "jev" ? (
-				questionOutputs(data.question ?? defaultJevQuestion()).map(
-					(output, index, all) => (
-						<Handle
-							key={output.id}
-							className={cn(
-								"route-handle",
-								(selected || data.usedBranch === output.id) &&
-									"route-handle--accent",
-							)}
-							type="source"
-							id={output.id}
-							position={Position.Right}
-							style={{ top: `${((index + 1) / (all.length + 1)) * 100}%` }}
-						/>
-					),
-				)
-			) : data.kind === "input" ? (
+			{data.kind === "input" && (
 				<Handle
 					className={cn(
 						"route-handle",
@@ -472,23 +285,54 @@ function RouteNodeHandles({
 					type="source"
 					position={Position.Right}
 				/>
-			) : null}
+			)}
 		</>
+	);
+}
+
+function JevOutputRows({
+	outputs,
+	selected,
+	usedBranch,
+}: {
+	outputs: ReturnType<typeof questionOutputs>;
+	selected: boolean;
+	usedBranch?: string;
+}) {
+	return (
+		<CardContent className="grid gap-1 px-0">
+			{outputs.map((output) => (
+				<div
+					key={output.id}
+					className="relative flex min-h-8 items-center justify-end px-3 py-1"
+				>
+					<span className="min-w-0 wrap-break-word text-right text-xs font-medium">
+						{output.label}
+					</span>
+					<Handle
+						className={cn(
+							"route-handle",
+							(selected || usedBranch === output.id) && "route-handle--accent",
+						)}
+						type="source"
+						id={output.id}
+						position={Position.Right}
+					/>
+				</div>
+			))}
+		</CardContent>
 	);
 }
 
 export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 	const updateNodeInternals = useUpdateNodeInternals();
-	const outputIds =
-		data.kind === "jev" && data.question
-			? questionOutputs(data.question)
-					.map(({ id }) => id)
-					.join("|")
-			: "";
+	const outputs =
+		data.kind === "jev"
+			? questionOutputs(data.question ?? defaultJevQuestion())
+			: [];
+	const outputIds = outputs.map(({ id }) => id).join("|");
 	const { title, subtitle, footerLabel } = nodeMeta[data.kind];
 	const footerValue = nodeFooterValue(data);
-	const editingPrompt = selected && data.kind === "input";
-	const height = routeNodeHeight(data);
 	useEffect(() => {
 		if (outputIds) updateNodeInternals(id);
 	}, [outputIds, id, updateNodeInternals]);
@@ -496,11 +340,10 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 		<div
 			className={cn(
 				"route-node",
-				editingPrompt && "route-node--editing",
+				data.kind === "jev" && "route-node--jev",
 				data.active && "route-node--active",
 				selected && "route-node--selected",
 			)}
-			style={height ? { height } : undefined}
 		>
 			<RouteNodeToolbar id={id} data={data} selected={selected} title={title} />
 			<div className="route-node__eyebrow">
@@ -520,7 +363,8 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 			<Card
 				size="sm"
 				className={cn(
-					"h-full justify-between bg-card shadow-sm",
+					data.kind === "jev" ? "min-h-36 overflow-visible" : "h-full",
+					"justify-between bg-card shadow-sm",
 					(selected || data.active) && "ring-[var(--route-accent)]",
 				)}
 			>
@@ -533,16 +377,22 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 						</CardDescription>
 					</div>
 				</CardHeader>
-				{editingPrompt && <PromptEditor data={data} />}
+				{data.kind === "jev" && (
+					<JevOutputRows
+						outputs={outputs}
+						selected={selected}
+						usedBranch={data.usedBranch}
+					/>
+				)}
 				<CardFooter className="min-w-0 justify-between gap-2 py-3">
 					<span className="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground">
 						{footerLabel}
 					</span>
 					<span
 						className="min-w-0 truncate text-right text-xs font-medium"
-						title={editingPrompt ? undefined : footerValue}
+						title={footerValue}
 					>
-						{footerDisplay(data, editingPrompt, footerValue)}
+						{footerValue}
 					</span>
 				</CardFooter>
 			</Card>

@@ -1,16 +1,28 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-	Dialog,
-	DialogContent,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
+	Field,
+	FieldError,
+	FieldGroup,
+	FieldLabel,
+	FieldLegend,
+	FieldSet,
+	FieldTitle,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+	Sheet,
+	SheetClose,
+	SheetContent,
+	SheetFooter,
+	SheetHeader,
+	SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { type JevQuestion, jevQuestionSchema } from "@/lib/jev-question";
+import { cn } from "@/lib/utils";
 
 type ChoiceQuestion = Extract<JevQuestion, { type: "choice" }>;
 type NoulQuestion = Extract<JevQuestion, { type: "noul" }>;
@@ -19,6 +31,12 @@ type FieldsProps<T extends JevQuestion> = {
 	question: T;
 	onChange: (question: T) => void;
 };
+
+const editorTextareaSize = "min-h-[132px] max-h-52";
+const sectionFrameClassName =
+	"relative min-h-[132px] gap-1 rounded-lg border border-input bg-transparent px-3 py-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30";
+const sectionTextareaClassName =
+	"min-h-20 max-h-52 rounded-none border-0 bg-transparent px-0 py-0 text-sm leading-6 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent";
 
 function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 	const updateOption = (
@@ -32,24 +50,58 @@ function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 			),
 		});
 	return (
-		<div className="grid gap-3">
-			<div className="text-sm font-medium">Choices and connected outputs</div>
+		<FieldGroup className="gap-2">
+			<FieldTitle className="text-xs text-muted-foreground">
+				Sections
+			</FieldTitle>
 			{question.options.map((option, index) => (
-				<div key={option.id} className="grid gap-2 rounded-lg border p-3">
-					<div className="flex gap-2">
+				<FieldSet key={option.id} className={sectionFrameClassName}>
+					<FieldLegend className="sr-only">Choice {index + 1}</FieldLegend>
+					<Field>
+						<FieldLabel
+							htmlFor={`jev-choice-${option.id}-label`}
+							className="sr-only"
+						>
+							Choice {index + 1} name
+						</FieldLabel>
 						<Input
-							aria-label={`Choice ${index + 1} name`}
+							id={`jev-choice-${option.id}-label`}
+							className={cn(
+								"h-7 rounded-none border-0 bg-transparent px-0 py-0 text-base shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent",
+								question.options.length > 2 && "pr-8",
+							)}
+							placeholder="Choice name"
 							value={option.label}
 							onChange={(event) =>
 								updateOption(option.id, { label: event.target.value })
 							}
 						/>
+					</Field>
+					<Field>
+						<FieldLabel
+							htmlFor={`jev-choice-${option.id}-criteria`}
+							className="sr-only"
+						>
+							{option.label || `Choice ${index + 1}`} criteria
+						</FieldLabel>
+						<Textarea
+							id={`jev-choice-${option.id}-criteria`}
+							className={sectionTextareaClassName}
+							placeholder="When to choose this output"
+							value={option.description}
+							onChange={(event) =>
+								updateOption(option.id, { description: event.target.value })
+							}
+							rows={2}
+						/>
+					</Field>
+					{question.options.length > 2 && (
 						<Button
 							type="button"
 							variant="ghost"
 							size="icon-sm"
-							aria-label={`Remove ${option.label}`}
-							disabled={question.options.length <= 2}
+							className="absolute right-2 top-2 text-muted-foreground"
+							aria-label={`Remove ${option.label || `choice ${index + 1}`}`}
 							onClick={() =>
 								onChange({
 									...question,
@@ -59,23 +111,16 @@ function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 								})
 							}
 						>
-							<Trash2 />
+							<X />
 						</Button>
-					</div>
-					<Textarea
-						aria-label={`${option.label} criteria`}
-						value={option.description}
-						onChange={(event) =>
-							updateOption(option.id, { description: event.target.value })
-						}
-						rows={2}
-					/>
-				</div>
+					)}
+				</FieldSet>
 			))}
 			<Button
 				type="button"
 				variant="outline"
 				size="sm"
+				className="w-full"
 				disabled={question.options.length >= 255}
 				onClick={() =>
 					onChange({
@@ -89,113 +134,117 @@ function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 			>
 				<Plus /> Add choice
 			</Button>
-		</div>
+		</FieldGroup>
 	);
 }
 
 function NoulFields({ question, onChange }: FieldsProps<NoulQuestion>) {
 	return (
-		<>
-			<label htmlFor="jev-yes" className="grid gap-1 text-sm font-medium">
-				Yes criteria
+		<FieldGroup>
+			<Field>
+				<FieldLabel htmlFor="jev-yes" className="text-xs text-muted-foreground">
+					Yes
+				</FieldLabel>
 				<Textarea
 					id="jev-yes"
+					className={editorTextareaSize}
 					value={question.yesDescription}
 					onChange={(event) =>
 						onChange({ ...question, yesDescription: event.target.value })
 					}
 					rows={2}
 				/>
-			</label>
-			<label htmlFor="jev-no" className="grid gap-1 text-sm font-medium">
-				No criteria
+			</Field>
+			<Field>
+				<FieldLabel htmlFor="jev-no" className="text-xs text-muted-foreground">
+					No
+				</FieldLabel>
 				<Textarea
 					id="jev-no"
+					className={editorTextareaSize}
 					value={question.noDescription}
 					onChange={(event) =>
 						onChange({ ...question, noDescription: event.target.value })
 					}
 					rows={2}
 				/>
-			</label>
-		</>
+			</Field>
+		</FieldGroup>
 	);
 }
 
 function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
-	const [levelIds, setLevelIds] = useState(() =>
-		question.levels.map(() => crypto.randomUUID()),
-	);
-	const removeLevel = (index: number) => {
+	const removeLevel = (id: string) => {
 		onChange({
 			...question,
-			levels: question.levels.filter((_, levelIndex) => levelIndex !== index),
-			threshold: Math.min(question.threshold, question.levels.length - 2),
+			levels: question.levels.filter((level) => level.id !== id),
 		});
-		setLevelIds((ids) => ids.filter((_, levelIndex) => levelIndex !== index));
 	};
 	const addLevel = () => {
-		onChange({ ...question, levels: [...question.levels, ""] });
-		setLevelIds((ids) => [...ids, crypto.randomUUID()]);
+		onChange({
+			...question,
+			levels: [
+				...question.levels,
+				{ id: crypto.randomUUID(), description: "" },
+			],
+		});
 	};
 	return (
-		<>
-			<div className="grid gap-2">
-				<div className="text-sm font-medium">
-					Score levels (0 to {question.levels.length - 1})
-				</div>
-				{question.levels.map((level, index) => (
-					<div key={levelIds[index]} className="flex items-center gap-2">
-						<span className="w-5 text-xs text-muted-foreground">{index}</span>
-						<Input
-							aria-label={`Score level ${index}`}
-							value={level}
+		<FieldGroup className="gap-2">
+			<FieldTitle className="text-xs text-muted-foreground">
+				Score levels (0 to {question.levels.length - 1})
+			</FieldTitle>
+			{question.levels.map((level, index) => (
+				<FieldSet key={level.id} className={sectionFrameClassName}>
+					<FieldLegend className="sr-only">Level {index}</FieldLegend>
+					<FieldTitle className="w-full pr-8">Level {index}</FieldTitle>
+					<Field>
+						<FieldLabel htmlFor={`jev-score-${level.id}`} className="sr-only">
+							Level {index}
+						</FieldLabel>
+						<Textarea
+							id={`jev-score-${level.id}`}
+							className={sectionTextareaClassName}
+							placeholder="Describe this level"
+							value={level.description}
 							onChange={(event) =>
 								onChange({
 									...question,
-									levels: question.levels.map((item, levelIndex) =>
-										levelIndex === index ? event.target.value : item,
+									levels: question.levels.map((item) =>
+										item.id === level.id
+											? { ...item, description: event.target.value }
+											: item,
 									),
 								})
 							}
+							rows={2}
 						/>
+					</Field>
+					{question.levels.length > 2 && (
 						<Button
 							type="button"
 							variant="ghost"
 							size="icon-sm"
+							className="absolute right-2 top-2 text-muted-foreground"
 							aria-label={`Remove score level ${index}`}
-							disabled={question.levels.length <= 2}
-							onClick={() => removeLevel(index)}
+							onClick={() => removeLevel(level.id)}
 						>
-							<Trash2 />
+							<X />
 						</Button>
-					</div>
-				))}
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					disabled={question.levels.length >= 10}
-					onClick={addLevel}
-				>
-					<Plus /> Add level
-				</Button>
-			</div>
-			<label htmlFor="jev-threshold" className="grid gap-1 text-sm font-medium">
-				High begins at score
-				<Input
-					id="jev-threshold"
-					type="number"
-					min={0}
-					max={question.levels.length - 1}
-					step="any"
-					value={question.threshold}
-					onChange={(event) =>
-						onChange({ ...question, threshold: event.target.valueAsNumber })
-					}
-				/>
-			</label>
-		</>
+					)}
+				</FieldSet>
+			))}
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				className="w-full"
+				disabled={question.levels.length >= 10}
+				onClick={addLevel}
+			>
+				<Plus /> Add level
+			</Button>
+		</FieldGroup>
 	);
 }
 
@@ -224,53 +273,47 @@ export function JevQuestionEditor({
 		onOpenChange(false);
 	};
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[min(80vh,720px)] w-[min(520px,calc(100vw-2rem))] overflow-y-auto sm:max-w-none">
-				<DialogHeader>
-					<DialogTitle>
-						Edit{" "}
-						{draft.type === "noul"
-							? "Noul"
-							: draft.type === "score"
-								? "Score"
-								: "Choice"}{" "}
-						question
-					</DialogTitle>
-				</DialogHeader>
-				<div className="grid gap-4">
-					<label
-						htmlFor="jev-instructions"
-						className="grid gap-1 text-sm font-medium"
-					>
-						Instructions
-						<Textarea
-							id="jev-instructions"
-							value={draft.instructions}
-							onChange={(event) =>
-								setDraft({ ...draft, instructions: event.target.value })
-							}
-							rows={2}
-						/>
-					</label>
-					{draft.type === "choice" && (
-						<ChoiceFields question={draft} onChange={setDraft} />
-					)}
-					{draft.type === "noul" && (
-						<NoulFields question={draft} onChange={setDraft} />
-					)}
-					{draft.type === "score" && (
-						<ScoreFields question={draft} onChange={setDraft} />
-					)}
-					{error && (
-						<p role="alert" className="text-sm text-destructive">
-							{error}
-						</p>
-					)}
-				</div>
-				<DialogFooter>
+		<Sheet open={open} onOpenChange={onOpenChange}>
+			<SheetContent>
+				<SheetHeader>
+					<SheetTitle>Router</SheetTitle>
+				</SheetHeader>
+				<ScrollArea className="min-h-0 flex-1">
+					<div className="flex flex-col gap-6 px-4 pb-4">
+						<Field>
+							<FieldLabel
+								htmlFor="jev-instructions"
+								className="text-xs text-muted-foreground"
+							>
+								Instructions
+							</FieldLabel>
+							<Textarea
+								id="jev-instructions"
+								className={editorTextareaSize}
+								value={draft.instructions}
+								onChange={(event) =>
+									setDraft({ ...draft, instructions: event.target.value })
+								}
+								rows={2}
+							/>
+						</Field>
+						{draft.type === "choice" && (
+							<ChoiceFields question={draft} onChange={setDraft} />
+						)}
+						{draft.type === "noul" && (
+							<NoulFields question={draft} onChange={setDraft} />
+						)}
+						{draft.type === "score" && (
+							<ScoreFields question={draft} onChange={setDraft} />
+						)}
+						{error && <FieldError>{error}</FieldError>}
+					</div>
+				</ScrollArea>
+				<SheetFooter>
 					<Button onClick={save}>Save question</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+					<SheetClose render={<Button variant="outline" />}>Cancel</SheetClose>
+				</SheetFooter>
+			</SheetContent>
+		</Sheet>
 	);
 }

@@ -4,8 +4,8 @@ Chat keeps the conversation in memory and follows the current graph for each tur
 
 A direct path keeps the selected model; a Jev path evaluates each turn independently.
 
-The composer remains editable while a response streams.
+The composer starts compact, grows as text is entered, and scrolls internally after reaching its maximum height. It remains editable while a response streams.
 
-[src/chat/use-route-chat.ts](../src/chat/use-route-chat.ts) owns messages, request state, and streamed assistant updates. [src/chat/chat-panel.tsx](../src/chat/chat-panel.tsx) renders the collapsible panel and composer. [src/chat/chat-message-item.tsx](../src/chat/chat-message-item.tsx) renders user and assistant messages. [src/lib/route-stream.ts](../src/lib/route-stream.ts) decodes server events before chat applies them.
+[src/chat/use-route-chat.ts](../src/chat/use-route-chat.ts) owns messages, request state, and streamed assistant updates. [src/chat/chat-panel.tsx](../src/chat/chat-panel.tsx) renders the floating chat and composer above the canvas. [src/chat/chat-message-item.tsx](../src/chat/chat-message-item.tsx) renders user and assistant messages. [src/lib/route-stream.ts](../src/lib/route-stream.ts) decodes server events before chat applies them.
 
-The panel's expanded or collapsed state persists in browser local storage and restores on refresh. Collapsing retains the current in-memory conversation. Clearing chat removes it; a page reload starts a new conversation.
+The chat opens from a persistent bottom-right canvas button, starts closed without a saved preference, and never resizes the canvas. Its open state persists in browser local storage and restores on refresh. Closing retains the current in-memory conversation. Clearing chat removes it; a page reload starts a new conversation.

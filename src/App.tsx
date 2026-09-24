@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import useSWR from "swr";
 import { ChatPanel } from "@/chat/chat-panel";
 import { useRouteChat } from "@/chat/use-route-chat";
+import { Popover } from "@/components/ui/popover";
 import { RoutingCanvas } from "@/flow/routing-canvas";
 import { useRoutingGraph } from "@/flow/use-routing-graph";
 import type { KeyStatus } from "@/lib/routing";
@@ -17,7 +18,7 @@ async function readKeyStatus(): Promise<KeyStatus> {
 
 function App() {
 	const [chatOpen, setChatOpen] = useState(
-		() => localStorage.getItem(CHAT_OPEN_STORAGE_KEY) !== "false",
+		() => localStorage.getItem(CHAT_OPEN_STORAGE_KEY) === "true",
 	);
 	const onChatOpenChange = useCallback((open: boolean) => {
 		localStorage.setItem(CHAT_OPEN_STORAGE_KEY, String(open));
@@ -45,33 +46,35 @@ function App() {
 
 	return (
 		<main className="studio">
-			<RoutingCanvas
-				graph={graph}
-				result={chat.result}
-				running={chat.running}
-				messages={chat.messages}
-				draft={chat.draft}
-				onDraftChange={chat.setDraft}
-				chatOpen={chatOpen}
-				onOpenChat={() => onChatOpenChange(true)}
-				onDuplicateNode={duplicateNode}
-				onRemoveNode={removeNode}
-				onNodesDeleted={chat.clearResultForNode}
-			/>
-			<ChatPanel
-				open={chatOpen}
-				routes={graph.routes}
-				onClose={() => onChatOpenChange(false)}
-				draft={chat.draft}
-				onDraftChange={chat.setDraft}
-				messages={chat.messages}
-				error={chat.error}
-				running={chat.running}
-				status={status}
-				statusUnavailable={Boolean(statusError)}
-				onSend={() => void chat.run()}
-				onClear={chat.clearChat}
-			/>
+			<Popover open={chatOpen} onOpenChange={onChatOpenChange}>
+				<RoutingCanvas
+					graph={graph}
+					result={chat.result}
+					running={chat.running}
+					messages={chat.messages}
+					draft={chat.draft}
+					onDraftChange={chat.setDraft}
+					chatOpen={chatOpen}
+					onDuplicateNode={duplicateNode}
+					onRemoveNode={removeNode}
+					onNodesDeleted={chat.clearResultForNode}
+				/>
+				{chatOpen && (
+					<ChatPanel
+						routes={graph.routes}
+						onClose={() => onChatOpenChange(false)}
+						draft={chat.draft}
+						onDraftChange={chat.setDraft}
+						messages={chat.messages}
+						error={chat.error}
+						running={chat.running}
+						status={status}
+						statusUnavailable={Boolean(statusError)}
+						onSend={() => void chat.run()}
+						onClear={chat.clearChat}
+					/>
+				)}
+			</Popover>
 		</main>
 	);
 }

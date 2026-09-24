@@ -276,7 +276,11 @@ type OutputTier = "low" | "high";
 
 function outputTier(question: JevQuestion, id: string): OutputTier | undefined {
 	if (question.type === "noul") return id === "no" ? "low" : "high";
-	if (question.type === "score") return id === "low" ? "low" : "high";
+	if (question.type === "score") {
+		const index = question.levels.findIndex((level) => level.id === id);
+		if (index < 0) return undefined;
+		return index < question.levels.length / 2 ? "low" : "high";
+	}
 	const index = question.options.findIndex((option) => option.id === id);
 	if (index === 0) return "low";
 	if (index === question.options.length - 1) return "high";

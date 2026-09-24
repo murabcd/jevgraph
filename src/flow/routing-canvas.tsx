@@ -7,12 +7,19 @@ import {
 	ReactFlow,
 	useReactFlow,
 } from "@xyflow/react";
-import { PanelRight } from "lucide-react";
+import { Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import "@xyflow/react/dist/style.css";
 import type { ChatTurn } from "@/chat/types";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { PopoverTrigger } from "@/components/ui/popover";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
 	type CreatableNodeKind,
 	canConnectNodes,
@@ -40,7 +47,6 @@ type RoutingCanvasProps = {
 	draft: string;
 	onDraftChange: (value: string) => void;
 	chatOpen: boolean;
-	onOpenChat: () => void;
 	onDuplicateNode: (nodeId: string) => void;
 	onRemoveNode: (nodeId: string) => void;
 	onNodesDeleted: (nodeId: string) => void;
@@ -54,7 +60,6 @@ export function RoutingCanvas({
 	draft,
 	onDraftChange,
 	chatOpen,
-	onOpenChat,
 	onDuplicateNode,
 	onRemoveNode,
 	onNodesDeleted,
@@ -178,9 +183,6 @@ export function RoutingCanvas({
 	const edges = useMemo<Edge[]>(() => {
 		const active = "var(--route-accent)";
 		const muted = "var(--muted-foreground)";
-		const routerQuestion = nodes.find((node) => node.id === "jev")?.data
-			.question;
-		const outputs = routerQuestion ? questionOutputs(routerQuestion) : [];
 		const routeEdges = graphEdges.map((edge) => {
 			const onPath =
 				edge.source === "input"
@@ -195,17 +197,6 @@ export function RoutingCanvas({
 					running &&
 					(edge.source === "input" ||
 						edge.sourceHandle === result?.finalBranch),
-				label: edge.sourceHandle
-					? outputs
-							.find((output) => output.id === edge.sourceHandle)
-							?.label.toUpperCase()
-					: undefined,
-				labelStyle: {
-					fill: onPath ? active : muted,
-					fontSize: 10,
-					fontWeight: 700,
-				},
-				labelBgStyle: { fill: "var(--muted)" },
 				style: {
 					stroke: onPath ? active : muted,
 					strokeWidth: onPath ? 1.8 : 1.2,
@@ -229,7 +220,7 @@ export function RoutingCanvas({
 				},
 			},
 		];
-	}, [nodes, graphEdges, result, running, pendingConnection]);
+	}, [graphEdges, result, running, pendingConnection]);
 
 	const availableNodeTypes = useMemo<CreatableNodeKind[]>(
 		() => [
@@ -270,19 +261,31 @@ export function RoutingCanvas({
 			className="canvas-shell"
 			aria-label="Routing canvas"
 		>
-			{!chatOpen && (
-				<div className="canvas-actions">
-					<Button
-						variant="outline"
-						size="icon-sm"
-						aria-label="Open chat"
-						title="Open chat"
-						onClick={onOpenChat}
+			<Card
+				size="sm"
+				className="canvas-chat-launcher flex-row gap-0 p-1 shadow-sm"
+			>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<PopoverTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={chatOpen ? "Close chat" : "Open chat"}
+									/>
+								}
+							/>
+						}
 					>
-						<PanelRight />
-					</Button>
-				</div>
-			)}
+						<Zap />
+					</TooltipTrigger>
+					<TooltipContent>
+						{chatOpen ? "Close chat" : "Open chat"}
+					</TooltipContent>
+				</Tooltip>
+			</Card>
 			<ReactFlow<CanvasNode, Edge>
 				nodes={displayNodes}
 				edges={edges}

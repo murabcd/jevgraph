@@ -220,7 +220,7 @@ describe("editable routing graph", () => {
 		const branchIds = {
 			choice: ["fast", "deep"],
 			noul: ["no", "yes"],
-			score: ["low", "high"],
+			score: ["score-0", "score-2"],
 		} as const;
 		const nodes: FlowNode[] = [
 			{
@@ -265,22 +265,32 @@ describe("editable routing graph", () => {
 					sourceHandle: previousHigh,
 					target: "complex",
 				},
+				...(previousType === "score"
+					? [
+							{
+								id: "middle",
+								source: "jev",
+								sourceHandle: "score-1",
+								target: "simple",
+							},
+						]
+					: []),
 			];
 			for (const nextType of types) {
 				const question = defaultJevQuestion(nextType);
 				const [low, high] = branchIds[nextType];
 				const remapped = remapQuestionEdges(previousQuestion, question, edges);
-				const connected = jevRoutes(
-					nodes.map((node) =>
-						node.id === "jev"
-							? { ...node, data: { ...node.data, question } }
-							: node,
-					),
-					remapped,
+				const nextNodes = nodes.map((node) =>
+					node.id === "jev"
+						? { ...node, data: { ...node.data, question } }
+						: node,
 				);
+				const connected = jevRoutes(nextNodes, remapped);
 				expect(connected.targets[low].nodeId).toBe("simple");
 				expect(connected.targets[high].nodeId).toBe("complex");
-				expect(remapped).toHaveLength(3);
+				if (nextType === "score")
+					expect(connected.targets["score-1"].nodeId).toBe("simple");
+				expect(remapped).toHaveLength(nextType === "score" ? 4 : 3);
 			}
 		}
 	});
@@ -307,6 +317,27 @@ describe("editable routing graph", () => {
 			sourceHandle: "fast",
 			target: "model",
 		});
+	});
+
+	test("keeps surviving Score connections when a level is removed", () => {
+		const previous = defaultJevQuestion("score");
+		if (previous.type !== "score") throw new Error("Expected Score");
+		const next = { ...previous, levels: previous.levels.slice(1) };
+		const edges: Edge[] = previous.levels.map((level) => ({
+			id: level.id,
+			source: "jev",
+			sourceHandle: level.id,
+			target: level.id,
+		}));
+		expect(
+			remapQuestionEdges(previous, next, edges).map(
+				(edge) => edge.sourceHandle,
+			),
+		).toEqual(["score-1", "score-2"]);
+		expect(questionOutputs(next).map((output) => output.label)).toEqual([
+			"Level 0",
+			"Level 1",
+		]);
 	});
 
 	test("connects Input directly to a selected model without Jev", () => {

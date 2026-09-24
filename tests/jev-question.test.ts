@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	defaultJevQuestion,
 	questionForJev,
+	questionOutputs,
 	resolveJevAnswer,
 } from "../src/lib/jev-question";
 
@@ -59,14 +60,22 @@ describe("Jev question modes", () => {
 		).toThrow("invalid yes probability");
 	});
 
-	test("routes an expected Score across the configured threshold", () => {
+	test("routes Score to the nearest numbered level", () => {
 		const question = defaultJevQuestion("score");
+		expect(questionOutputs(question)).toEqual([
+			{ id: "score-0", label: "Level 0" },
+			{ id: "score-1", label: "Level 1" },
+			{ id: "score-2", label: "Level 2" },
+		]);
 		expect(
-			resolveJevAnswer(question, { type: "score", score: 1.49 }, 0.8).branch,
-		).toBe("low");
+			resolveJevAnswer(question, { type: "score", score: 0.49 }, 0.8).branch,
+		).toBe("score-0");
+		expect(
+			resolveJevAnswer(question, { type: "score", score: 0.5 }, 0.8).branch,
+		).toBe("score-1");
 		expect(
 			resolveJevAnswer(question, { type: "score", score: 1.5 }, 0.8).branch,
-		).toBe("high");
+		).toBe("score-2");
 		expect(() =>
 			resolveJevAnswer(question, { type: "score", score: 3 }, 0.8),
 		).toThrow("outside the rubric");
