@@ -7,6 +7,9 @@ import {
 } from "@xyflow/react";
 import {
 	ChevronDown,
+	ChevronsDown,
+	ChevronsUp,
+	ChevronUp,
 	Copy,
 	Eye,
 	GitFork,
@@ -56,9 +59,49 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { FlowNode, NodeKind } from "@/flow/graph";
-import { textModels } from "@/lib/models";
+import { type CostBracket, textModels } from "@/lib/models";
 import { JEV_MODEL_ID } from "@/lib/routing";
 import { cn } from "@/lib/utils";
+
+const costIndicators = {
+	lowest: {
+		icon: ChevronsDown,
+		label: "Much lower estimated cost",
+		color: "text-green-500 dark:text-green-400",
+	},
+	low: {
+		icon: ChevronDown,
+		label: "Lower estimated cost",
+		color: "text-green-500 dark:text-green-400",
+	},
+	high: {
+		icon: ChevronUp,
+		label: "Higher estimated cost",
+		color: "text-orange-500 dark:text-orange-400",
+	},
+	highest: {
+		icon: ChevronsUp,
+		label: "Much higher estimated cost",
+		color: "text-red-500 dark:text-red-400",
+	},
+} satisfies Record<
+	CostBracket,
+	{ icon: typeof ChevronDown; label: string; color: string }
+>;
+
+function CostIndicator({ bracket }: { bracket: CostBracket }) {
+	const { icon: Icon, label, color } = costIndicators[bracket];
+	return (
+		<span
+			role="img"
+			aria-label={label}
+			title={label}
+			className="ml-auto shrink-0"
+		>
+			<Icon aria-hidden="true" className={cn("size-4", color)} />
+		</span>
+	);
+}
 
 function ModelPicker({
 	nodeId,
@@ -127,9 +170,7 @@ function ModelPicker({
 											<span className="min-w-0 flex-1 truncate">
 												{model.label}
 											</span>
-											<span className="truncate font-mono text-[11px] text-muted-foreground">
-												{model.id}
-											</span>
+											<CostIndicator bracket={model.costBracket} />
 										</CommandItem>
 									))}
 							</CommandGroup>
