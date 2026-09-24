@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "conventions": [
+    {
+      "name": "react-component-primary-export",
+      "description": "Single-component modules export the PascalCase component named by their file.",
+      "paths": [
+        "src/components/ui/{componentName}.tsx",
+        "src/components/{componentName}.tsx",
+        "src/chat/{componentName}.tsx",
+        "src/flow/{componentName}.tsx"
+      ],
+      "must": {
+        "exportValues": ["${componentName.toPascalCase()}"]
+      }
+    }
+  ]
+}

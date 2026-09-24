@@ -38,7 +38,9 @@ Drag a connection from a Jev output to empty canvas to create and connect a mode
 bun run dev     # Vite UI and local API
 bun run build   # typecheck and production build
 bun run preview # serve built UI with local API
-bun run check   # read-only Biome format, lint, and import checks
+bun run check   # Lat, Konsistent, and read-only Biome checks
+bun run check:lat         # knowledge graph links and structure
+bun run check:konsistent  # component export conventions
 bun run lint    # read-only Biome lint
 bun run format  # write Biome formatting changes
 bun run typecheck
@@ -46,6 +48,8 @@ bun run test
 ```
 
 The `/api/route` and `/api/status` endpoints run in Vite's dev and preview servers. A static-only deployment will not provide these endpoints; deploy them with a server runtime before using the app remotely. Keep all three keys on that server.
+
+The [knowledge graph](lat.md/lat.md) records the app's architecture and runtime contracts. [AGENTS.md](AGENTS.md) has repository working rules; [konsistent.json](konsistent.json) enforces the repeated component export convention.
 
 ## References
 
