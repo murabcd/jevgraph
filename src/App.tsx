@@ -51,13 +51,16 @@ function App() {
 				running={chat.running}
 				messages={chat.messages}
 				draft={chat.draft}
+				onDraftChange={chat.setDraft}
 				chatOpen={chatOpen}
 				onOpenChat={() => onChatOpenChange(true)}
 				onDuplicateNode={duplicateNode}
 				onRemoveNode={removeNode}
+				onNodesDeleted={chat.clearResultForNode}
 			/>
 			<ChatPanel
 				open={chatOpen}
+				routes={graph.routes}
 				onClose={() => onChatOpenChange(false)}
 				draft={chat.draft}
 				onDraftChange={chat.setDraft}

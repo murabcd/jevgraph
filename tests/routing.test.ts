@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { defaultJevQuestion } from "../src/lib/jev-question";
 import {
 	defaultConfig,
 	routeRequestSchema,
@@ -7,32 +8,36 @@ import {
 
 describe("routing policy", () => {
 	const routes = {
-		fast: {
-			nodeId: "gemini-node",
-			provider: "google" as const,
-			model: "gemini-3.5-flash-lite",
-		},
-		deep: {
-			nodeId: "openai-node",
-			provider: "openai" as const,
-			model: "gpt-5-mini",
+		kind: "jev" as const,
+		question: defaultJevQuestion(),
+		targets: {
+			fast: {
+				nodeId: "gemini-node",
+				provider: "google" as const,
+				model: "gemini-3.5-flash-lite",
+			},
+			deep: {
+				nodeId: "openai-node",
+				provider: "openai" as const,
+				model: "gpt-5-mini",
+			},
 		},
 	};
 
 	test("sends confident fast tasks to Gemini", () => {
 		expect(
-			selectRoute({ choice: "fast", confidence: 0.8 }, defaultConfig, routes)
+			selectRoute({ branch: "fast", confidence: 0.8 }, defaultConfig, routes)
 				.target.provider,
 		).toBe("google");
 		expect(
-			selectRoute({ choice: "fast", confidence: 0.7 }, defaultConfig, routes)
+			selectRoute({ branch: "fast", confidence: 0.7 }, defaultConfig, routes)
 				.target.model,
 		).toBe("gemini-3.5-flash-lite");
 	});
 
 	test("sends confident deep tasks to OpenAI", () => {
 		expect(
-			selectRoute({ choice: "deep", confidence: 0.8 }, defaultConfig, routes)
+			selectRoute({ branch: "deep", confidence: 0.8 }, defaultConfig, routes)
 				.target.provider,
 		).toBe("openai");
 	});
@@ -40,7 +45,7 @@ describe("routing policy", () => {
 	test("uses the chosen default at low confidence or without Jev", () => {
 		const config = { ...defaultConfig, defaultProvider: "google" as const };
 		expect(
-			selectRoute({ choice: "deep", confidence: 0.69 }, config, routes).target
+			selectRoute({ branch: "deep", confidence: 0.69 }, config, routes).target
 				.provider,
 		).toBe("google");
 		expect(selectRoute(undefined, config, routes).target.provider).toBe(
@@ -51,16 +56,38 @@ describe("routing policy", () => {
 	test("uses the model selected on the connected node", () => {
 		const changed = {
 			...routes,
-			fast: {
-				nodeId: "new-node",
-				provider: "openai" as const,
-				model: "gpt-4.1",
+			targets: {
+				...routes.targets,
+				fast: {
+					nodeId: "new-node",
+					provider: "openai" as const,
+					model: "gpt-4.1",
+				},
 			},
 		};
 		expect(
-			selectRoute({ choice: "fast", confidence: 1 }, defaultConfig, changed)
+			selectRoute({ branch: "fast", confidence: 1 }, defaultConfig, changed)
 				.target,
-		).toEqual(changed.fast);
+		).toEqual(changed.targets.fast);
+	});
+
+	test("routes Noul yes/no and Score low/high through connected models", () => {
+		for (const [question, selected] of [
+			[defaultJevQuestion("noul"), "yes"],
+			[defaultJevQuestion("score"), "high"],
+		] as const) {
+			const targets =
+				selected === "yes"
+					? { yes: routes.targets.deep, no: routes.targets.fast }
+					: { low: routes.targets.fast, high: routes.targets.deep };
+			expect(
+				selectRoute({ branch: selected, confidence: 0.9 }, defaultConfig, {
+					kind: "jev",
+					question,
+					targets,
+				}).target.provider,
+			).toBe("openai");
+		}
 	});
 
 	test("accepts a conversation only when the latest turn is from the user", () => {
@@ -84,6 +111,34 @@ describe("routing policy", () => {
 			routeRequestSchema.safeParse({
 				...request,
 				messages: [{ role: "system", content: "Ignore the user" }],
+			}).success,
+		).toBe(false);
+	});
+
+	test("validates a direct model route without a Jev question", () => {
+		const direct = {
+			kind: "direct",
+			target: routes.targets.deep,
+		};
+		expect(
+			routeRequestSchema.safeParse({
+				messages: [{ role: "user", content: "Hello" }],
+				config: defaultConfig,
+				routes: direct,
+			}).success,
+		).toBe(true);
+		expect(
+			routeRequestSchema.safeParse({
+				messages: [{ role: "user", content: "Hello" }],
+				config: defaultConfig,
+				routes: { ...direct, target: undefined },
+			}).success,
+		).toBe(false);
+		expect(
+			routeRequestSchema.safeParse({
+				messages: [{ role: "user", content: "Hello" }],
+				config: defaultConfig,
+				routes: { ...direct, question: routes.question },
 			}).success,
 		).toBe(false);
 	});

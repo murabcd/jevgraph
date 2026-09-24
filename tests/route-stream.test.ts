@@ -20,6 +20,7 @@ describe("route stream", () => {
 		const done: RouteStreamEvent = {
 			type: "done",
 			route: {
+				mode: "jev",
 				text: "Bonjour",
 				provider: "google",
 				model: "gemini-test",

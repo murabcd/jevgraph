@@ -18,63 +18,76 @@ function providerName(provider: Provider) {
 	return provider === "google" ? "Gemini" : "OpenAI";
 }
 
-export function ChatMessageItem({ message }: { message: ChatTurn }) {
+function pendingLabel(message: ChatTurn) {
+	if (message.route) {
+		return `Waiting for ${providerName(message.route.provider)}…`;
+	}
+
+	return message.mode === "direct" ? "Connecting to model…" : "Jev is routing…";
+}
+
+function AssistantContent({ message }: { message: ChatTurn }) {
+	if (!message.content) {
+		return (
+			<span className="text-muted-foreground">{pendingLabel(message)}</span>
+		);
+	}
+
 	return (
-		<MessageScrollerItem
-			messageId={message.id}
-			scrollAnchor={message.role === "user"}
+		<Suspense
+			fallback={<span className="whitespace-pre-wrap">{message.content}</span>}
 		>
-			<Message align={message.role === "user" ? "end" : "start"}>
+			<Streamdown
+				mode={message.streaming ? "streaming" : "static"}
+				isAnimating={message.streaming}
+				caret="block"
+				className="w-full wrap-break-word"
+			>
+				{message.content}
+			</Streamdown>
+		</Suspense>
+	);
+}
+
+function RouteBadge({ message }: { message: ChatTurn }) {
+	if (!message.route || message.streaming || message.failed) {
+		return null;
+	}
+
+	return (
+		<MessageFooter>
+			<Badge
+				variant="outline"
+				title={`${message.route.reason}${message.route.jev ? ` · Jev ${Math.round(message.route.jev.confidence * 100)}%` : ""}`}
+			>
+				{providerName(message.route.provider)} · {message.route.model}
+			</Badge>
+		</MessageFooter>
+	);
+}
+
+export function ChatMessageItem({ message }: { message: ChatTurn }) {
+	const isUser = message.role === "user";
+	const align = isUser ? "end" : "start";
+
+	return (
+		<MessageScrollerItem messageId={message.id} scrollAnchor={isUser}>
+			<Message align={align}>
 				<MessageContent>
-					<Bubble
-						variant={message.role === "user" ? "secondary" : "ghost"}
-						align={message.role === "user" ? "end" : "start"}
-					>
+					<Bubble variant={isUser ? "secondary" : "ghost"} align={align}>
 						<BubbleContent
 							className={
-								message.role === "user"
-									? "whitespace-pre-wrap"
-									: "w-full text-sm leading-6"
+								isUser ? "whitespace-pre-wrap" : "w-full text-sm leading-6"
 							}
 						>
-							{message.role === "user" ? (
+							{isUser ? (
 								message.content
-							) : message.content ? (
-								<Suspense
-									fallback={
-										<span className="whitespace-pre-wrap">
-											{message.content}
-										</span>
-									}
-								>
-									<Streamdown
-										mode={message.streaming ? "streaming" : "static"}
-										isAnimating={message.streaming}
-										caret="block"
-										className="w-full wrap-break-word"
-									>
-										{message.content}
-									</Streamdown>
-								</Suspense>
 							) : (
-								<span className="text-muted-foreground">
-									{message.route
-										? `Waiting for ${providerName(message.route.provider)}…`
-										: "Jev is routing…"}
-								</span>
+								<AssistantContent message={message} />
 							)}
 						</BubbleContent>
 					</Bubble>
-					{message.route && !message.streaming && !message.failed && (
-						<MessageFooter>
-							<Badge
-								variant="outline"
-								title={`${message.route.reason}${message.route.jev ? ` · Jev ${Math.round(message.route.jev.confidence * 100)}%` : ""}`}
-							>
-								{providerName(message.route.provider)} · {message.route.model}
-							</Badge>
-						</MessageFooter>
-					)}
+					<RouteBadge message={message} />
 				</MessageContent>
 			</Message>
 		</MessageScrollerItem>

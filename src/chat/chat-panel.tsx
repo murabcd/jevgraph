@@ -1,4 +1,4 @@
-import { ArrowUp, CircleAlert, PanelRight, Trash2 } from "lucide-react";
+import { ArrowUp, CircleAlert, PanelRight, Trash2, Zap } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef } from "react";
 import { ChatMessageItem } from "@/chat/chat-message-item";
 import type { ChatTurn } from "@/chat/types";
@@ -8,6 +8,7 @@ import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
+	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
 import {
@@ -24,11 +25,12 @@ import {
 	MessageScrollerProvider,
 	MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import type { KeyStatus } from "@/lib/routing";
+import type { KeyStatus, Routes } from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
 export type ChatPanelProps = {
 	open: boolean;
+	routes: Routes | null;
 	onClose: () => void;
 	draft: string;
 	onDraftChange: (value: string) => void;
@@ -44,26 +46,36 @@ export type ChatPanelProps = {
 function KeyStatusNotice({
 	status,
 	unavailable,
+	routes,
 }: {
 	status?: KeyStatus;
 	unavailable: boolean;
+	routes: Routes | null;
 }) {
+	const targets = routes
+		? routes.kind === "direct"
+			? [routes.target]
+			: Object.values(routes.targets)
+		: [];
+	const missing = status
+		? [
+				routes?.kind === "jev" && !status.jev && "Jev",
+				targets.some((target) => target.provider === "openai") &&
+					!status.openai &&
+					"OpenAI",
+				targets.some((target) => target.provider === "google") &&
+					!status.google &&
+					"Gemini",
+			].filter(Boolean)
+		: [];
 	return (
 		<>
-			{status && (!status.jev || !status.openai || !status.google) && (
+			{missing.length > 0 && (
 				<Alert className="mx-4 mt-4 w-auto">
 					<CircleAlert />
 					<AlertTitle>Missing API key</AlertTitle>
 					<AlertDescription>
-						Add{" "}
-						{[
-							!status.jev && "Jev",
-							!status.openai && "OpenAI",
-							!status.google && "Gemini",
-						]
-							.filter(Boolean)
-							.join(", ")}{" "}
-						to <code>.env.local</code>.
+						Add {missing.join(", ")} to <code>.env.local</code>.
 					</AlertDescription>
 				</Alert>
 			)}
@@ -79,6 +91,7 @@ function KeyStatusNotice({
 
 export function ChatPanel({
 	open,
+	routes,
 	onClose,
 	draft,
 	onDraftChange,
@@ -151,7 +164,11 @@ export function ChatPanel({
 					</div>
 				</header>
 
-				<KeyStatusNotice status={status} unavailable={statusUnavailable} />
+				<KeyStatusNotice
+					status={status}
+					unavailable={statusUnavailable}
+					routes={routes}
+				/>
 
 				<MessageScrollerProvider autoScroll>
 					<MessageScroller className="min-h-0 flex-1">
@@ -179,9 +196,14 @@ export function ChatPanel({
 						{messages.length === 0 && !running && (
 							<Empty className="pointer-events-none absolute inset-0">
 								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<Zap />
+									</EmptyMedia>
 									<EmptyTitle>Ask anything</EmptyTitle>
 									<EmptyDescription>
-										Start a conversation. Jev chooses a model for every message.
+										{routes?.kind === "direct"
+											? "Start a conversation with the connected model."
+											: "Start a conversation. Jev chooses a model for every message."}
 									</EmptyDescription>
 								</EmptyHeader>
 							</Empty>

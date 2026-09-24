@@ -46,6 +46,10 @@ body {
 	height: 144px;
 }
 
+.route-node--editing {
+	height: 228px;
+}
+
 .route-node__eyebrow {
 	position: absolute;
 	top: -30px;

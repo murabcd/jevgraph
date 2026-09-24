@@ -4,12 +4,10 @@ import {
 	NodeToolbar,
 	Position,
 	useReactFlow,
+	useUpdateNodeInternals,
 } from "@xyflow/react";
 import {
 	ChevronDown,
-	ChevronsDown,
-	ChevronsUp,
-	ChevronUp,
 	Copy,
 	Eye,
 	GitFork,
@@ -18,11 +16,13 @@ import {
 	Minus,
 	Moon,
 	MoreHorizontal,
+	Pencil,
 	Plus,
+	SquareMousePointer,
 	Sun,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GoogleIcon, OpenAIIcon } from "@/components/icons/provider-icons";
 import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
+	CardContent,
 	CardDescription,
 	CardFooter,
 	CardHeader,
@@ -59,50 +60,30 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import type { FlowNode, NodeKind } from "@/flow/graph";
-import { type CostBracket, textModels } from "@/lib/models";
-import { JEV_MODEL_ID } from "@/lib/routing";
+import { Textarea } from "@/components/ui/textarea";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import type { CreatableNodeKind, FlowNode, NodeKind } from "@/flow/graph";
+import { JevQuestionEditor } from "@/flow/jev-question-editor";
+import { ModelCommand } from "@/flow/model-command";
+import { NodeTypeCommand } from "@/flow/node-type-command";
+import {
+	defaultJevQuestion,
+	type JevQuestion,
+	jevQuestionTypes,
+	questionOutputs,
+} from "@/lib/jev-question";
+import { textModels } from "@/lib/models";
 import { cn } from "@/lib/utils";
 
-const costIndicators = {
-	lowest: {
-		icon: ChevronsDown,
-		label: "Much lower estimated cost",
-		color: "text-green-500 dark:text-green-400",
-	},
-	low: {
-		icon: ChevronDown,
-		label: "Lower estimated cost",
-		color: "text-green-500 dark:text-green-400",
-	},
-	high: {
-		icon: ChevronUp,
-		label: "Higher estimated cost",
-		color: "text-orange-500 dark:text-orange-400",
-	},
-	highest: {
-		icon: ChevronsUp,
-		label: "Much higher estimated cost",
-		color: "text-red-500 dark:text-red-400",
-	},
-} satisfies Record<
-	CostBracket,
-	{ icon: typeof ChevronDown; label: string; color: string }
->;
-
-function CostIndicator({ bracket }: { bracket: CostBracket }) {
-	const { icon: Icon, label, color } = costIndicators[bracket];
-	return (
-		<span
-			role="img"
-			aria-label={label}
-			title={label}
-			className="ml-auto shrink-0"
-		>
-			<Icon aria-hidden="true" className={cn("size-4", color)} />
-		</span>
-	);
-}
+const questionTypeLabels = {
+	choice: "Choice",
+	noul: "Noul",
+	score: "Score",
+} satisfies Record<JevQuestion["type"], string>;
 
 function ModelPicker({
 	nodeId,
@@ -142,40 +123,87 @@ function ModelPicker({
 				<DialogHeader className="sr-only">
 					<DialogTitle>Select a model</DialogTitle>
 				</DialogHeader>
+				<ModelCommand
+					modelId={modelId}
+					onSelect={(selectedModel) => {
+						onChange?.(nodeId, selectedModel);
+						setOpen(false);
+					}}
+				/>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+function JevQuestionPicker({
+	question,
+	onChange,
+}: {
+	question: JevQuestion;
+	onChange?: (question: JevQuestion) => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const label = questionTypeLabels[question.type];
+	return (
+		<Dialog open={open} onOpenChange={setOpen}>
+			<DialogTrigger
+				render={
+					<Button
+						variant="outline"
+						size="sm"
+						className="nodrag nopan w-[200px] min-w-0 justify-between gap-2 rounded-full"
+						aria-label={`Jev question type: ${label}`}
+					/>
+				}
+			>
+				<Avatar className="size-4 rounded-sm after:hidden">
+					<AvatarImage
+						src="/brands/typesafe.png"
+						alt=""
+						className="object-contain"
+					/>
+					<AvatarFallback className="bg-transparent">
+						<GitFork />
+					</AvatarFallback>
+				</Avatar>
+				<span className="truncate">{label}</span>
+				<ChevronDown className="shrink-0" />
+			</DialogTrigger>
+			<DialogContent
+				className="w-[min(440px,calc(100vw-2rem))] gap-0 p-0"
+				showCloseButton={false}
+			>
+				<DialogHeader className="sr-only">
+					<DialogTitle>Select Jev question type</DialogTitle>
+				</DialogHeader>
 				<Command>
-					<CommandInput placeholder="Search models…" autoFocus />
+					<CommandInput placeholder="Search question types…" autoFocus />
 					<CommandList>
-						<CommandEmpty>No matching models.</CommandEmpty>
-						{(["openai", "google"] as const).map((provider) => (
-							<CommandGroup
-								key={provider}
-								heading={provider === "openai" ? "OpenAI" : "Gemini"}
-							>
-								{textModels
-									.filter((model) => model.provider === provider)
-									.map((model) => (
-										<CommandItem
-											key={model.id}
-											value={`${model.label} ${model.id} ${provider}`}
-											data-checked={model.id === modelId}
-											onSelect={() => {
-												onChange?.(nodeId, model.id);
-												setOpen(false);
-											}}
-										>
-											{provider === "openai" ? (
-												<OpenAIIcon className="size-4" />
-											) : (
-												<GoogleIcon className="size-4" />
-											)}
-											<span className="min-w-0 flex-1 truncate">
-												{model.label}
-											</span>
-											<CostIndicator bracket={model.costBracket} />
-										</CommandItem>
-									))}
-							</CommandGroup>
-						))}
+						<CommandEmpty>No matching types.</CommandEmpty>
+						<CommandGroup heading="Jev question types">
+							{jevQuestionTypes.map((type) => (
+								<CommandItem
+									key={type}
+									value={type}
+									data-checked={type === question.type}
+									onSelect={() => {
+										if (type !== question.type)
+											onChange?.(defaultJevQuestion(type));
+										setOpen(false);
+									}}
+								>
+									<Avatar className="size-4 rounded-sm after:hidden">
+										<AvatarImage src="/brands/typesafe.png" alt="" />
+										<AvatarFallback className="bg-transparent">
+											<GitFork />
+										</AvatarFallback>
+									</Avatar>
+									<span className="min-w-0 flex-1 truncate">
+										{questionTypeLabels[type]}
+									</span>
+								</CommandItem>
+							))}
+						</CommandGroup>
 					</CommandList>
 				</Command>
 			</DialogContent>
@@ -188,35 +216,68 @@ const nodeMeta = {
 		title: "Your request",
 		subtitle: "Prompt source",
 		footerLabel: "PROMPT",
-		step: "01 / INPUT",
 	},
 	jev: {
 		title: "Jev",
 		subtitle: "Routing decision",
-		footerLabel: "CHOICE",
-		step: "02 / ROUTER",
+		footerLabel: "QUESTION",
 	},
 	google: {
 		title: "Gemini",
 		subtitle: "Select a model",
 		footerLabel: "MODEL",
-		step: "03 / MODEL",
 	},
 	openai: {
 		title: "OpenAI",
 		subtitle: "Select a model",
 		footerLabel: "MODEL",
-		step: "03 / MODEL",
 	},
 } satisfies Record<
 	NodeKind,
-	{ title: string; subtitle: string; footerLabel: string; step: string }
+	{ title: string; subtitle: string; footerLabel: string }
 >;
 
 function nodeFooterValue(data: FlowNode["data"]) {
 	if (data.kind === "input") return data.prompt || "Waiting for input";
-	if (data.kind === "jev") return data.decision || "Fast or deep";
+	if (data.kind === "jev")
+		return data.question
+			? questionTypeLabels[data.question.type]
+			: "Select question";
 	return data.model ?? "";
+}
+
+function PromptEditor({ data }: { data: FlowNode["data"] }) {
+	const promptRef = useRef<HTMLTextAreaElement>(null);
+	useEffect(() => promptRef.current?.focus(), []);
+	return (
+		<CardContent className="min-h-0 flex-1">
+			<Textarea
+				ref={promptRef}
+				className="nodrag nopan nowheel h-full min-h-0 resize-none rounded-none border-0 bg-transparent px-1 py-0.5 text-xs shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+				aria-label="Prompt"
+				placeholder="Write a prompt..."
+				value={data.draft ?? ""}
+				onChange={(event) => data.onPromptChange?.(event.target.value)}
+			/>
+		</CardContent>
+	);
+}
+
+function routeNodeHeight(data: FlowNode["data"]) {
+	if (data.kind !== "jev") return undefined;
+	return Math.max(
+		144,
+		questionOutputs(data.question ?? defaultJevQuestion()).length * 54,
+	);
+}
+
+function footerDisplay(
+	data: FlowNode["data"],
+	editingPrompt: boolean,
+	value: string,
+) {
+	if (!editingPrompt) return value;
+	return data.draft?.trim() ? "Ready to send" : "Waiting for input";
 }
 
 function RouteNodeToolbar({
@@ -232,6 +293,7 @@ function RouteNodeToolbar({
 }) {
 	const { fitView } = useReactFlow();
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [editOpen, setEditOpen] = useState(false);
 	const isModel = data.kind === "google" || data.kind === "openai";
 	return (
 		<NodeToolbar
@@ -246,24 +308,20 @@ function RouteNodeToolbar({
 					onChange={data.onModelChange}
 				/>
 			)}
-			{data.kind === "jev" && (
-				<Badge
-					variant="outline"
-					className="h-8 w-[200px] justify-start gap-2 rounded-full px-3 text-xs font-medium"
-					title={JEV_MODEL_ID}
-				>
-					<Avatar className="size-4 rounded-sm after:hidden">
-						<AvatarImage
-							src="/brands/typesafe.png"
-							alt=""
-							className="object-contain"
-						/>
-						<AvatarFallback className="bg-transparent">
-							<GitFork />
-						</AvatarFallback>
-					</Avatar>
-					<span>Jev Latest</span>
-				</Badge>
+			{data.kind === "jev" && data.question && (
+				<JevQuestionPicker
+					question={data.question}
+					onChange={data.onQuestionChange}
+				/>
+			)}
+			{data.kind === "jev" && data.question && editOpen && (
+				<JevQuestionEditor
+					key={data.question.type}
+					question={data.question}
+					open={editOpen}
+					onOpenChange={setEditOpen}
+					onSave={(question) => data.onQuestionChange?.(question)}
+				/>
 			)}
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
 				<DropdownMenuTrigger
@@ -281,6 +339,11 @@ function RouteNodeToolbar({
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="center" sideOffset={8} className="min-w-40">
 					<DropdownMenuGroup>
+						{data.kind === "jev" && (
+							<DropdownMenuItem onClick={() => setEditOpen(true)}>
+								<Pencil /> Edit question
+							</DropdownMenuItem>
+						)}
 						<DropdownMenuItem
 							onClick={() =>
 								void fitView({
@@ -302,20 +365,16 @@ function RouteNodeToolbar({
 							</DropdownMenuItem>
 						)}
 					</DropdownMenuGroup>
-					{isModel && (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuGroup>
-								<DropdownMenuItem
-									variant="destructive"
-									disabled={data.editingDisabled}
-									onClick={() => data.onRemoveNode?.(id)}
-								>
-									<Trash2 /> Remove model
-								</DropdownMenuItem>
-							</DropdownMenuGroup>
-						</>
-					)}
+					<DropdownMenuSeparator />
+					<DropdownMenuGroup>
+						<DropdownMenuItem
+							variant="destructive"
+							disabled={data.editingDisabled}
+							onClick={() => data.onRemoveNode?.(id)}
+						>
+							<Trash2 /> Remove node
+						</DropdownMenuItem>
+					</DropdownMenuGroup>
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</NodeToolbar>
@@ -388,30 +447,22 @@ function RouteNodeHandles({
 				/>
 			)}
 			{data.kind === "jev" ? (
-				<>
-					<Handle
-						className={cn(
-							"route-handle",
-							(selected || data.usedBranch === "fast") &&
-								"route-handle--accent",
-						)}
-						type="source"
-						id="fast"
-						position={Position.Right}
-						style={{ top: "32%" }}
-					/>
-					<Handle
-						className={cn(
-							"route-handle",
-							(selected || data.usedBranch === "deep") &&
-								"route-handle--accent",
-						)}
-						type="source"
-						id="deep"
-						position={Position.Right}
-						style={{ top: "68%" }}
-					/>
-				</>
+				questionOutputs(data.question ?? defaultJevQuestion()).map(
+					(output, index, all) => (
+						<Handle
+							key={output.id}
+							className={cn(
+								"route-handle",
+								(selected || data.usedBranch === output.id) &&
+									"route-handle--accent",
+							)}
+							type="source"
+							id={output.id}
+							position={Position.Right}
+							style={{ top: `${((index + 1) / (all.length + 1)) * 100}%` }}
+						/>
+					),
+				)
 			) : data.kind === "input" ? (
 				<Handle
 					className={cn(
@@ -427,15 +478,29 @@ function RouteNodeHandles({
 }
 
 export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
-	const { title, subtitle, footerLabel, step } = nodeMeta[data.kind];
+	const updateNodeInternals = useUpdateNodeInternals();
+	const outputIds =
+		data.kind === "jev" && data.question
+			? questionOutputs(data.question)
+					.map(({ id }) => id)
+					.join("|")
+			: "";
+	const { title, subtitle, footerLabel } = nodeMeta[data.kind];
 	const footerValue = nodeFooterValue(data);
+	const editingPrompt = selected && data.kind === "input";
+	const height = routeNodeHeight(data);
+	useEffect(() => {
+		if (outputIds) updateNodeInternals(id);
+	}, [outputIds, id, updateNodeInternals]);
 	return (
 		<div
 			className={cn(
 				"route-node",
+				editingPrompt && "route-node--editing",
 				data.active && "route-node--active",
 				selected && "route-node--selected",
 			)}
+			style={height ? { height } : undefined}
 		>
 			<RouteNodeToolbar id={id} data={data} selected={selected} title={title} />
 			<div className="route-node__eyebrow">
@@ -443,7 +508,7 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 					variant="outline"
 					className="bg-background text-[10px] tracking-wider"
 				>
-					{step}
+					{data.step}
 				</Badge>
 				{data.active && (
 					<Badge variant="secondary" className="text-[10px]">
@@ -468,15 +533,16 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 						</CardDescription>
 					</div>
 				</CardHeader>
+				{editingPrompt && <PromptEditor data={data} />}
 				<CardFooter className="min-w-0 justify-between gap-2 py-3">
 					<span className="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground">
 						{footerLabel}
 					</span>
 					<span
 						className="min-w-0 truncate text-right text-xs font-medium"
-						title={footerValue}
+						title={editingPrompt ? undefined : footerValue}
 					>
-						{footerValue}
+						{footerDisplay(data, editingPrompt, footerValue)}
 					</span>
 				</CardFooter>
 			</Card>
@@ -485,50 +551,121 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 	);
 }
 
-export function CanvasControls() {
+export function CanvasControls({
+	available,
+	onAddNode,
+	addingDisabled,
+}: {
+	available: CreatableNodeKind[];
+	onAddNode: (kind: CreatableNodeKind) => void;
+	addingDisabled: boolean;
+}) {
 	const { zoomIn, zoomOut, fitView } = useReactFlow();
 	const { theme, setTheme } = useTheme();
+	const [addOpen, setAddOpen] = useState(false);
 	return (
 		<Card size="sm" className="canvas-controls flex-row gap-0 p-1 shadow-sm">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				aria-label="Zoom in"
-				title="Zoom in"
-				onClick={() => void zoomIn()}
-			>
-				<Plus />
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				aria-label="Zoom out"
-				title="Zoom out"
-				onClick={() => void zoomOut()}
-			>
-				<Minus />
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				aria-label="Fit canvas"
-				title="Fit canvas"
-				onClick={() => void fitView({ padding: 0.12 })}
-			>
-				<Maximize />
-			</Button>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Zoom in"
+							onClick={() => void zoomIn()}
+						/>
+					}
+				>
+					<Plus />
+				</TooltipTrigger>
+				<TooltipContent>Zoom in</TooltipContent>
+			</Tooltip>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Zoom out"
+							onClick={() => void zoomOut()}
+						/>
+					}
+				>
+					<Minus />
+				</TooltipTrigger>
+				<TooltipContent>Zoom out</TooltipContent>
+			</Tooltip>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Fit canvas"
+							onClick={() => void fitView({ padding: 0.12 })}
+						/>
+					}
+				>
+					<Maximize />
+				</TooltipTrigger>
+				<TooltipContent>Fit canvas</TooltipContent>
+			</Tooltip>
 			<Separator orientation="vertical" className="mx-1 my-1" />
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				aria-label={
-					theme === "dark" ? "Switch to light theme" : "Switch to dark theme"
-				}
-				title={theme === "dark" ? "Light theme" : "Dark theme"}
-				onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-			>
-				{theme === "dark" ? <Sun /> : <Moon />}
-			</Button>
+			<Dialog open={addOpen} onOpenChange={setAddOpen}>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Add node"
+								disabled={addingDisabled}
+								onClick={() => setAddOpen(true)}
+							/>
+						}
+					>
+						<SquareMousePointer />
+					</TooltipTrigger>
+					<TooltipContent>Add node</TooltipContent>
+				</Tooltip>
+				<DialogContent
+					className="w-[min(360px,calc(100vw-2rem))] gap-0 p-0"
+					showCloseButton={false}
+				>
+					<DialogHeader className="sr-only">
+						<DialogTitle>Add node</DialogTitle>
+					</DialogHeader>
+					<NodeTypeCommand
+						available={available}
+						onSelect={(kind) => {
+							onAddNode(kind);
+							setAddOpen(false);
+						}}
+					/>
+				</DialogContent>
+			</Dialog>
+			<Separator orientation="vertical" className="mx-1 my-1" />
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={
+								theme === "dark"
+									? "Switch to light theme"
+									: "Switch to dark theme"
+							}
+							onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+						/>
+					}
+				>
+					{theme === "dark" ? <Sun /> : <Moon />}
+				</TooltipTrigger>
+				<TooltipContent>
+					{theme === "dark" ? "Light theme" : "Dark theme"}
+				</TooltipContent>
+			</Tooltip>
 		</Card>
 	);
 }

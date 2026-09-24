@@ -4,13 +4,19 @@ import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_evaluate, streamText } from "ai";
 import { z } from "zod";
 import {
+	type JevQuestion,
+	questionForJev,
+	questionOutputs,
+	resolveJevAnswer,
+} from "../src/lib/jev-question.ts";
+import {
 	type ChatMessage,
 	JEV_MODEL_ID,
 	type JevDecision,
+	type JevRoutes,
 	type RouteResult,
 	type RouteSelectionResult,
 	type RouteStreamEvent,
-	type Routes,
 	type RouteTarget,
 	type RoutingConfig,
 	routeRequestSchema,
@@ -23,46 +29,33 @@ type Keys = {
 	GOOGLE_GENERATIVE_AI_API_KEY?: string;
 };
 
-async function classify(prompt: string, key: string): Promise<JevDecision> {
+async function classify(
+	prompt: string,
+	key: string,
+	question: JevQuestion,
+): Promise<JevDecision> {
 	const start = performance.now();
 	const typeSafeAi = createTypeSafeAi({ apiKey: key });
 	const result = await experimental_evaluate({
 		model: typeSafeAi.evaluationModel(JEV_MODEL_ID),
 		state: prompt,
-		questions: {
-			task: {
-				type: "choice",
-				instructions:
-					"Which level of generative model is appropriate to answer this request accurately?",
-				criteria: {
-					fast: "Straightforward writing, extraction, summary, translation, or direct questions with limited reasoning.",
-					deep: "Complex reasoning, multi-step analysis, coding, nuanced synthesis, or high precision instructions.",
-				},
-			},
-		},
+		questions: { task: questionForJev(question) },
 		abortSignal: AbortSignal.timeout(10000),
 		maxRetries: 0,
 	});
-	const answer = result.answers.task;
-	const choice = z.enum(["fast", "deep"]).parse(answer.choice);
-	const probabilities = z
-		.object({ fast: z.number(), deep: z.number() })
-		.parse(answer.probabilities);
 	const confidence = result.providerMetadata?.typesafe?.confidence;
 	const taskConfidence =
 		confidence && typeof confidence === "object" && "task" in confidence
 			? confidence.task
 			: undefined;
-	if (
-		typeof taskConfidence !== "number" ||
-		taskConfidence < 0 ||
-		taskConfidence > 1
-	)
-		throw new Error("Jev returned no task confidence");
+	const decision = resolveJevAnswer(
+		question,
+		result.answers.task,
+		taskConfidence,
+	);
 	return {
-		choice,
-		confidence: taskConfidence,
-		probabilities,
+		type: question.type,
+		...decision,
 		model: result.response?.modelId ?? JEV_MODEL_ID,
 		latencyMs: Math.round(performance.now() - start),
 	};
@@ -121,10 +114,42 @@ async function runModel(
 	};
 }
 
-async function routePrompt(
+async function routeDirectPrompt(
+	messages: ChatMessage[],
+	target: RouteTarget,
+	keys: Keys,
+	emit: (event: RouteStreamEvent) => void,
+): Promise<void> {
+	const start = performance.now();
+	const route: RouteSelectionResult = {
+		mode: "direct",
+		provider: target.provider,
+		model: target.model,
+		initialProvider: target.provider,
+		nodeId: target.nodeId,
+		initialNodeId: target.nodeId,
+		branch: "direct",
+		finalBranch: "direct",
+		reason: "Direct model",
+	};
+	emit({ type: "route", route });
+	const response = await runModel(messages, target, keys, (text) =>
+		emit({ type: "delta", text }),
+	);
+	emit({
+		type: "done",
+		route: {
+			...response,
+			...route,
+			latencyMs: Math.round(performance.now() - start),
+		},
+	});
+}
+
+async function routeJevPrompt(
 	messages: ChatMessage[],
 	config: RoutingConfig,
-	routes: Routes,
+	routes: JevRoutes,
 	keys: Keys,
 	emit: (event: RouteStreamEvent) => void,
 ): Promise<void> {
@@ -138,7 +163,11 @@ async function routePrompt(
 			.slice(-6)
 			.map((message) => `${message.role}: ${message.content}`)
 			.join("\n");
-		jev = await classify(routingContext, keys.TYPESAFE_API_KEY);
+		jev = await classify(
+			routingContext,
+			keys.TYPESAFE_API_KEY,
+			routes.question,
+		);
 	} catch (error) {
 		classificationError =
 			error instanceof Error ? error.message : "Unknown Jev error";
@@ -148,20 +177,17 @@ async function routePrompt(
 	const initialTarget = selection.target;
 	const initialProvider = initialTarget.provider;
 	let target = initialTarget;
+	let finalBranch = selection.branch;
 	let fallbackReason: string | undefined;
 	const routeSelection = (): RouteSelectionResult => ({
+		mode: "jev",
 		provider: target.provider,
 		model: target.model,
 		initialProvider,
 		nodeId: target.nodeId,
 		initialNodeId: initialTarget.nodeId,
 		branch: selection.branch,
-		finalBranch:
-			target.nodeId === initialTarget.nodeId
-				? selection.branch
-				: selection.branch === "fast"
-					? "deep"
-					: "fast",
+		finalBranch,
 		reason: selection.reason,
 		classificationError,
 		fallbackReason,
@@ -182,11 +208,17 @@ async function routePrompt(
 			throw new Error(`${target.provider} failed: ${message}`, {
 				cause: error,
 			});
-		target = routes[selection.branch === "fast" ? "deep" : "fast"];
-		if (target.nodeId === initialTarget.nodeId)
+		const fallback = questionOutputs(routes.question).find(
+			(output) =>
+				output.id !== selection.branch &&
+				routes.targets[output.id].nodeId !== initialTarget.nodeId,
+		);
+		if (!fallback)
 			throw new Error(`${initialProvider} failed: ${message}`, {
 				cause: error,
 			});
+		finalBranch = fallback.id;
+		target = routes.targets[finalBranch];
 		fallbackReason = `${initialProvider} failed: ${message}`;
 		emit({ type: "route", route: routeSelection() });
 		try {
@@ -237,7 +269,17 @@ export async function handleApi(
 			start(controller) {
 				const emit = (event: RouteStreamEvent) =>
 					controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-				void routePrompt(input.messages, input.config, input.routes, keys, emit)
+				const processing =
+					input.routes.kind === "direct"
+						? routeDirectPrompt(input.messages, input.routes.target, keys, emit)
+						: routeJevPrompt(
+								input.messages,
+								input.config,
+								input.routes,
+								keys,
+								emit,
+							);
+				void processing
 					.catch((error) =>
 						emit({
 							type: "error",

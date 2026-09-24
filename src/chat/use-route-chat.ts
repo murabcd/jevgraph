@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ChatTurn } from "@/chat/types";
 import { readRouteStream } from "@/lib/route-stream";
 import {
@@ -16,15 +16,20 @@ export function useRouteChat(
 	const [draft, setDraft] = useState("");
 	const [messages, setMessages] = useState<ChatTurn[]>([]);
 	const [result, setResult] = useState<RouteResult | null>(null);
+	const [resultRouteKey, setResultRouteKey] = useState<string | null>(null);
 	const [error, setError] = useState("");
 	const [running, setRunning] = useState(false);
+	const routeKey = useMemo(
+		() => (routes ? JSON.stringify(routes) : null),
+		[routes],
+	);
 
 	const run = useCallback(async () => {
 		const question = draft.trim();
 		if (!question || running) return;
 		if (!routes) {
 			setError(
-				"Connect both Jev branches to model nodes before sending a message.",
+				"Connect Input to a model, or connect it through Jev with every output linked to a model.",
 			);
 			return;
 		}
@@ -39,12 +44,19 @@ export function useRouteChat(
 		setMessages((previous) => [
 			...previous,
 			{ id: crypto.randomUUID(), role: "user", content: question },
-			{ id: assistantId, role: "assistant", content: "", streaming: true },
+			{
+				id: assistantId,
+				role: "assistant",
+				content: "",
+				mode: routes.kind,
+				streaming: true,
+			},
 		]);
 		setDraft("");
 		setRunning(true);
 		setError("");
 		setResult(null);
+		setResultRouteKey(routeKey);
 		onRequestStarted();
 		try {
 			const response = await fetch("/api/route", {
@@ -114,24 +126,29 @@ export function useRouteChat(
 		} finally {
 			setRunning(false);
 		}
-	}, [draft, messages, routes, running, onRequestStarted]);
+	}, [draft, messages, routes, routeKey, running, onRequestStarted]);
 
 	const clearChat = () => {
 		setMessages([]);
 		setResult(null);
+		setResultRouteKey(null);
 		setError("");
 		setDraft("");
 	};
 
 	const clearResultForNode = (nodeId: string) => {
-		setResult((current) => (current?.nodeId === nodeId ? null : current));
+		setResult((current) =>
+			current?.nodeId === nodeId || nodeId === "input" || nodeId === "jev"
+				? null
+				: current,
+		);
 	};
 
 	return {
 		draft,
 		setDraft,
 		messages,
-		result,
+		result: routeKey === resultRouteKey ? result : null,
 		error,
 		running,
 		run,
