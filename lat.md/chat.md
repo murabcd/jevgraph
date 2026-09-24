@@ -1,6 +1,8 @@
 # Chat
 
-Chat keeps the conversation in memory and routes each new turn independently. The chosen model receives recent history for follow-ups. See [[routing]] for server events and [[canvas]] for the graph sent with a turn.
+Chat keeps the conversation in memory and follows the current graph for each turn. The chosen model receives recent history. See [[routing]] for server events and [[canvas]] for graph behavior.
+
+A direct path keeps the selected model; a Jev path evaluates each turn independently.
 
 The composer remains editable while a response streams.
 
