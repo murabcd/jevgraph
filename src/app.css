@@ -23,14 +23,14 @@ body {
 	position: absolute;
 	z-index: 5;
 	bottom: 16px;
-	right: 18px;
+	right: 12px;
 }
 
 .canvas-controls {
 	position: absolute;
 	z-index: 5;
 	bottom: 16px;
-	left: 18px;
+	left: 12px;
 }
 
 .route-node {

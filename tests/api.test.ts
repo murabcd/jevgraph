@@ -12,7 +12,6 @@ async function eventsFor(
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				messages: [{ role: "user", content: "Hello" }],
-				requestPrompt: "",
 				config: defaultConfig,
 				routes,
 			}),
@@ -34,7 +33,7 @@ describe("chatflow API", () => {
 		const { response, events } = await eventsFor({
 			kind: "workflow",
 			nodes: [
-				{ id: "input", kind: "input" },
+				{ id: "input", kind: "input", fields: [] },
 				{
 					id: "selected-model",
 					kind: "model",
@@ -66,7 +65,7 @@ describe("chatflow API", () => {
 		const { response, events } = await eventsFor({
 			kind: "workflow",
 			nodes: [
-				{ id: "input", kind: "input" },
+				{ id: "input", kind: "input", fields: [] },
 				{ id: "custom-router", kind: "jev", question: defaultJevQuestion() },
 				{
 					id: "fast-model",

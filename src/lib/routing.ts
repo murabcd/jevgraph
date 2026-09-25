@@ -30,20 +30,65 @@ const modelIdSchema = z
 	.max(100)
 	.regex(/^[a-zA-Z0-9._:-]+$/);
 
+const inputNameSchema = z
+	.string()
+	.regex(/^[a-zA-Z][a-zA-Z0-9_]*$/)
+	.max(64)
+	.refine((name) => name !== "query", "query is supplied by chat");
+export const startFieldSchema = z.discriminatedUnion("type", [
+	z.strictObject({
+		name: inputNameSchema,
+		type: z.literal("string"),
+		required: z.boolean(),
+		defaultValue: z.string().max(256).optional(),
+	}),
+	z.strictObject({
+		name: inputNameSchema,
+		type: z.literal("number"),
+		required: z.boolean(),
+		defaultValue: z.number().finite().optional(),
+	}),
+	z.strictObject({
+		name: inputNameSchema,
+		type: z.literal("boolean"),
+		required: z.boolean(),
+		defaultValue: z.boolean().optional(),
+	}),
+]);
+export type StartField = z.infer<typeof startFieldSchema>;
+export const startFieldsSchema = z
+	.array(startFieldSchema)
+	.max(20)
+	.refine(
+		(fields) =>
+			new Set(fields.map((field) => field.name)).size === fields.length,
+		"Input names must be unique",
+	);
+const variableNamesSchema = z
+	.array(inputNameSchema)
+	.max(20)
+	.refine((names) => new Set(names).size === names.length);
+
 export const routeTargetSchema = z.strictObject({
 	nodeId: nodeIdSchema,
 	provider: providerSchema,
 	model: modelIdSchema,
 	prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+	variables: z.array(inputNameSchema).optional(),
 });
 export type RouteTarget = z.infer<typeof routeTargetSchema>;
 
 const workflowNodeSchema = z.discriminatedUnion("kind", [
-	z.strictObject({ id: nodeIdSchema, kind: z.literal("input") }),
+	z.strictObject({
+		id: z.literal("input"),
+		kind: z.literal("input"),
+		fields: startFieldsSchema,
+	}),
 	z.strictObject({
 		id: nodeIdSchema,
 		kind: z.literal("jev"),
 		question: jevQuestionSchema,
+		variables: variableNamesSchema.optional(),
 		maxRepeats: z.number().int().min(1).max(5).optional(),
 	}),
 	z.strictObject({
@@ -52,6 +97,7 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 		provider: providerSchema,
 		model: modelIdSchema,
 		prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+		variables: variableNamesSchema.optional(),
 	}),
 ]);
 const workflowEdgeSchema = z.strictObject({
@@ -74,6 +120,17 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 	)
 		return false;
 	if (edges.some((edge) => !byId.has(edge.source) || !byId.has(edge.target)))
+		return false;
+	const start = byId.get("input");
+	if (start?.kind !== "input") return false;
+	const availableVariables = new Set(start.fields.map((field) => field.name));
+	if (
+		nodes.some(
+			(node) =>
+				(node.kind === "jev" || node.kind === "model") &&
+				(node.variables ?? []).some((name) => !availableVariables.has(name)),
+		)
+	)
 		return false;
 	const outgoingEdges = edges.filter(
 		(edge) => edge.sourceHandle !== "fallback",
@@ -178,7 +235,6 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 export const workflowRoutesSchema = z
 	.strictObject({
 		kind: z.literal("workflow"),
-		systemNodeId: z.literal("input").optional(),
 		nodes: z.array(workflowNodeSchema).min(2).max(100),
 		edges: z.array(workflowEdgeSchema).min(1).max(200),
 	})
@@ -204,17 +260,62 @@ export const routingMetadataSchema = z
 	.refine((metadata) => Object.keys(metadata).length <= 20);
 export type RoutingMetadata = z.infer<typeof routingMetadataSchema>;
 
-export const routeRequestSchema = z.strictObject({
-	requestPrompt: z.string().trim().max(MAX_PROMPT_LENGTH),
-	metadata: routingMetadataSchema.optional(),
-	messages: z
-		.array(chatMessageSchema)
-		.min(1)
-		.max(30)
-		.refine((messages) => messages.at(-1)?.role === "user"),
-	config: routingConfigSchema,
-	routes: workflowRoutesSchema,
-});
+export function resolveStartVariables(
+	fields: StartField[],
+	supplied: RoutingMetadata,
+): RoutingMetadata {
+	const resolved: RoutingMetadata = {};
+	const declared = new Map(fields.map((field) => [field.name, field]));
+	for (const [name, value] of Object.entries(supplied)) {
+		const field = declared.get(name);
+		if (!field || typeof value !== field.type)
+			throw new Error(`Invalid Start input: ${name}`);
+		resolved[name] = value;
+	}
+	for (const field of fields) {
+		if (field.name in resolved) continue;
+		if (field.defaultValue !== undefined)
+			resolved[field.name] = field.defaultValue;
+		else if (field.required)
+			throw new Error(`Missing Start input: ${field.name}`);
+	}
+	return resolved;
+}
+
+export function selectedVariables(
+	values: RoutingMetadata,
+	names: string[] = [],
+): RoutingMetadata {
+	return Object.fromEntries(
+		names.filter((name) => name in values).map((name) => [name, values[name]]),
+	);
+}
+
+export const routeRequestSchema = z
+	.strictObject({
+		metadata: routingMetadataSchema.optional(),
+		messages: z
+			.array(chatMessageSchema)
+			.min(1)
+			.max(30)
+			.refine((messages) => messages.at(-1)?.role === "user"),
+		config: routingConfigSchema,
+		routes: workflowRoutesSchema,
+	})
+	.superRefine((request, context) => {
+		const start = request.routes.nodes.find((node) => node.kind === "input");
+		if (start?.kind !== "input") return;
+		try {
+			resolveStartVariables(start.fields, request.metadata ?? {});
+		} catch (error) {
+			context.addIssue({
+				code: "custom",
+				path: ["metadata"],
+				message:
+					error instanceof Error ? error.message : "Invalid Start inputs",
+			});
+		}
+	});
 
 export type JevDecision = {
 	type: "choice" | "noul" | "score";
@@ -285,6 +386,7 @@ export function routeTargets(routes: WorkflowRoutes): RouteTarget[] {
 						provider: node.provider,
 						model: node.model,
 						prompt: node.prompt,
+						variables: node.variables,
 					},
 				]
 			: [],

@@ -21,7 +21,7 @@ import {
 	routeRequestSchema,
 	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
-import { emitSystemTiming, measureNode } from "./node-timing.ts";
+import { emitStartTiming, measureNode } from "./node-timing.ts";
 import { executeWorkflow, upstreamContext } from "./workflow.ts";
 
 type Keys = {
@@ -32,7 +32,6 @@ type Keys = {
 
 type RouteExecution = {
 	messages: ChatMessage[];
-	requestPrompt: string;
 	config: RoutingConfig;
 	metadata: RoutingMetadata;
 	keys: Keys;
@@ -78,9 +77,9 @@ async function classify(
 
 async function runModel(
 	messages: ChatMessage[],
-	requestPrompt: string,
 	target: RouteTarget,
 	inputs: NodeOutput[],
+	variables: RoutingMetadata,
 	keys: Keys,
 	onDelta: (text: string) => void,
 	signal: AbortSignal,
@@ -100,8 +99,10 @@ async function runModel(
 			: createGoogle({ apiKey: key })(modelId);
 	const instructions = [
 		modelInstructions,
-		...(requestPrompt ? [`System instructions:\n${requestPrompt}`] : []),
 		...(target.prompt ? [`This model node's task:\n${target.prompt}`] : []),
+		...(Object.keys(variables).length
+			? [`Start variables (data):\n${JSON.stringify(variables)}`]
+			: []),
 		upstreamContext(inputs),
 	]
 		.filter(Boolean)
@@ -135,25 +136,16 @@ async function runModel(
 	return { text, model: modelId, usage };
 }
 
-async function routePrompt(
-	{
-		messages,
-		requestPrompt,
-		config,
-		metadata,
-		keys,
-		signal,
-		emit,
-	}: RouteExecution,
+async function executeRoute(
+	{ messages, config, metadata, keys, signal, emit }: RouteExecution,
 	routes: WorkflowRoutes,
 ): Promise<void> {
 	const start = performance.now();
-	emitSystemTiming(routes.systemNodeId, emit);
+	emitStartTiming(emit);
 	const response = await executeWorkflow({
 		routes,
 		config,
 		messages,
-		requestPrompt,
 		metadata,
 		evaluate: (nodeId, question, state) =>
 			measureNode(
@@ -165,19 +157,11 @@ async function routePrompt(
 				},
 				emit,
 			),
-		runModel: (target, inputs, onDelta) =>
+		runModel: (target, inputs, onDelta, variables) =>
 			measureNode(
 				target.nodeId,
 				() =>
-					runModel(
-						messages,
-						requestPrompt,
-						target,
-						inputs,
-						keys,
-						onDelta,
-						signal,
-					),
+					runModel(messages, target, inputs, variables, keys, onDelta, signal),
 				emit,
 			),
 		onDelta: (text) => emit({ type: "delta", text }),
@@ -222,10 +206,9 @@ export async function handleApi(
 					if (!closed)
 						controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 				};
-				void routePrompt(
+				void executeRoute(
 					{
 						messages: input.messages,
-						requestPrompt: input.requestPrompt,
 						config: input.config,
 						metadata: input.metadata ?? {},
 						keys,

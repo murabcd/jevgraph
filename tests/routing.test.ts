@@ -10,7 +10,14 @@ import {
 const direct = {
 	kind: "workflow" as const,
 	nodes: [
-		{ id: "input", kind: "input" as const },
+		{
+			id: "input",
+			kind: "input" as const,
+			fields: [
+				{ name: "accountTier", type: "string" as const, required: false },
+				{ name: "currentLoad", type: "number" as const, required: false },
+			],
+		},
 		{
 			id: "model",
 			kind: "model" as const,
@@ -23,7 +30,6 @@ const direct = {
 };
 
 const request = {
-	requestPrompt: "Answer in one sentence.",
 	config: defaultConfig,
 	routes: direct,
 	messages: [
@@ -49,6 +55,44 @@ describe("chatflow contract", () => {
 		).toEqual({ accountTier: "paid", currentLoad: 2.4 });
 	});
 
+	test("validates supplied Start values against declared names and types", () => {
+		expect(
+			routeRequestSchema.safeParse({
+				...request,
+				metadata: { accountTier: "paid" },
+			}).success,
+		).toBe(true);
+		expect(
+			routeRequestSchema.safeParse({ ...request, metadata: { isPaid: true } })
+				.success,
+		).toBe(false);
+		expect(
+			routeRequestSchema.safeParse({
+				...request,
+				metadata: { currentLoad: "fast" },
+			}).success,
+		).toBe(false);
+		const required = {
+			...request,
+			routes: {
+				...direct,
+				nodes: [
+					{
+						id: "input",
+						kind: "input",
+						fields: [{ name: "isPaid", type: "boolean", required: true }],
+					},
+					direct.nodes[1],
+				],
+			},
+		};
+		expect(routeRequestSchema.safeParse(required).success).toBe(false);
+		expect(
+			routeRequestSchema.safeParse({ ...required, metadata: { isPaid: false } })
+				.success,
+		).toBe(true);
+	});
+
 	test("rejects obsolete route shapes and invalid chat messages", () => {
 		expect(
 			routeRequestSchema.safeParse({ ...request, context: {} }).success,
@@ -60,7 +104,7 @@ describe("chatflow contract", () => {
 			}).success,
 		).toBe(false);
 		expect(
-			routeRequestSchema.safeParse({ ...request, requestPrompt: undefined })
+			routeRequestSchema.safeParse({ ...request, requestPrompt: "obsolete" })
 				.success,
 		).toBe(false);
 		expect(
@@ -81,7 +125,7 @@ describe("chatflow contract", () => {
 		const flow = {
 			kind: "workflow",
 			nodes: [
-				{ id: "input", kind: "input" },
+				{ id: "input", kind: "input", fields: [] },
 				{ id: "first", kind: "model", provider: "openai", model: "gpt-5-mini" },
 				{
 					id: "second",

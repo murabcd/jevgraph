@@ -3,9 +3,9 @@ import { questionTypeLabels } from "@/lib/jev-question";
 
 export const nodeMeta = {
 	input: {
-		title: "Prompt",
-		subtitle: "Reusable instructions",
-		footerLabel: "SYSTEM",
+		title: "Start",
+		subtitle: "Chat input and variables",
+		footerLabel: "INPUT",
 	},
 	jev: {
 		title: "Jev",
@@ -28,7 +28,7 @@ export const nodeMeta = {
 >;
 
 export function nodeFooterValue(data: FlowNode["data"]) {
-	if (data.kind === "input") return data.prompt || "No prompt";
+	if (data.kind === "input") return "";
 	if (data.kind === "jev") return questionTypeLabels[data.question.type];
 	return data.model;
 }

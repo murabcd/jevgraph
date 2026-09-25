@@ -33,11 +33,7 @@ function App() {
 	const onRequestStarted = useCallback(() => {
 		void refreshStatus();
 	}, [refreshStatus]);
-	const chat = useRouteChat(
-		graph.routes,
-		graph.requestPrompt,
-		onRequestStarted,
-	);
+	const chat = useRouteChat(graph.routes, onRequestStarted);
 
 	const duplicateNode = (nodeId: string) => {
 		if (!chat.running) graph.onDuplicateNode(nodeId);

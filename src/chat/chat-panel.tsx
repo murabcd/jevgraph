@@ -31,6 +31,11 @@ import {
 	PopoverTitle,
 } from "@/components/ui/popover";
 import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
 	type KeyStatus,
 	routesUseJev,
 	routeTargets,
@@ -131,32 +136,43 @@ export function ChatPanel({
 			aria-label="Routing chat"
 			side="top"
 			align="end"
+			alignOffset={-4}
 			sideOffset={8}
 			initialFocus={composerRef}
-			className="h-[min(37.5rem,calc(100dvh-5rem))] w-[min(25rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0"
+			className="h-[min(37.5rem,calc(100dvh-5rem))] w-[min(25rem,calc(100vw-1.5rem))] gap-0 overflow-hidden p-0"
 		>
 			<PopoverHeader className="flex-row items-center justify-between p-3">
 				<PopoverTitle>Chat</PopoverTitle>
 				<div className="flex items-center gap-1">
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label="Clear conversation"
-						title="Clear conversation"
-						disabled={messages.length === 0 || running}
-						onClick={onClear}
-					>
-						<Trash2 />
-					</Button>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label="Close chat"
-						title="Close chat"
-						onClick={onClose}
-					>
-						<Minus />
-					</Button>
+					<Tooltip>
+						<TooltipTrigger render={<span className="inline-flex" />}>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Clear conversation"
+								disabled={messages.length === 0 || running}
+								onClick={onClear}
+							>
+								<Trash2 />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>Clear conversation</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label="Close chat"
+									onClick={onClose}
+								/>
+							}
+						>
+							<Minus />
+						</TooltipTrigger>
+						<TooltipContent>Close chat</TooltipContent>
+					</Tooltip>
 				</div>
 			</PopoverHeader>
 

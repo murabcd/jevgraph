@@ -13,7 +13,6 @@ import {
 
 export function useRouteChat(
 	routes: WorkflowRoutes | null,
-	requestPrompt: string,
 	onRequestStarted: () => void,
 ) {
 	const [draft, setDraft] = useState("");
@@ -27,8 +26,8 @@ export function useRouteChat(
 	const [error, setError] = useState("");
 	const [running, setRunning] = useState(false);
 	const routeKey = useMemo(
-		() => (routes ? JSON.stringify({ routes, requestPrompt }) : null),
-		[routes, requestPrompt],
+		() => (routes ? JSON.stringify(routes) : null),
+		[routes],
 	);
 
 	const run = useCallback(async () => {
@@ -70,7 +69,6 @@ export function useRouteChat(
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					messages: history,
-					requestPrompt,
 					config: defaultConfig,
 					routes,
 				}),
@@ -149,15 +147,7 @@ export function useRouteChat(
 		} finally {
 			setRunning(false);
 		}
-	}, [
-		draft,
-		messages,
-		requestPrompt,
-		routes,
-		routeKey,
-		running,
-		onRequestStarted,
-	]);
+	}, [draft, messages, routes, routeKey, running, onRequestStarted]);
 
 	const clearChat = () => {
 		setMessages([]);

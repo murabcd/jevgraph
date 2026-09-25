@@ -110,6 +110,7 @@ export function RoutingCanvas({
 				(node) => node.type === "route" && node.id === activePanel.nodeId,
 			)
 		: undefined;
+	const startNode = nodes.find((node) => node.id === "input");
 
 	const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
 		(changes) => {
@@ -134,14 +135,8 @@ export function RoutingCanvas({
 	);
 
 	const availableNodeTypes = useMemo<CreatableNodeKind[]>(
-		() => [
-			...(!nodes.some((node) => node.id === "input")
-				? (["input"] as const)
-				: []),
-			"jev",
-			"model",
-		],
-		[nodes],
+		() => ["jev", "model"],
+		[],
 	);
 
 	const addNodeAtCenter = useCallback(
@@ -248,6 +243,9 @@ export function RoutingCanvas({
 					data={panelNode.data}
 					title={nodeMeta[panelNode.data.kind].title}
 					view={activePanel.view}
+					startFields={
+						startNode?.data.kind === "input" ? startNode.data.fields : []
+					}
 					onClose={() => setPanel(null)}
 					actions={graph}
 				/>

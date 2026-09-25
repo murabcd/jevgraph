@@ -8,29 +8,25 @@ import {
 	MessageFooter,
 } from "@/components/ui/message";
 import { MessageScrollerItem } from "@/components/ui/message-scroller";
-import type { Provider } from "@/lib/routing";
 
 const Streamdown = lazy(() =>
 	import("streamdown").then((module) => ({ default: module.Streamdown })),
 );
-
-function providerName(provider: Provider) {
-	return provider === "google" ? "Gemini" : "OpenAI";
-}
-
-function pendingLabel(message: ChatTurn) {
-	if (message.route) {
-		return `Waiting for ${providerName(message.route.provider)}…`;
-	}
-
-	return "Running chatflow…";
-}
+const Shimmer = lazy(() =>
+	import("@/components/ai-elements/shimmer").then((module) => ({
+		default: module.Shimmer,
+	})),
+);
 
 function AssistantContent({ message }: { message: ChatTurn }) {
 	if (!message.content) {
-		return (
-			<span className="text-muted-foreground">{pendingLabel(message)}</span>
-		);
+		return message.streaming ? (
+			<Suspense
+				fallback={<span className="text-muted-foreground">Thinking</span>}
+			>
+				<Shimmer>Thinking</Shimmer>
+			</Suspense>
+		) : null;
 	}
 
 	return (
@@ -49,27 +45,19 @@ function AssistantContent({ message }: { message: ChatTurn }) {
 	);
 }
 
-function RouteBadge({ message }: { message: ChatTurn }) {
-	if (!message.route || message.streaming || message.failed) {
+function JevErrorBadge({ message }: { message: ChatTurn }) {
+	const errors = message.route?.jevSteps
+		.map((step) => step.error)
+		.filter((error): error is string => Boolean(error));
+	if (!errors?.length || message.streaming || message.failed) {
 		return null;
 	}
 
 	return (
 		<MessageFooter>
-			<Badge variant="outline" title={message.route.reason}>
-				{providerName(message.route.provider)} · {message.route.model}
+			<Badge variant="destructive" title={errors.join("; ")}>
+				Jev unavailable
 			</Badge>
-			{message.route.jevSteps.some((step) => step.error) && (
-				<Badge
-					variant="destructive"
-					title={message.route.jevSteps
-						.map((step) => step.error)
-						.filter(Boolean)
-						.join("; ")}
-				>
-					Jev unavailable
-				</Badge>
-			)}
 		</MessageFooter>
 	);
 }
@@ -95,7 +83,7 @@ export function ChatMessageItem({ message }: { message: ChatTurn }) {
 							)}
 						</BubbleContent>
 					</Bubble>
-					<RouteBadge message={message} />
+					<JevErrorBadge message={message} />
 				</MessageContent>
 			</Message>
 		</MessageScrollerItem>

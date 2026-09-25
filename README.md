@@ -22,8 +22,8 @@ Keep actual keys only in .env.local. A turn needs keys for the providers it reac
 
 ## Build a chatflow
 
-1. Add an optional Prompt node for reusable system instructions. The chat composer supplies the current user message independently.
-2. Connect Jev and Model nodes. Jev outputs choose one branch; a Model's Continue output can feed another Jev or Model. Several paths can run in parallel but must join before the final Model.
+1. Start is the required entry. Add custom text, number, or boolean fields there. The latest chat message is the built-in query. Defaults let you test fields locally; an API caller may supply declared values under `metadata`.
+2. Connect Jev and Model nodes. In each node's settings, select only the Start fields it needs. Jev outputs choose one branch; a Model's Continue output can feed another Jev or Model. Several paths can run in parallel but must join before the final Model.
 3. Edit Model prompts for each model's specific task. A terminal Model generates the chat answer.
 4. To repeat work, connect one Jev output back to an earlier Model. Set the Jev repeat limit in its settings panel. Another output must exit the loop.
 

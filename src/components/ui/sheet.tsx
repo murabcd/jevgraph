@@ -1,6 +1,6 @@
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { cn } from "cn";
-import { XIcon } from "lucide-react";
+import { MinusIcon } from "lucide-react";
 import type * as React from "react";
 import { Button } from "@/components/ui/button";
 
@@ -83,7 +83,7 @@ function SheetContent({
 							/>
 						}
 					>
-						<XIcon />
+						<MinusIcon />
 						<span className="sr-only">Close</span>
 					</SheetPrimitive.Close>
 				)}

@@ -45,7 +45,6 @@ function run(
 			routes,
 			config: defaultConfig,
 			messages: [{ role: "user", content: "Help me" }],
-			requestPrompt: "Be clear",
 			metadata: {},
 			evaluate: (nodeId, _question, state) =>
 				options.decide?.(nodeId, state) ?? Promise.resolve(answer("yes")),
@@ -71,7 +70,7 @@ test("Jev evaluates only the selected path and keeps a connected backup", async 
 	const execution = run(connected, {
 		decide: async (nodeId, state) => {
 			questions.push(nodeId);
-			expect(state).toContain("System instructions: Be clear");
+			expect(state).toContain("user: Help me");
 			return answer("yes");
 		},
 	});
@@ -86,11 +85,83 @@ test("Jev evaluates only the selected path and keeps a connected backup", async 
 	expect(execution.deltas).toEqual(["answer from primary-model"]);
 });
 
+test("Start values reach only the nodes that select them", async () => {
+	const routes: WorkflowRoutes = {
+		kind: "workflow",
+		nodes: [
+			{
+				id: "input",
+				kind: "input",
+				fields: [
+					{
+						name: "plan",
+						type: "string",
+						required: false,
+						defaultValue: "paid",
+					},
+					{
+						name: "requestRateRps",
+						type: "number",
+						required: false,
+						defaultValue: 0.8,
+					},
+				],
+			},
+			{
+				id: "judge",
+				kind: "jev",
+				question: defaultJevQuestion("noul"),
+				variables: ["plan"],
+			},
+			{
+				id: "yes",
+				kind: "model",
+				provider: "openai",
+				model: "gpt-5-mini",
+				variables: ["requestRateRps"],
+			},
+			{
+				id: "no",
+				kind: "model",
+				provider: "google",
+				model: "gemini-3.5-flash-lite",
+			},
+		],
+		edges: [
+			{ id: "entry", source: "input", target: "judge" },
+			{ id: "yes", source: "judge", sourceHandle: "yes", target: "yes" },
+			{ id: "no", source: "judge", sourceHandle: "no", target: "no" },
+		],
+	};
+	let state = "";
+	let modelVariables: Record<string, string | number | boolean> = {};
+	await executeWorkflow({
+		routes,
+		config: defaultConfig,
+		messages: [{ role: "user", content: "hello" }],
+		metadata: {},
+		evaluate: async (_id, _question, input) => {
+			state = input;
+			return answer("yes");
+		},
+		runModel: async (_target, _inputs, _onDelta, variables) => {
+			modelVariables = variables;
+			return { text: "ok", model: "gpt-5-mini" };
+		},
+		onDelta: () => {},
+		onRoute: () => {},
+		onProgress: () => {},
+	});
+	expect(state).toContain('"plan":"paid"');
+	expect(state).not.toContain("requestRateRps");
+	expect(modelVariables).toEqual({ requestRateRps: 0.8 });
+});
+
 test("a model can feed its output to Jev and another model", async () => {
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
-			{ id: "input", kind: "input" },
+			{ id: "input", kind: "input", fields: [] },
 			{
 				id: "draft",
 				kind: "model",
@@ -141,7 +212,7 @@ test("parallel model results join before Jev evaluates them", async () => {
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
-			{ id: "input", kind: "input" },
+			{ id: "input", kind: "input", fields: [] },
 			{ id: "first", kind: "model", provider: "openai", model: "gpt-5-mini" },
 			{
 				id: "second",
@@ -202,7 +273,7 @@ test("model failure uses the connected backup once before downstream work", asyn
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
-			{ id: "input", kind: "input" },
+			{ id: "input", kind: "input", fields: [] },
 			{ id: "primary", kind: "model", provider: "openai", model: "gpt-5-mini" },
 			{
 				id: "backup",
@@ -250,7 +321,7 @@ test("a Jev feedback branch repeats a model with the latest result and exits at 
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
-			{ id: "input", kind: "input" },
+			{ id: "input", kind: "input", fields: [] },
 			{ id: "draft", kind: "model", provider: "openai", model: "gpt-5-mini" },
 			{
 				id: "judge",
@@ -303,7 +374,7 @@ test("a parallel join waits for a repeating branch before running the final mode
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
-			{ id: "input", kind: "input" },
+			{ id: "input", kind: "input", fields: [] },
 			{ id: "draft", kind: "model", provider: "openai", model: "gpt-5-mini" },
 			{
 				id: "context",
@@ -371,15 +442,13 @@ test("cancellation during Jev evaluation stops before the default model", async 
 	expect(modelCalls).toBe(0);
 });
 
-test("Jev context includes the conversation, system instructions, and metadata", () => {
+test("Jev context includes the conversation and selected variables", () => {
 	const state = workflowRoutingState(
 		[{ role: "user", content: "Help with an invoice" }],
-		"Be concise",
 		{ accountTier: "paid", currentLoad: 2.4 },
 	);
 	expect(state).toContain(
 		'Routing metadata: {"accountTier":"paid","currentLoad":2.4}',
 	);
-	expect(state).toContain("System instructions: Be concise");
 	expect(state).toContain("user: Help with an invoice");
 });

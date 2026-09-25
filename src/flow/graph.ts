@@ -11,15 +11,16 @@ import {
 	DEFAULT_OPENAI_MODEL,
 	MAX_PROMPT_LENGTH,
 	type NodeTiming,
+	type StartField,
+	startFieldsSchema,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
 } from "@/lib/routing";
 
 export type NodeKind = "input" | "jev" | "google" | "openai";
-export type CreatableNodeKind = "input" | "jev" | "model";
+export type CreatableNodeKind = "jev" | "model";
 type NodeViewData = {
 	active: boolean;
-	entry?: boolean;
 	hasRepeat?: boolean;
 	fallbackConnected?: boolean;
 	isBackup?: boolean;
@@ -36,11 +37,18 @@ type NodeViewData = {
 
 type NodeData = NodeViewData &
 	(
-		| { kind: "input"; prompt?: string; question?: never; model?: never }
+		| {
+				kind: "input";
+				prompt?: never;
+				fields: StartField[];
+				question?: never;
+				model?: never;
+		  }
 		| {
 				kind: "jev";
 				question: JevQuestion;
 				maxRepeats?: number;
+				variables?: string[];
 				prompt?: never;
 				model?: never;
 		  }
@@ -48,6 +56,7 @@ type NodeData = NodeViewData &
 				kind: "google" | "openai";
 				model: string;
 				prompt?: string;
+				variables?: string[];
 				question?: never;
 		  }
 	);
@@ -58,7 +67,6 @@ export function defaultNodeData(
 	kind: CreatableNodeKind,
 	provider: "google" | "openai" = "openai",
 ): FlowNode["data"] {
-	if (kind === "input") return { kind, active: false };
 	if (kind === "jev")
 		return { kind, active: false, question: defaultJevQuestion() };
 	return {
@@ -72,7 +80,7 @@ const startingNodes: FlowNode[] = [
 		id: "input",
 		type: "route",
 		position: { x: 0, y: 235 },
-		data: { kind: "input", active: false },
+		data: { kind: "input", active: false, fields: [] },
 	},
 	{
 		id: "jev",
@@ -123,25 +131,25 @@ const persistedNodeSchema = z.object({
 	data: z.discriminatedUnion("kind", [
 		z.object({
 			kind: z.literal("input"),
-			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+			fields: startFieldsSchema,
 		}),
 		z.object({
 			kind: z.literal("jev"),
 			question: jevQuestionSchema,
 			maxRepeats: z.number().int().min(1).max(5).optional(),
-			entry: z.boolean().optional(),
+			variables: z.array(z.string()).optional(),
 		}),
 		z.object({
 			kind: z.literal("google"),
 			model: z.string().min(1),
 			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
-			entry: z.boolean().optional(),
+			variables: z.array(z.string()).optional(),
 		}),
 		z.object({
 			kind: z.literal("openai"),
 			model: z.string().min(1),
 			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
-			entry: z.boolean().optional(),
+			variables: z.array(z.string()).optional(),
 		}),
 	]),
 });
@@ -291,7 +299,11 @@ export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 					? [{ ...parsed.data, type: "default" as const }]
 					: [];
 			});
-			return { nodes, edges };
+			return nodes.some(
+				(node) => node.id === "input" && node.data.kind === "input",
+			)
+				? { nodes, edges }
+				: { nodes: startingNodes, edges: startingEdges };
 		}
 		return { nodes: startingNodes, edges: startingEdges };
 	} catch {
@@ -309,13 +321,15 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 				position: node.position,
 				data: {
 					kind: node.data.kind,
-					...(node.data.kind === "input" ? { prompt: node.data.prompt } : {}),
+					...(node.data.kind === "input" ? { fields: node.data.fields } : {}),
 					...(node.data.kind === "google" || node.data.kind === "openai"
 						? { prompt: node.data.prompt }
 						: {}),
-					...(node.data.entry ? { entry: true } : {}),
 					...(node.data.kind === "jev" && node.data.maxRepeats
 						? { maxRepeats: node.data.maxRepeats }
+						: {}),
+					...(node.data.kind !== "input"
+						? { variables: node.data.variables }
 						: {}),
 					model: node.data.model,
 					question: node.data.question,
@@ -338,37 +352,20 @@ export function removeGraphNode(
 	edges: Edge[],
 	nodeId: string,
 ) {
-	const nextEntries = new Set(
-		nodeId === "input"
-			? edges
-					.filter((edge) => edge.source === nodeId)
-					.map((edge) => edge.target)
-			: [],
-	);
+	if (nodeId === "input") return { nodes, edges };
 	return {
-		nodes: nodes
-			.filter((node) => node.id !== nodeId)
-			.map((node) =>
-				nextEntries.size > 0
-					? { ...node, data: { ...node.data, entry: nextEntries.has(node.id) } }
-					: node,
-			),
+		nodes: nodes.filter((node) => node.id !== nodeId),
 		edges: edges.filter(
 			(edge) => edge.source !== nodeId && edge.target !== nodeId,
 		),
 	};
 }
 
-function graphEntryNodes(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
+function graphEntryNodes(nodes: FlowNode[]): FlowNode[] {
 	const system = nodes.find(
 		(node) => node.id === "input" && node.data.kind === "input",
 	);
-	if (system) return [system];
-	const explicit = nodes.filter((node) => node.data.entry);
-	if (explicit.length > 0) return explicit;
-	const targets = new Set(edges.map((edge) => edge.target));
-	const roots = nodes.filter((node) => !targets.has(node.id));
-	return roots.length === 1 ? roots : [];
+	return system ? [system] : [];
 }
 
 export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
@@ -392,14 +389,14 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 		for (const target of targetsBySource.get(id) ?? []) visit(target);
 	}
 
-	for (const entry of graphEntryNodes(nodes, edges)) visit(entry.id);
+	for (const entry of graphEntryNodes(nodes)) visit(entry.id);
 	for (const node of nodes) visit(node.id);
 
 	return new Map(
 		ordered.map((node, index) => {
 			const type =
 				node.data.kind === "input"
-					? "PROMPT"
+					? "START"
 					: node.data.kind === "jev"
 						? "ROUTER"
 						: backupTargets.has(node.id)
@@ -419,8 +416,8 @@ export function routesFromGraph(
 	nodes: FlowNode[],
 	edges: Edge[],
 ): WorkflowRoutes | null {
-	const entries = graphEntryNodes(nodes, edges);
-	if (entries.length === 0) return null;
+	const entries = graphEntryNodes(nodes);
+	if (entries.length !== 1 || entries[0].id !== "input") return null;
 	const reachable = new Set<string>();
 	const visit = (id: string) => {
 		if (reachable.has(id)) return;
@@ -429,22 +426,26 @@ export function routesFromGraph(
 			visit(edge.target);
 	};
 	for (const entry of entries) visit(entry.id);
-	const hasSystem = entries[0].data.kind === "input";
 	const workflow = {
 		kind: "workflow" as const,
-		...(hasSystem ? { systemNodeId: "input" as const } : {}),
 		nodes: [
-			...(!hasSystem ? [{ id: "input", kind: "input" as const }] : []),
 			...nodes
 				.filter((node) => reachable.has(node.id))
 				.map((node) => {
 					if (node.data.kind === "input")
-						return { id: node.id, kind: "input" as const };
+						return {
+							id: "input" as const,
+							kind: "input" as const,
+							fields: node.data.fields,
+						};
 					if (node.data.kind === "jev")
 						return {
 							id: node.id,
 							kind: "jev" as const,
 							question: node.data.question,
+							...(node.data.variables?.length
+								? { variables: node.data.variables }
+								: {}),
 							...(node.data.maxRepeats
 								? { maxRepeats: node.data.maxRepeats }
 								: {}),
@@ -454,18 +455,14 @@ export function routesFromGraph(
 						kind: "model" as const,
 						provider: node.data.kind,
 						model: node.data.model,
+						...(node.data.variables?.length
+							? { variables: node.data.variables }
+							: {}),
 						...(node.data.prompt ? { prompt: node.data.prompt } : {}),
 					};
 				}),
 		],
 		edges: [
-			...(!hasSystem
-				? entries.map((entry) => ({
-						id: `chat-entry-${entry.id}`,
-						source: "input",
-						target: entry.id,
-					}))
-				: []),
 			...edges
 				.filter((edge) => reachable.has(edge.source))
 				.map((edge) => ({

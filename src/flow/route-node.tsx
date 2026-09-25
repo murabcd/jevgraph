@@ -12,6 +12,7 @@ import {
 	GitFork,
 	MessageSquareText,
 	MoreHorizontal,
+	Play,
 	Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -133,11 +134,9 @@ function RouteNodeAvatar({ kind }: { kind: NodeKind }) {
 			)}
 		>
 			{kind === "input" && (
-				<AvatarImage
-					src="https://avatar.vercel.sh/your-request.svg?size=72&rounded=36"
-					alt=""
-					className="size-6 rounded-full"
-				/>
+				<AvatarFallback className="size-7 rounded-full bg-primary text-primary-foreground">
+					<Play className="size-4 fill-current" />
+				</AvatarFallback>
 			)}
 			{kind === "jev" && (
 				<AvatarImage
@@ -146,24 +145,24 @@ function RouteNodeAvatar({ kind }: { kind: NodeKind }) {
 					className="rounded-lg object-contain p-1"
 				/>
 			)}
-			<AvatarFallback
-				className={cn(
-					kind === "input" ? "rounded-full" : "rounded-lg",
-					kind === "google" || kind === "openai"
-						? "bg-transparent text-foreground"
-						: "bg-muted",
-				)}
-			>
-				{kind === "google" ? (
-					<GoogleIcon className="size-6" />
-				) : kind === "openai" ? (
-					<OpenAIIcon className="size-6" />
-				) : kind === "jev" ? (
-					<GitFork className="size-5" strokeWidth={1.8} />
-				) : (
-					<MessageSquareText className="size-5" strokeWidth={1.8} />
-				)}
-			</AvatarFallback>
+			{kind !== "input" && (
+				<AvatarFallback
+					className={cn(
+						"rounded-lg",
+						kind === "google" || kind === "openai"
+							? "bg-transparent text-foreground"
+							: "bg-muted",
+					)}
+				>
+					{kind === "google" ? (
+						<GoogleIcon className="size-6" />
+					) : kind === "openai" ? (
+						<OpenAIIcon className="size-6" />
+					) : kind === "jev" ? (
+						<GitFork className="size-5" strokeWidth={1.8} />
+					) : null}
+				</AvatarFallback>
+			)}
 		</Avatar>
 	);
 }
@@ -315,13 +314,89 @@ function RouteNodeStatus({
 	);
 }
 
+function RouteCardHeader({ data }: { data: FlowNode["data"] }) {
+	const { title, subtitle } = nodeMeta[data.kind];
+	return (
+		<CardHeader className="grid grid-cols-[36px_1fr] items-center gap-x-3">
+			<RouteNodeAvatar kind={data.kind} />
+			<div className="min-w-0">
+				<CardTitle className="truncate text-base">{title}</CardTitle>
+				<CardDescription className="truncate text-xs">
+					{data.isBackup ? "Runs if primary fails" : subtitle}
+				</CardDescription>
+			</div>
+		</CardHeader>
+	);
+}
+
+function RouteCardOutputs({
+	data,
+	outputs,
+}: {
+	data: FlowNode["data"];
+	outputs: ReturnType<typeof questionOutputs>;
+}) {
+	if (data.kind === "jev") {
+		return <JevOutputRows outputs={outputs} usedBranches={data.usedBranches} />;
+	}
+	if (data.kind === "input" || data.isBackup) return null;
+	return (
+		<ModelOutputRows
+			usedBranches={data.usedBranches}
+			fallbackConnected={data.fallbackConnected}
+		/>
+	);
+}
+
+function RouteCardFooter({ data }: { data: FlowNode["data"] }) {
+	const { footerLabel } = nodeMeta[data.kind];
+	const footerValue = nodeFooterValue(data);
+	return (
+		<CardFooter className="h-11 min-w-0 shrink-0 justify-between gap-2 px-3 py-0">
+			<span className="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground">
+				{footerLabel}
+			</span>
+			{footerValue && (
+				<span
+					className="min-w-0 truncate text-right text-xs font-medium"
+					title={footerValue}
+				>
+					{footerValue}
+				</span>
+			)}
+		</CardFooter>
+	);
+}
+
+function RouteNodeCard({
+	data,
+	selected,
+	outputs,
+}: {
+	data: FlowNode["data"];
+	selected: boolean;
+	outputs: ReturnType<typeof questionOutputs>;
+}) {
+	return (
+		<Card
+			size="sm"
+			className={cn(
+				data.kind === "jev" ? "min-h-36" : "h-full",
+				"justify-between overflow-visible bg-card shadow-sm",
+				data.active ? "ring-[var(--route-accent)]" : selected && "ring-ring",
+			)}
+		>
+			<RouteCardHeader data={data} />
+			<RouteCardOutputs data={data} outputs={outputs} />
+			<RouteCardFooter data={data} />
+		</Card>
+	);
+}
+
 export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 	const updateNodeInternals = useUpdateNodeInternals();
 	const outputs = data.kind === "jev" ? questionOutputs(data.question) : [];
 	const outputIds = outputs.map(({ id }) => id).join("|");
-	const { title, subtitle, footerLabel } = nodeMeta[data.kind];
-	const isModel = data.kind === "google" || data.kind === "openai";
-	const footerValue = nodeFooterValue(data);
 	useEffect(() => {
 		if (outputIds) updateNodeInternals(id);
 	}, [outputIds, id, updateNodeInternals]);
@@ -330,53 +405,24 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 			className={cn(
 				"route-node",
 				data.kind === "jev" && "route-node--jev",
-				isModel && !data.isBackup && "route-node--model",
+				(data.kind === "google" || data.kind === "openai") &&
+					!data.isBackup &&
+					"route-node--model",
 				data.isBackup && "route-node--backup",
 				data.active && "route-node--active",
 				selected && "route-node--selected",
 			)}
 		>
-			<RouteNodeToolbar id={id} data={data} selected={selected} title={title} />
+			{data.kind !== "input" && (
+				<RouteNodeToolbar
+					id={id}
+					data={data}
+					selected={selected}
+					title={nodeMeta[data.kind].title}
+				/>
+			)}
 			<RouteNodeStatus step={data.step} timing={data.timing} />
-
-			<Card
-				size="sm"
-				className={cn(
-					data.kind === "jev" ? "min-h-36" : "h-full",
-					"justify-between overflow-visible bg-card shadow-sm",
-					data.active ? "ring-[var(--route-accent)]" : selected && "ring-ring",
-				)}
-			>
-				<CardHeader className="grid grid-cols-[36px_1fr] items-center gap-x-3">
-					<RouteNodeAvatar kind={data.kind} />
-					<div className="min-w-0">
-						<CardTitle className="truncate text-base">{title}</CardTitle>
-						<CardDescription className="truncate text-xs">
-							{data.isBackup ? "Runs if primary fails" : subtitle}
-						</CardDescription>
-					</div>
-				</CardHeader>
-				{data.kind === "jev" && (
-					<JevOutputRows outputs={outputs} usedBranches={data.usedBranches} />
-				)}
-				{isModel && !data.isBackup && (
-					<ModelOutputRows
-						usedBranches={data.usedBranches}
-						fallbackConnected={data.fallbackConnected}
-					/>
-				)}
-				<CardFooter className="h-11 min-w-0 shrink-0 justify-between gap-2 px-3 py-0">
-					<span className="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground">
-						{footerLabel}
-					</span>
-					<span
-						className="min-w-0 truncate text-right text-xs font-medium"
-						title={footerValue}
-					>
-						{footerValue}
-					</span>
-				</CardFooter>
-			</Card>
+			<RouteNodeCard data={data} selected={selected} outputs={outputs} />
 			<RouteNodeHandles data={data} />
 		</div>
 	);

@@ -19,7 +19,7 @@ Browser storage, in-memory chat, and server-only secrets have separate owners.
 
 Graph configuration, node positions, theme, viewport, and chat panel visibility live in browser local storage. Messages and the latest execution trace live in memory and reset on reload. API keys stay in the server's .env.local; the browser receives key availability, not key values.
 
-The browser sends the graph with each turn, and the server validates it before provider calls. Intermediate model outputs are bounded data for downstream stages. Chat has no separate workflow-run action.
+The browser sends the graph with each turn, and the server validates Start fields, any supplied values, and node bindings before provider calls. The browser's configured defaults support local testing; trusted production values must be mapped by the server or an API caller. Intermediate model outputs are bounded data for downstream stages. Chat has no separate workflow-run action.
 
 ## Validation
 

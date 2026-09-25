@@ -2,15 +2,11 @@ import type { RouteStreamEvent } from "../src/lib/routing.ts";
 
 type Emit = (event: RouteStreamEvent) => void;
 
-export function emitSystemTiming(
-	systemNodeId: "input" | undefined,
-	emit: Emit,
-) {
-	if (!systemNodeId) return;
-	// System instructions are static configuration; they have no remote execution.
+export function emitStartTiming(emit: Emit) {
+	// Start resolves local inputs; it has no remote execution.
 	emit({
 		type: "timing",
-		timing: { nodeId: systemNodeId, durationMs: 0, status: "completed" },
+		timing: { nodeId: "input", durationMs: 0, status: "completed" },
 	});
 }
 

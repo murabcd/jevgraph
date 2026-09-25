@@ -28,6 +28,7 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { StartVariableBinding } from "@/flow/start-variable-binding";
 import {
 	defaultJevQuestion,
 	type JevQuestion,
@@ -36,6 +37,7 @@ import {
 	jevQuestionTypes,
 	questionTypeLabels,
 } from "@/lib/jev-question";
+import type { StartField } from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
 type ChoiceQuestion = Extract<JevQuestion, { type: "choice" }>;
@@ -286,25 +288,32 @@ function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
 
 type Props = {
 	question: JevQuestion;
+	fields: StartField[];
+	variables: string[];
 	hasRepeat?: boolean;
 	maxRepeats: number;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSave: (question: JevQuestion) => void;
-	onRepeatLimitChange: (limit: number) => void;
+	onSave: (
+		question: JevQuestion,
+		variables: string[],
+		maxRepeats: number,
+	) => void;
 };
 
 export function JevQuestionEditor({
 	question,
+	fields,
+	variables,
 	hasRepeat,
 	maxRepeats,
 	open,
 	onOpenChange,
 	onSave,
-	onRepeatLimitChange,
 }: Props) {
 	const [draft, setDraft] = useState<JevQuestion>(question);
 	const [repeatDraft, setRepeatDraft] = useState(maxRepeats);
+	const [variablesDraft, setVariablesDraft] = useState(variables);
 	const [error, setError] = useState("");
 	const save = () => {
 		const parsed = jevQuestionSchema.safeParse(draft);
@@ -312,9 +321,7 @@ export function JevQuestionEditor({
 			setError(parsed.error.issues[0]?.message ?? "Check the question fields.");
 			return;
 		}
-		onSave(parsed.data);
-		if (hasRepeat && repeatDraft !== maxRepeats)
-			onRepeatLimitChange(repeatDraft);
+		onSave(parsed.data, variablesDraft, repeatDraft);
 		onOpenChange(false);
 	};
 	return (
@@ -328,7 +335,10 @@ export function JevQuestionEditor({
 				<SheetHeader>
 					<SheetTitle>Router</SheetTitle>
 				</SheetHeader>
-				<ScrollArea className="min-h-0 flex-1">
+				<ScrollArea
+					className="min-h-0 flex-1"
+					viewportClassName="scroll-fade-b"
+				>
 					<div className="flex flex-col gap-6 px-4 pb-4">
 						<Field>
 							<FieldLabel
@@ -386,6 +396,11 @@ export function JevQuestionEditor({
 								rows={2}
 							/>
 						</Field>
+						<StartVariableBinding
+							fields={fields}
+							selected={variablesDraft}
+							onChange={setVariablesDraft}
+						/>
 						{draft.type === "choice" && (
 							<ChoiceFields question={draft} onChange={setDraft} />
 						)}
@@ -434,7 +449,7 @@ export function JevQuestionEditor({
 					</div>
 				</ScrollArea>
 				<SheetFooter>
-					<Button onClick={save}>Save question</Button>
+					<Button onClick={save}>Save</Button>
 					<SheetClose render={<Button variant="outline" />}>Cancel</SheetClose>
 				</SheetFooter>
 			</SheetContent>

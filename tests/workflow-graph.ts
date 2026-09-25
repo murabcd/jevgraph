@@ -9,7 +9,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				id: "input",
 				type: "route",
 				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
+				data: { kind: "input", active: false, fields: [] },
 			},
 			{
 				id: "first-router",

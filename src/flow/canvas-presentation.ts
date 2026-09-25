@@ -72,7 +72,7 @@ export function useCanvasPresentation({
 		const stepLabels = nodeStepLabels(nodes, graphEdges);
 		const routeNodes = nodes.map((node) => ({
 			...node,
-			deletable: !running,
+			deletable: !running && node.data.kind !== "input",
 			data: {
 				...node.data,
 				hasRepeat: graphEdges.some(

@@ -45,6 +45,7 @@ function node(
 		data: {
 			kind,
 			active: false,
+			...(kind === "input" ? { fields: [] } : {}),
 			...(kind === "jev" ? { question: defaultJevQuestion() } : {}),
 			...(kind === "openai" ? { model: "gpt-5-mini" } : {}),
 			...(kind === "google" ? { model: "gemini-3.5-flash-lite" } : {}),
@@ -66,6 +67,61 @@ describe("editable chatflow graph", () => {
 			routesFromGraph(
 				graph.nodes,
 				graph.edges.filter((edge) => edge.id !== "second-no"),
+			),
+		).toBeNull();
+	});
+
+	test("persists configured Start fields and only declared node bindings", () => {
+		const nodes = [
+			{
+				...node("input", "input", 0),
+				data: {
+					kind: "input" as const,
+					active: false,
+					fields: [
+						{
+							name: "plan",
+							type: "string" as const,
+							required: false,
+							defaultValue: "free",
+						},
+					],
+				},
+			},
+			{
+				...node("model", "openai", 1),
+				data: {
+					kind: "openai" as const,
+					active: false,
+					model: "gpt-5-mini",
+					variables: ["plan"],
+				},
+			},
+		];
+		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
+		const routes = routesFromGraph(nodes, edges);
+		expect(routes?.nodes[0]).toEqual({
+			id: "input",
+			kind: "input",
+			fields: [
+				{ name: "plan", type: "string", required: false, defaultValue: "free" },
+			],
+		});
+		expect(routes?.nodes[1]).toMatchObject({
+			kind: "model",
+			variables: ["plan"],
+		});
+		saveGraph(nodes, edges);
+		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
+			routes,
+		);
+		expect(
+			routesFromGraph(
+				[
+					nodes[0],
+					{ ...nodes[1], data: { ...nodes[1].data, variables: ["unknown"] } },
+				],
+				edges,
 			),
 		).toBeNull();
 	});
@@ -170,21 +226,22 @@ describe("editable chatflow graph", () => {
 		).toBe("Write a draft");
 	});
 
-	test("keeps a direct chatflow when System is removed", () => {
+	test("keeps Start as the required chatflow entry", () => {
 		const nodes = [node("input", "input", 0), node("model", "openai", 1)];
 		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
-		const withSystem = routesFromGraph(nodes, edges);
-		expect(withSystem?.systemNodeId).toBe("input");
+		const withStart = routesFromGraph(nodes, edges);
+		expect(withStart?.nodes[0]?.kind).toBe("input");
 		const removed = removeGraphNode(nodes, edges, "input");
-		const withoutSystem = routesFromGraph(removed.nodes, removed.edges);
-		expect(withoutSystem?.systemNodeId).toBeUndefined();
-		expect(withoutSystem?.edges).toEqual([
-			{ id: "chat-entry-model", source: "input", target: "model" },
-		]);
-		expect(withoutSystem?.nodes[0]).toEqual({ id: "input", kind: "input" });
+		expect(removed).toEqual({ nodes, edges });
+		expect(
+			routesFromGraph(
+				nodes.filter((item) => item.id !== "input"),
+				[],
+			),
+		).toBeNull();
 	});
 
-	test("preserves every parallel chat entry when System is removed", () => {
+	test("Start can launch parallel branches", () => {
 		const nodes = [
 			node("input", "input", 0),
 			node("first", "openai", 1),
@@ -210,8 +267,7 @@ describe("editable chatflow graph", () => {
 			{ id: "yes", source: "join", sourceHandle: "fast", target: "final" },
 			{ id: "no", source: "join", sourceHandle: "deep", target: "final" },
 		];
-		const removed = removeGraphNode(nodes, edges, "input");
-		const routes = routesFromGraph(removed.nodes, removed.edges);
+		const routes = routesFromGraph(nodes, edges);
 		expect(
 			routes?.edges
 				.filter((edge) => edge.source === "input")
@@ -289,14 +345,24 @@ describe("editable chatflow graph", () => {
 		);
 	});
 
-	test("keeps an intentionally empty graph and rejects malformed persisted nodes", () => {
+	test("restores the initial graph when Start is missing and rejects malformed nodes", () => {
 		saveGraph([], []);
-		expect(readGraph()).toEqual({ nodes: [], edges: [] });
+		expect(readGraph().nodes.map((item) => item.id)).toEqual([
+			"input",
+			"jev",
+			"google",
+			"openai",
+		]);
+		expect(readGraph().edges).toHaveLength(3);
 		stored.set(
 			"router:graph:v2",
 			JSON.stringify({
 				nodes: [
-					{ id: "input", position: { x: 0, y: 0 }, data: { kind: "input" } },
+					{
+						id: "input",
+						position: { x: 0, y: 0 },
+						data: { kind: "input", fields: [] },
+					},
 					{
 						id: "model",
 						position: { x: 1, y: 0 },

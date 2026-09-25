@@ -1,3 +1,4 @@
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
 	Sheet,
 	SheetContent,
@@ -8,42 +9,49 @@ import type { FlowNode } from "@/flow/graph";
 import { JevQuestionEditor } from "@/flow/jev-question-editor";
 import { formatNodeDuration } from "@/flow/node-duration";
 import { PromptEditor } from "@/flow/prompt-editor";
+import { StartEditor } from "@/flow/start-editor";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
+import type { StartField } from "@/lib/routing";
 
 type EditorActions = Pick<
 	ReturnType<typeof useRoutingGraph>,
-	| "onModelChange"
-	| "onModelPromptChange"
-	| "onRepeatLimitChange"
-	| "onPromptChange"
-	| "onQuestionChange"
+	"onModelSettingsChange" | "onQuestionChange" | "onStartFieldsChange"
 >;
-export function RouteNodePanel({
-	id,
-	data,
-	title,
-	view,
-	onClose,
-	actions,
-}: {
+type PanelProps = {
 	id: string;
 	data: FlowNode["data"];
 	title: string;
 	view: "edit" | "inspect";
+	startFields: StartField[];
 	onClose: () => void;
 	actions: EditorActions;
-}) {
-	const close = (open: boolean) => {
-		if (!open) onClose();
-	};
-	if (view === "inspect") {
-		return (
-			<Sheet modal={false} disablePointerDismissal open onOpenChange={close}>
-				<SheetContent variant="floating">
-					<SheetHeader>
-						<SheetTitle>{title} · last turn</SheetTitle>
-					</SheetHeader>
-					<div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+};
+
+type EditProps = Omit<PanelProps, "view"> & {
+	onOpenChange: (open: boolean) => void;
+};
+
+function LastTurnPanel({
+	data,
+	title,
+	onOpenChange,
+}: Pick<EditProps, "data" | "title" | "onOpenChange">) {
+	return (
+		<Sheet
+			modal={false}
+			disablePointerDismissal
+			open
+			onOpenChange={onOpenChange}
+		>
+			<SheetContent variant="floating">
+				<SheetHeader>
+					<SheetTitle>{title} · last turn</SheetTitle>
+				</SheetHeader>
+				<ScrollArea
+					className="min-h-0 flex-1"
+					viewportClassName="scroll-fade-b"
+				>
+					<div className="px-4 pb-4">
 						{data.timing && (
 							<p className="mb-4 text-xs text-muted-foreground tabular-nums">
 								{data.timing.status === "failed" ? "Failed" : "Completed"} in{" "}
@@ -62,36 +70,84 @@ export function RouteNodePanel({
 							</pre>
 						)}
 					</div>
-				</SheetContent>
-			</Sheet>
-		);
-	}
-	if (data.kind === "jev") {
-		return (
-			<JevQuestionEditor
-				question={data.question}
-				hasRepeat={data.hasRepeat}
-				maxRepeats={data.maxRepeats ?? 3}
-				open
-				onOpenChange={close}
-				onSave={(question) => actions.onQuestionChange(id, question)}
-				onRepeatLimitChange={(limit) => actions.onRepeatLimitChange(id, limit)}
-			/>
-		);
-	}
+				</ScrollArea>
+			</SheetContent>
+		</Sheet>
+	);
+}
+
+function JevPanel({
+	id,
+	data,
+	startFields,
+	actions,
+	onOpenChange,
+}: EditProps & {
+	data: Extract<FlowNode["data"], { kind: "jev" }>;
+}) {
+	return (
+		<JevQuestionEditor
+			question={data.question}
+			fields={startFields}
+			variables={data.variables ?? []}
+			hasRepeat={data.hasRepeat}
+			maxRepeats={data.maxRepeats ?? 3}
+			open
+			onOpenChange={onOpenChange}
+			onSave={(question, variables, maxRepeats) =>
+				actions.onQuestionChange(id, question, variables, maxRepeats)
+			}
+		/>
+	);
+}
+
+function ModelPanel({
+	id,
+	data,
+	title,
+	startFields,
+	actions,
+	onOpenChange,
+}: EditProps & {
+	data: Extract<FlowNode["data"], { kind: "google" | "openai" }>;
+}) {
 	return (
 		<PromptEditor
 			value={data.prompt ?? ""}
 			open
-			onOpenChange={close}
-			onSave={(prompt) => {
-				if (data.kind === "input") actions.onPromptChange(prompt);
-				else actions.onModelPromptChange(id, prompt);
-			}}
-			modelId={data.kind === "input" ? undefined : data.model}
-			onModelChange={(model) => actions.onModelChange(id, model)}
+			onOpenChange={onOpenChange}
+			onSave={(settings) => actions.onModelSettingsChange(id, settings)}
+			modelId={data.model}
+			fields={startFields}
+			variables={data.variables ?? []}
 			title={title}
-			id={data.kind === "input" ? "system-prompt" : `model-prompt-${id}`}
+			id={`model-prompt-${id}`}
 		/>
+	);
+}
+
+export function RouteNodePanel(props: PanelProps) {
+	const onOpenChange = (open: boolean) => {
+		if (!open) props.onClose();
+	};
+	if (props.view === "inspect") {
+		return <LastTurnPanel {...props} onOpenChange={onOpenChange} />;
+	}
+	if (props.data.kind === "jev") {
+		return (
+			<JevPanel {...props} data={props.data} onOpenChange={onOpenChange} />
+		);
+	}
+	if (props.data.kind === "input") {
+		return (
+			<StartEditor
+				fields={props.data.fields}
+				onOpenChange={onOpenChange}
+				onSave={props.actions.onStartFieldsChange}
+			/>
+		);
+	}
+	return (
+		<ModelPanel {...props} data={props.data} onOpenChange={onOpenChange} />
 	);
 }

@@ -21,8 +21,9 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { StartVariableBinding } from "@/flow/start-variable-binding";
 import { textModels } from "@/lib/models";
-import { MAX_PROMPT_LENGTH } from "@/lib/routing";
+import { MAX_PROMPT_LENGTH, type StartField } from "@/lib/routing";
 
 function ModelOption({ model }: { model: (typeof textModels)[number] }) {
 	return (
@@ -41,11 +42,16 @@ type Props = {
 	value: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSave: (value: string) => void;
+	onSave: (settings: {
+		model: string;
+		prompt: string;
+		variables: string[];
+	}) => void;
 	title: string;
 	id: string;
-	modelId?: string;
-	onModelChange?: (modelId: string) => void;
+	modelId: string;
+	fields: StartField[];
+	variables: string[];
 };
 
 export function PromptEditor({
@@ -56,10 +62,12 @@ export function PromptEditor({
 	title,
 	id,
 	modelId,
-	onModelChange,
+	fields,
+	variables,
 }: Props) {
 	const [draft, setDraft] = useState(value);
-	const [draftModel, setDraftModel] = useState(modelId ?? "");
+	const [draftModel, setDraftModel] = useState(modelId);
+	const [variablesDraft, setVariablesDraft] = useState(variables);
 	return (
 		<Sheet
 			modal={false}
@@ -71,7 +79,10 @@ export function PromptEditor({
 				<SheetHeader>
 					<SheetTitle>{title}</SheetTitle>
 				</SheetHeader>
-				<ScrollArea className="min-h-0 flex-1">
+				<ScrollArea
+					className="min-h-0 flex-1"
+					viewportClassName="scroll-fade-b"
+				>
 					<FieldGroup className="px-4 pb-4">
 						{modelId && (
 							<Field>
@@ -123,20 +134,26 @@ export function PromptEditor({
 								</Select>
 							</Field>
 						)}
+						<StartVariableBinding
+							fields={fields}
+							selected={variablesDraft}
+							onChange={setVariablesDraft}
+						/>
 						<Field>
 							<FieldLabel
 								htmlFor={id}
 								className="text-xs text-muted-foreground"
 							>
-								Prompt
+								Instructions
 							</FieldLabel>
 							<Textarea
 								id={id}
-								className="min-h-[60dvh] max-h-[75dvh]"
-								placeholder="Write a prompt..."
+								className="min-h-[132px] max-h-52"
+								placeholder="Write instructions..."
 								maxLength={MAX_PROMPT_LENGTH}
 								value={draft}
 								onChange={(event) => setDraft(event.target.value)}
+								rows={2}
 								autoFocus
 							/>
 						</Field>
@@ -145,13 +162,15 @@ export function PromptEditor({
 				<SheetFooter>
 					<Button
 						onClick={() => {
-							onSave(draft);
-							if (modelId && draftModel !== modelId)
-								onModelChange?.(draftModel);
+							onSave({
+								model: draftModel,
+								prompt: draft,
+								variables: variablesDraft,
+							});
 							onOpenChange(false);
 						}}
 					>
-						{modelId ? "Save changes" : "Save prompt"}
+						Save
 					</Button>
 					<SheetClose render={<Button variant="outline" />}>Cancel</SheetClose>
 				</SheetFooter>
