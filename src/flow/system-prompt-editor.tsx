@@ -20,7 +20,7 @@ type Props = {
 	onSave: (value: string) => void;
 };
 
-export function InputPromptEditor({
+export function SystemPromptEditor({
 	value,
 	open,
 	onOpenChange,
@@ -31,19 +31,19 @@ export function InputPromptEditor({
 		<Sheet open={open} onOpenChange={onOpenChange}>
 			<SheetContent>
 				<SheetHeader>
-					<SheetTitle>Request</SheetTitle>
+					<SheetTitle>System</SheetTitle>
 				</SheetHeader>
 				<ScrollArea className="min-h-0 flex-1">
 					<FieldGroup className="px-4 pb-4">
 						<Field>
 							<FieldLabel
-								htmlFor="input-prompt"
+								htmlFor="system-prompt"
 								className="text-xs text-muted-foreground"
 							>
 								Prompt
 							</FieldLabel>
 							<Textarea
-								id="input-prompt"
+								id="system-prompt"
 								className="min-h-[60dvh] max-h-[75dvh]"
 								placeholder="Write a prompt..."
 								maxLength={MAX_REQUEST_PROMPT_LENGTH}

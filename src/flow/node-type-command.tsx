@@ -11,7 +11,7 @@ import {
 import type { CreatableNodeKind } from "@/flow/graph";
 
 const nodeTypes = {
-	input: { label: "Input", icon: MessageSquareText },
+	input: { label: "System", icon: MessageSquareText },
 	jev: { label: "Router", icon: GitFork },
 	model: { label: "Model", icon: Bot },
 } as const;

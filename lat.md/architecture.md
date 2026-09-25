@@ -6,7 +6,7 @@ Router is a local Vite and React app. Its server API classifies each message and
 
 These files own the principal runtime and UI contracts.
 
-- [server/api.ts](../server/api.ts) owns `/api/route` and `/api/status`, direct provider calls, and the server-only API keys.
+- [server/api.ts](../server/api.ts) owns `/api/route` and `/api/status`, direct provider calls, and the server-only API keys. [server/workflow.ts](../server/workflow.ts) traverses connected Jev questions; [server/model-failover.ts](../server/model-failover.ts) limits a connected backup model to one attempt.
 - [src/lib/routing.ts](../src/lib/routing.ts) owns routing request schemas and branch selection.
 - [src/flow/graph.ts](../src/flow/graph.ts) owns graph shape, connection rules, and graph persistence.
 - [src/chat/use-route-chat.ts](../src/chat/use-route-chat.ts) owns the in-memory conversation and request lifecycle.
@@ -17,7 +17,7 @@ These files own the principal runtime and UI contracts.
 
 The canvas graph and theme live in browser local storage. Chat state lives only in memory.
 
-The graph includes model connections, node positions, and the Input node's reusable prompt. Canvas pan and zoom persist separately. Chat state includes messages and the current draft. API keys belong in `.env.local` on the server and never enter the browser bundle.
+The graph includes Jev and model connections, node positions, and the optional System node's reusable prompt. Canvas pan and zoom persist separately. Chat state includes messages and the current draft. API keys belong in `.env.local` on the server and never enter the browser bundle.
 
 ## Validation
 

@@ -62,6 +62,11 @@ function RouteBadge({ message }: { message: ChatTurn }) {
 			>
 				{providerName(message.route.provider)} · {message.route.model}
 			</Badge>
+			{message.route.classificationError && (
+				<Badge variant="destructive" title={message.route.classificationError}>
+					Jev fallback
+				</Badge>
+			)}
 		</MessageFooter>
 	);
 }

@@ -30,7 +30,12 @@ import {
 	PopoverHeader,
 	PopoverTitle,
 } from "@/components/ui/popover";
-import type { KeyStatus, Routes } from "@/lib/routing";
+import {
+	type KeyStatus,
+	type Routes,
+	routesUseJev,
+	routeTargets,
+} from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
 export type ChatPanelProps = {
@@ -56,14 +61,11 @@ function KeyStatusNotice({
 	unavailable: boolean;
 	routes: Routes | null;
 }) {
-	const targets = routes
-		? routes.kind === "direct"
-			? [routes.target]
-			: Object.values(routes.targets)
-		: [];
+	const targets = routes ? routeTargets(routes) : [];
+	const usesJev = routes ? routesUseJev(routes) : false;
 	const missing = status
 		? [
-				routes?.kind === "jev" && !status.jev && "Jev",
+				usesJev && !status.jev && "Jev",
 				targets.some((target) => target.provider === "openai") &&
 					!status.openai &&
 					"OpenAI",
@@ -198,7 +200,7 @@ export function ChatPanel({
 								</EmptyMedia>
 								<EmptyTitle>Ask anything</EmptyTitle>
 								<EmptyDescription>
-									{routes?.kind === "direct"
+									{routes && !routesUseJev(routes)
 										? "Start a conversation with the connected model."
 										: "Start a conversation. Jev chooses a model for every message."}
 								</EmptyDescription>

@@ -10,7 +10,9 @@ import {
 	defaultConfig,
 	type JevRoutes,
 	MAX_REQUEST_PROMPT_LENGTH,
+	type NodeTiming,
 	type Routes,
+	routesSchema,
 } from "@/lib/routing";
 
 export type NodeKind = "input" | "jev" | "google" | "openai";
@@ -22,12 +24,14 @@ export type FlowNode = Node<
 		model?: string;
 		question?: JevQuestion;
 		prompt?: string;
+		entry?: boolean;
 		decision?: string;
 		usedBranch?: string;
 		step?: string;
+		timing?: NodeTiming;
 		onModelChange?: (nodeId: string, model: string) => void;
 		onPromptChange?: (prompt: string) => void;
-		onQuestionChange?: (question: JevQuestion) => void;
+		onQuestionChange?: (nodeId: string, question: JevQuestion) => void;
 		onDuplicateNode?: (nodeId: string) => void;
 		onRemoveNode?: (nodeId: string) => void;
 		editingDisabled?: boolean;
@@ -92,9 +96,21 @@ const persistedNodeSchema = z.object({
 			kind: z.literal("input"),
 			prompt: z.string().max(MAX_REQUEST_PROMPT_LENGTH).optional(),
 		}),
-		z.object({ kind: z.literal("jev"), question: jevQuestionSchema }),
-		z.object({ kind: z.literal("google"), model: z.string().optional() }),
-		z.object({ kind: z.literal("openai"), model: z.string().optional() }),
+		z.object({
+			kind: z.literal("jev"),
+			question: jevQuestionSchema,
+			entry: z.boolean().optional(),
+		}),
+		z.object({
+			kind: z.literal("google"),
+			model: z.string().optional(),
+			entry: z.boolean().optional(),
+		}),
+		z.object({
+			kind: z.literal("openai"),
+			model: z.string().optional(),
+			entry: z.boolean().optional(),
+		}),
 	]),
 });
 
@@ -108,10 +124,24 @@ const persistedEdgeSchema = z.object({
 export function canConnectNodes(
 	connection: { source: string; sourceHandle?: string | null; target: string },
 	nodes: FlowNode[],
+	edges: Edge[] = [],
 ) {
 	const source = nodes.find((node) => node.id === connection.source);
 	const target = nodes.find((node) => node.id === connection.target);
 	if (!source || !target || source.id === target.id) return false;
+	const visited = new Set<string>();
+	const stack = [target.id];
+	while (stack.length > 0) {
+		const current = stack.pop();
+		if (!current || visited.has(current)) continue;
+		if (current === source.id) return false;
+		visited.add(current);
+		stack.push(
+			...edges
+				.filter((edge) => edge.source === current)
+				.map((edge) => edge.target),
+		);
+	}
 	if (source.data.kind === "input") {
 		return (
 			target.data.kind === "jev" ||
@@ -119,15 +149,20 @@ export function canConnectNodes(
 			target.data.kind === "openai"
 		);
 	}
-	return (
-		source.data.kind === "jev" &&
-		Boolean(
+	const targetIsModel =
+		target.data.kind === "google" || target.data.kind === "openai";
+	if (source.data.kind === "jev")
+		return Boolean(
 			source.data.question &&
 				questionOutputs(source.data.question).some(
 					(output) => output.id === connection.sourceHandle,
-				),
-		) &&
-		(target.data.kind === "google" || target.data.kind === "openai")
+				) &&
+				(targetIsModel || target.data.kind === "jev"),
+		);
+	return (
+		targetIsModel &&
+		connection.sourceHandle === "fallback" &&
+		!edges.some((edge) => edge.source === target.id)
 	);
 }
 
@@ -184,6 +219,7 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 				data: {
 					kind: node.data.kind,
 					...(node.data.kind === "input" ? { prompt: node.data.prompt } : {}),
+					...(node.data.entry ? { entry: true } : {}),
 					model: node.data.model,
 					question: node.data.question,
 				},
@@ -197,6 +233,42 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 			})),
 		}),
 	);
+}
+
+export function removeGraphNode(
+	nodes: FlowNode[],
+	edges: Edge[],
+	nodeId: string,
+) {
+	const nextEntry =
+		nodeId === "input"
+			? edges.find((edge) => edge.source === nodeId)?.target
+			: undefined;
+	return {
+		nodes: nodes
+			.filter((node) => node.id !== nodeId)
+			.map((node) =>
+				nextEntry
+					? { ...node, data: { ...node.data, entry: node.id === nextEntry } }
+					: node,
+			),
+		edges: edges.filter(
+			(edge) => edge.source !== nodeId && edge.target !== nodeId,
+		),
+	};
+}
+
+function graphEntryNode(nodes: FlowNode[], edges: Edge[]) {
+	const system = nodes.find(
+		(node) => node.id === "input" && node.data.kind === "input",
+	);
+	if (system) return system;
+	const explicit = nodes.filter((node) => node.data.entry);
+	if (explicit.length === 1) return explicit[0];
+	if (explicit.length > 1) return null;
+	const targets = new Set(edges.map((edge) => edge.target));
+	const roots = nodes.filter((node) => !targets.has(node.id));
+	return roots.length === 1 ? roots[0] : null;
 }
 
 export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
@@ -220,17 +292,18 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 		for (const target of targetsBySource.get(id) ?? []) visit(target);
 	}
 
-	visit("input");
+	const entry = graphEntryNode(nodes, edges);
+	if (entry) visit(entry.id);
 	for (const node of nodes) visit(node.id);
 
 	return new Map(
 		ordered.map((node, index) => {
 			const type =
 				node.data.kind === "input"
-					? "INPUT"
+					? "SYSTEM"
 					: node.data.kind === "jev"
 						? "ROUTER"
-						: connectedTargets.has(node.id)
+						: connectedTargets.has(node.id) || entry?.id === node.id
 							? "OUTPUT"
 							: "MODEL";
 			return [node.id, `${String(index + 1).padStart(2, "0")} / ${type}`];
@@ -242,10 +315,24 @@ export function routesFromGraph(
 	nodes: FlowNode[],
 	edges: Edge[],
 ): Routes | null {
-	if (!nodes.some((node) => node.id === "input" && node.data.kind === "input"))
-		return null;
+	const entry = graphEntryNode(nodes, edges);
+	if (!entry) return null;
+	const systemNodeId =
+		entry.data.kind === "input" ? ("input" as const) : undefined;
 	const inputEdges = edges.filter((edge) => edge.source === "input");
-	if (inputEdges.length !== 1) return null;
+	if (entry.data.kind === "input" && inputEdges.length !== 1) return null;
+	const firstTarget =
+		entry.data.kind === "input" ? inputEdges[0].target : entry.id;
+	const reachable = new Set<string>();
+	const visit = (id: string) => {
+		if (reachable.has(id)) return;
+		reachable.add(id);
+		for (const edge of edges.filter((entry) => entry.source === id))
+			visit(edge.target);
+	};
+	visit(entry.id);
+	const relevantNodes = nodes.filter((node) => reachable.has(node.id));
+	const relevantEdges = edges.filter((edge) => reachable.has(edge.source));
 	const targetFor = (nodeId: string | undefined) => {
 		const node = nodes.find((entry) => entry.id === nodeId);
 		if (
@@ -260,24 +347,75 @@ export function routesFromGraph(
 			model: node.data.model,
 		};
 	};
-	if (inputEdges[0].target !== "jev") {
-		const target = targetFor(inputEdges[0].target);
-		return target ? { kind: "direct", target } : null;
+	const jevNodes = relevantNodes.filter((node) => node.data.kind === "jev");
+	const hasFallback = relevantEdges.some(
+		(edge) => edge.sourceHandle === "fallback",
+	);
+	if (jevNodes.length > 1 || hasFallback) {
+		const workflow = {
+			kind: "workflow" as const,
+			...(systemNodeId ? { systemNodeId } : {}),
+			nodes: [
+				...(entry.data.kind === "input"
+					? []
+					: [{ id: "input", kind: "input" as const }]),
+				...relevantNodes.map((node) => {
+					if (node.data.kind === "input")
+						return { id: node.id, kind: "input" as const };
+					if (node.data.kind === "jev")
+						return {
+							id: node.id,
+							kind: "jev" as const,
+							question: node.data.question,
+						};
+					return {
+						id: node.id,
+						kind: "model" as const,
+						provider: node.data.kind,
+						model: node.data.model,
+					};
+				}),
+			],
+			edges: [
+				...(entry.data.kind === "input"
+					? []
+					: [{ source: "input", target: entry.id }]),
+				...relevantEdges.map((edge) => ({
+					source: edge.source,
+					...(edge.sourceHandle ? { sourceHandle: edge.sourceHandle } : {}),
+					target: edge.target,
+				})),
+			],
+		};
+		const parsed = routesSchema.safeParse(workflow);
+		return parsed.success ? parsed.data : null;
 	}
-	const question = nodes.find(
-		(node) => node.id === "jev" && node.data.kind === "jev",
-	)?.data.question;
+	if (jevNodes.length === 0) {
+		const target = targetFor(firstTarget);
+		return target
+			? { kind: "direct", ...(systemNodeId ? { systemNodeId } : {}), target }
+			: null;
+	}
+	const jevId = jevNodes[0].id;
+	if (firstTarget !== jevId) return null;
+	const question = jevNodes[0].data.question;
 	if (!question) return null;
 	const targets: JevRoutes["targets"] = {};
 	for (const output of questionOutputs(question)) {
 		const edge = edges.find(
-			(entry) => entry.source === "jev" && entry.sourceHandle === output.id,
+			(entry) => entry.source === jevId && entry.sourceHandle === output.id,
 		);
 		const target = targetFor(edge?.target);
 		if (!target) return null;
 		targets[output.id] = target;
 	}
-	return { kind: "jev", question, targets };
+	return {
+		kind: "jev",
+		nodeId: jevId,
+		...(systemNodeId ? { systemNodeId } : {}),
+		question,
+		targets,
+	};
 }
 
 type OutputTier = "low" | "high";
@@ -299,11 +437,12 @@ export function remapQuestionEdges(
 	previousQuestion: JevQuestion,
 	nextQuestion: JevQuestion,
 	edges: Edge[],
+	sourceId = "jev",
 ): Edge[] {
 	const previousOutputs = questionOutputs(previousQuestion);
 	const nextOutputs = questionOutputs(nextQuestion);
-	const otherEdges = edges.filter((edge) => edge.source !== "jev");
-	const oldBranchEdges = edges.filter((edge) => edge.source === "jev");
+	const otherEdges = edges.filter((edge) => edge.source !== sourceId);
+	const oldBranchEdges = edges.filter((edge) => edge.source === sourceId);
 	const branchEdges = nextOutputs.flatMap((output) => {
 		const previousId =
 			previousQuestion.type === nextQuestion.type
@@ -320,7 +459,7 @@ export function remapQuestionEdges(
 			? [
 					{
 						...previous,
-						id: `jev-${output.id}-${previous.target}`,
+						id: `${sourceId}-${output.id}-${previous.target}`,
 						sourceHandle: output.id,
 					},
 				]

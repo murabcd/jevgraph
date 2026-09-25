@@ -56,11 +56,12 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { CreatableNodeKind, FlowNode, NodeKind } from "@/flow/graph";
-import { InputPromptEditor } from "@/flow/input-prompt-editor";
 import { JevQuestionEditor } from "@/flow/jev-question-editor";
 import { JevQuestionPicker } from "@/flow/jev-question-picker";
 import { ModelPicker } from "@/flow/model-picker";
+import { formatNodeDuration } from "@/flow/node-duration";
 import { NodeTypeCommand } from "@/flow/node-type-command";
+import { SystemPromptEditor } from "@/flow/system-prompt-editor";
 import {
 	defaultJevQuestion,
 	questionOutputs,
@@ -70,7 +71,7 @@ import { cn } from "@/lib/utils";
 
 const nodeMeta = {
 	input: {
-		title: "Request",
+		title: "System",
 		subtitle: "Reusable instructions",
 		footerLabel: "PROMPT",
 	},
@@ -125,7 +126,7 @@ function RouteNodeToolbar({
 			className="nodrag nopan flex items-center gap-1 rounded-full border border-border bg-background p-1.5 shadow-sm"
 		>
 			{data.kind === "input" && editOpen && (
-				<InputPromptEditor
+				<SystemPromptEditor
 					value={data.prompt ?? ""}
 					open={editOpen}
 					onOpenChange={setEditOpen}
@@ -137,7 +138,7 @@ function RouteNodeToolbar({
 					question={data.question}
 					open={editOpen}
 					onOpenChange={setEditOpen}
-					onSave={(question) => data.onQuestionChange?.(question)}
+					onSave={(question) => data.onQuestionChange?.(id, question)}
 				/>
 			)}
 			{isModel && (
@@ -150,7 +151,7 @@ function RouteNodeToolbar({
 			{data.kind === "jev" && data.question && (
 				<JevQuestionPicker
 					question={data.question}
-					onChange={data.onQuestionChange}
+					onChange={(question) => data.onQuestionChange?.(id, question)}
 				/>
 			)}
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -286,6 +287,19 @@ function RouteNodeHandles({
 					position={Position.Right}
 				/>
 			)}
+			{(data.kind === "google" || data.kind === "openai") && (
+				<Handle
+					className={cn(
+						"route-handle",
+						(selected || data.usedBranch === "fallback") &&
+							"route-handle--accent",
+					)}
+					type="source"
+					id="fallback"
+					position={Position.Right}
+					title="Connect a backup model for failures before text starts"
+				/>
+			)}
 		</>
 	);
 }
@@ -333,6 +347,7 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 	const outputIds = outputs.map(({ id }) => id).join("|");
 	const { title, subtitle, footerLabel } = nodeMeta[data.kind];
 	const footerValue = nodeFooterValue(data);
+	const timing = data.timing;
 	useEffect(() => {
 		if (outputIds) updateNodeInternals(id);
 	}, [outputIds, id, updateNodeInternals]);
@@ -347,16 +362,31 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 		>
 			<RouteNodeToolbar id={id} data={data} selected={selected} title={title} />
 			<div className="route-node__eyebrow">
-				<Badge
-					variant="outline"
-					className="bg-background text-[10px] tracking-wider"
-				>
-					{data.step}
-				</Badge>
-				{data.active && (
-					<Badge variant="secondary" className="text-[10px]">
-						On path
+				<div className="flex items-center gap-1">
+					<Badge
+						variant="outline"
+						className="bg-background text-[10px] tracking-wider"
+					>
+						{data.step}
 					</Badge>
+					{data.active && (
+						<Badge variant="secondary" className="text-[10px]">
+							On path
+						</Badge>
+					)}
+				</div>
+				{timing && (
+					<span
+						className={cn(
+							"font-mono text-[10px] tabular-nums",
+							timing.status === "failed"
+								? "text-destructive"
+								: "text-muted-foreground",
+						)}
+						title={`${timing.status === "failed" ? "Failed" : "Completed"} in ${formatNodeDuration(timing.durationMs)}`}
+					>
+						{formatNodeDuration(timing.durationMs)}
+					</span>
 				)}
 			</div>
 

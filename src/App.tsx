@@ -47,6 +47,11 @@ function App() {
 		graph.onRemoveNode(nodeId);
 		chat.clearResultForNode(nodeId);
 	};
+	const removeNodes = (nodeIds: string[]) => {
+		if (chat.running) return;
+		graph.onRemoveNodes(nodeIds);
+		for (const nodeId of nodeIds) chat.clearResultForNode(nodeId);
+	};
 
 	return (
 		<main className="studio">
@@ -54,11 +59,12 @@ function App() {
 				<RoutingCanvas
 					graph={graph}
 					result={chat.result}
+					timings={chat.nodeTimings}
 					running={chat.running}
 					chatOpen={chatOpen}
 					onDuplicateNode={duplicateNode}
 					onRemoveNode={removeNode}
-					onNodesDeleted={chat.clearResultForNode}
+					onNodesDeleted={removeNodes}
 				/>
 				{chatOpen && (
 					<ChatPanel

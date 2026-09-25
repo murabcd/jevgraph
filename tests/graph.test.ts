@@ -6,6 +6,7 @@ import {
 	nodeStepLabels,
 	readGraph,
 	remapQuestionEdges,
+	removeGraphNode,
 	routesFromGraph,
 	saveGraph,
 } from "../src/flow/graph";
@@ -14,6 +15,8 @@ import {
 	type JevQuestionType,
 	questionOutputs,
 } from "../src/lib/jev-question";
+import { routesUseJev } from "../src/lib/routing";
+import { connectedWorkflowGraph } from "./workflow-graph";
 
 const stored = new Map<string, string>();
 const previousStorage = Object.getOwnPropertyDescriptor(
@@ -41,6 +44,75 @@ function jevRoutes(nodes: FlowNode[], edges: Edge[]) {
 }
 
 describe("editable routing graph", () => {
+	test("compiles and persists connected Jev routers with an explicit model fallback", () => {
+		const example = connectedWorkflowGraph();
+		const routes = routesFromGraph(example.nodes, example.edges);
+		expect(routes?.kind).toBe("workflow");
+		if (routes?.kind !== "workflow") throw new Error("Expected workflow route");
+		expect(routes.nodes.filter((node) => node.kind === "jev")).toHaveLength(2);
+		expect(
+			canConnectNodes(
+				{
+					source: "first-router",
+					sourceHandle: "no",
+					target: "second-router",
+				},
+				example.nodes,
+			),
+		).toBe(true);
+		expect(
+			canConnectNodes(
+				{
+					source: "primary-model",
+					sourceHandle: "fallback",
+					target: "backup-model",
+				},
+				example.nodes,
+			),
+		).toBe(true);
+		expect(
+			canConnectNodes(
+				{
+					source: "second-router",
+					sourceHandle: "no",
+					target: "first-router",
+				},
+				example.nodes,
+				example.edges,
+			),
+		).toBe(false);
+		expect(
+			canConnectNodes(
+				{
+					source: "backup-model",
+					sourceHandle: "fallback",
+					target: "primary-model",
+				},
+				example.nodes,
+				example.edges,
+			),
+		).toBe(false);
+		saveGraph(example.nodes, example.edges);
+		const saved = readGraph();
+		expect(routesFromGraph(saved.nodes, saved.edges)).toEqual(routes);
+		expect(
+			routesFromGraph(
+				example.nodes,
+				example.edges.filter((edge) => edge.id !== "second-no"),
+			),
+		).toBeNull();
+		expect(
+			routesFromGraph(example.nodes, [
+				...example.edges,
+				{
+					id: "cycle",
+					source: "second-router",
+					sourceHandle: "no",
+					target: "first-router",
+				},
+			]),
+		).toBeNull();
+	});
 	test("only connects an existing source output to a compatible target", () => {
 		const nodes: FlowNode[] = [
 			{
@@ -93,7 +165,7 @@ describe("editable routing graph", () => {
 		expect(readGraph()).toEqual({ nodes: [], edges: [] });
 	});
 
-	test("persists the Request node prompt across graph reloads", () => {
+	test("persists the System node prompt across graph reloads", () => {
 		const prompt = "Answer every message in one sentence.";
 		saveGraph(
 			[
@@ -138,7 +210,7 @@ describe("editable routing graph", () => {
 		expect(routesFromGraph(graph.nodes, graph.edges)?.kind).toBe("direct");
 	});
 
-	test("requires Input to connect to Jev before chat can run", () => {
+	test("routes through Jev after removing the optional System node", () => {
 		const nodes: FlowNode[] = [
 			{
 				id: "input",
@@ -170,18 +242,41 @@ describe("editable routing graph", () => {
 			{ id: "deep-edge", source: "jev", sourceHandle: "deep", target: "deep" },
 		];
 		expect(routesFromGraph(nodes, branches)).toBeNull();
+		const withoutSystem = removeGraphNode(
+			nodes,
+			[{ id: "input-edge", source: "input", target: "jev" }, ...branches],
+			"input",
+		);
 		expect(
-			routesFromGraph(nodes.slice(1), [
-				{ id: "input-edge", source: "input", target: "jev" },
-				...branches,
-			]),
-		).toBeNull();
+			jevRoutes(withoutSystem.nodes, withoutSystem.edges).targets.fast.nodeId,
+		).toBe("fast");
+		expect(
+			withoutSystem.nodes.find((node) => node.id === "jev")?.data.entry,
+		).toBe(true);
+		saveGraph(withoutSystem.nodes, withoutSystem.edges);
+		const restored = readGraph();
+		expect(jevRoutes(restored.nodes, restored.edges).targets.deep.nodeId).toBe(
+			"deep",
+		);
 		expect(
 			jevRoutes(nodes, [
 				{ id: "input-edge", source: "input", target: "jev" },
 				...branches,
 			]).targets.fast.nodeId,
 		).toBe("fast");
+		const renamedNodes = withoutSystem.nodes.map((node) =>
+			node.id === "jev" ? { ...node, id: "router-a" } : node,
+		);
+		const renamedEdges = withoutSystem.edges.map((edge) => ({
+			...edge,
+			source: edge.source === "jev" ? "router-a" : edge.source,
+			target: edge.target === "jev" ? "router-a" : edge.target,
+		}));
+		const renamed = jevRoutes(renamedNodes, renamedEdges);
+		expect(renamed.nodeId).toBe("router-a");
+		expect(renamed.targets).toEqual(
+			jevRoutes(withoutSystem.nodes, withoutSystem.edges).targets,
+		);
 	});
 
 	test("requires every configured Choice output to have a model connection", () => {
@@ -356,7 +451,7 @@ describe("editable routing graph", () => {
 		]);
 	});
 
-	test("connects Input directly to a selected model without Jev", () => {
+	test("connects System directly to a selected model without Jev", () => {
 		const nodes: FlowNode[] = [
 			{
 				id: "input",
@@ -376,6 +471,7 @@ describe("editable routing graph", () => {
 		];
 		expect(routesFromGraph(nodes, edges)).toEqual({
 			kind: "direct",
+			systemNodeId: "input",
 			target: {
 				nodeId: "selected-model",
 				provider: "openai",
@@ -390,6 +486,55 @@ describe("editable routing graph", () => {
 		expect(routesFromGraph(saved.nodes, saved.edges)).toEqual(
 			routesFromGraph(nodes, edges),
 		);
+		const withoutSystem = removeGraphNode(nodes, edges, "input");
+		expect(routesFromGraph(withoutSystem.nodes, withoutSystem.edges)).toEqual({
+			kind: "direct",
+			target: {
+				nodeId: "selected-model",
+				provider: "openai",
+				model: "gpt-4.1",
+			},
+		});
+		expect(
+			nodeStepLabels(withoutSystem.nodes, withoutSystem.edges).get(
+				"selected-model",
+			),
+		).toBe("01 / OUTPUT");
+	});
+
+	test("a model-only fallback does not require Jev", () => {
+		const nodes: FlowNode[] = [
+			{
+				id: "input",
+				type: "route",
+				position: { x: 0, y: 0 },
+				data: { kind: "input", active: false },
+			},
+			{
+				id: "primary",
+				type: "route",
+				position: { x: 1, y: 0 },
+				data: { kind: "openai", active: false, model: "gpt-5-mini" },
+			},
+			{
+				id: "backup",
+				type: "route",
+				position: { x: 2, y: 0 },
+				data: { kind: "google", active: false, model: "gemini-3.5-flash-lite" },
+			},
+		];
+		const routes = routesFromGraph(nodes, [
+			{ id: "input-primary", source: "input", target: "primary" },
+			{
+				id: "primary-backup",
+				source: "primary",
+				sourceHandle: "fallback",
+				target: "backup",
+			},
+		]);
+		expect(routes?.kind).toBe("workflow");
+		if (!routes) throw new Error("Expected model-only workflow");
+		expect(routesUseJev(routes)).toBe(false);
 	});
 
 	test("numbers routing outputs uniquely even when node storage order differs", () => {
@@ -425,7 +570,7 @@ describe("editable routing graph", () => {
 			{ id: "jev-high", source: "jev", sourceHandle: "deep", target: "high" },
 		];
 		expect([...nodeStepLabels(nodes, edges)]).toEqual([
-			["input", "01 / INPUT"],
+			["input", "01 / SYSTEM"],
 			["jev", "02 / ROUTER"],
 			["low", "03 / OUTPUT"],
 			["high", "04 / OUTPUT"],

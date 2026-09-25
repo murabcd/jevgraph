@@ -16,6 +16,7 @@ import {
 	openPosition,
 	readGraph,
 	remapQuestionEdges,
+	removeGraphNode,
 	routesFromGraph,
 	saveGraph,
 } from "@/flow/graph";
@@ -28,7 +29,8 @@ import { providerForModel } from "@/lib/models";
 import { defaultConfig } from "@/lib/routing";
 
 type PendingConnection = {
-	source: "input" | "jev";
+	source: string;
+	sourceKind: "input" | "jev" | "model";
 	branch?: string;
 	position: { x: number; y: number };
 	measured?: { width: number; height: number };
@@ -45,14 +47,9 @@ export function useRoutingGraph() {
 	);
 	const [pendingConnection, setPendingConnection] =
 		useState<PendingConnection | null>(null);
-	const question = nodes.find((node) => node.id === "jev")?.data.question;
 	const requestPrompt =
 		nodes.find((node) => node.id === "input" && node.data.kind === "input")
 			?.data.prompt ?? "";
-	const outputs = useMemo(
-		() => (question ? questionOutputs(question) : []),
-		[question],
-	);
 	useEffect(() => {
 		saveGraph(nodes, graphEdges);
 	}, [nodes, graphEdges]);
@@ -86,19 +83,19 @@ export function useRoutingGraph() {
 	);
 
 	const onQuestionChange = useCallback(
-		(nextQuestion: JevQuestion) => {
-			const currentQuestion = nodes.find((node) => node.id === "jev")?.data
+		(nodeId: string, nextQuestion: JevQuestion) => {
+			const currentQuestion = nodes.find((node) => node.id === nodeId)?.data
 				.question;
 			if (!currentQuestion) return;
 			setNodes((current) =>
 				current.map((node) =>
-					node.id === "jev"
+					node.id === nodeId
 						? { ...node, data: { ...node.data, question: nextQuestion } }
 						: node,
 				),
 			);
 			setGraphEdges((current) =>
-				remapQuestionEdges(currentQuestion, nextQuestion, current),
+				remapQuestionEdges(currentQuestion, nextQuestion, current, nodeId),
 			);
 			setPendingConnection(null);
 		},
@@ -134,28 +131,32 @@ export function useRoutingGraph() {
 		[setNodes],
 	);
 
-	const onRemoveNode = useCallback(
-		(nodeId: string) => {
-			setNodes((current) => current.filter((node) => node.id !== nodeId));
-			setGraphEdges((current) =>
-				current.filter(
-					(edge) => edge.source !== nodeId && edge.target !== nodeId,
-				),
+	const onRemoveNodes = useCallback(
+		(nodeIds: string[]) => {
+			const next = nodeIds.reduce(
+				(graph, nodeId) => removeGraphNode(graph.nodes, graph.edges, nodeId),
+				{ nodes, edges: graphEdges },
 			);
+			setNodes(next.nodes);
+			setGraphEdges(next.edges);
 		},
-		[setNodes, setGraphEdges],
+		[nodes, graphEdges, setNodes, setGraphEdges],
+	);
+	const onRemoveNode = useCallback(
+		(nodeId: string) => onRemoveNodes([nodeId]),
+		[onRemoveNodes],
 	);
 
 	const createNode = useCallback(
 		(kind: CreatableNodeKind, position: { x: number; y: number }) => {
-			const id =
-				kind === "input"
-					? "input"
-					: kind === "jev"
-						? "jev"
-						: crypto.randomUUID();
 			const nodeKind = kind === "model" ? "openai" : kind;
 			setNodes((current) => {
+				const id =
+					kind === "input"
+						? "input"
+						: kind === "jev" && !current.some((node) => node.id === "jev")
+							? "jev"
+							: crypto.randomUUID();
 				if (current.some((node) => node.id === id)) return current;
 				return [
 					...current.map((node) => ({ ...node, selected: false })),
@@ -167,6 +168,9 @@ export function useRoutingGraph() {
 						data: {
 							kind: nodeKind,
 							active: false,
+							...(current.length === 0 && kind !== "input"
+								? { entry: true }
+								: {}),
 							...(kind === "model" ? { model: defaultConfig.openaiModel } : {}),
 							...(kind === "jev" ? { question: defaultJevQuestion() } : {}),
 						},
@@ -183,46 +187,36 @@ export function useRoutingGraph() {
 	);
 
 	const replaceBranch = useCallback(
-		(branch: string, targetId: string, createdNode?: FlowNode) => {
-			const previousTarget = graphEdges.find(
-				(edge) => edge.source === "jev" && edge.sourceHandle === branch,
-			)?.target;
-			const orphanedTarget =
-				previousTarget &&
-				previousTarget !== targetId &&
-				!graphEdges.some(
-					(edge) =>
-						edge.target === previousTarget && edge.sourceHandle !== branch,
-				)
-					? previousTarget
-					: undefined;
-			if (orphanedTarget || createdNode) {
+		(
+			source: string,
+			branch: string,
+			targetId: string,
+			createdNode?: FlowNode,
+		) => {
+			if (createdNode)
 				setNodes((current) => [
-					...current
-						.filter((node) => node.id !== orphanedTarget)
-						.map((node) => (createdNode ? { ...node, selected: false } : node)),
-					...(createdNode ? [createdNode] : []),
+					...current.map((node) => ({ ...node, selected: false })),
+					createdNode,
 				]);
-			}
 			setGraphEdges((current) => [
 				...current.filter(
-					(edge) => !(edge.source === "jev" && edge.sourceHandle === branch),
+					(edge) => !(edge.source === source && edge.sourceHandle === branch),
 				),
 				{
-					id: `jev-${branch}-${targetId}`,
-					source: "jev",
+					id: `${source}-${branch}-${targetId}`,
+					source,
 					sourceHandle: branch,
 					target: targetId,
 					type: "default",
 				},
 			]);
 		},
-		[graphEdges, setNodes, setGraphEdges],
+		[setNodes, setGraphEdges],
 	);
 
 	const connect = useCallback(
 		(connection: Connection) => {
-			if (!canConnectNodes(connection, nodes)) return;
+			if (!canConnectNodes(connection, nodes, graphEdges)) return;
 			if (connection.source === "input") {
 				setPendingConnection(null);
 				setGraphEdges((current) => [
@@ -239,19 +233,31 @@ export function useRoutingGraph() {
 			const branch = connection.sourceHandle;
 			if (!branch) return;
 			setPendingConnection(null);
-			replaceBranch(branch, connection.target);
+			replaceBranch(connection.source, branch, connection.target);
 		},
-		[nodes, replaceBranch, setGraphEdges],
+		[nodes, graphEdges, replaceBranch, setGraphEdges],
 	);
 
 	const connectEnd = useCallback<OnConnectEnd>(
 		(event, state) => {
 			if (state.isValid || state.toNode) return;
 			const source = state.fromNode?.id;
-			if (source !== "input" && source !== "jev") return;
+			const sourceNode = nodes.find((node) => node.id === source);
+			if (!source || !sourceNode) return;
+			const sourceKind =
+				sourceNode.data.kind === "openai" || sourceNode.data.kind === "google"
+					? "model"
+					: sourceNode.data.kind;
 			const branch = state.fromHandle?.id;
-			if (source === "jev" && !outputs.some((output) => output.id === branch))
+			if (
+				sourceKind === "jev" &&
+				(!sourceNode.data.question ||
+					!questionOutputs(sourceNode.data.question).some(
+						(output) => output.id === branch,
+					))
+			)
 				return;
+			if (sourceKind === "model" && branch !== "fallback") return;
 			const point = "changedTouches" in event ? event.changedTouches[0] : event;
 			const position = screenToFlowPosition({
 				x: point.clientX,
@@ -259,11 +265,12 @@ export function useRoutingGraph() {
 			});
 			setPendingConnection({
 				source,
-				branch: source === "jev" ? (branch ?? undefined) : undefined,
+				sourceKind,
+				branch: branch ?? undefined,
 				position,
 			});
 		},
-		[outputs, screenToFlowPosition],
+		[nodes, screenToFlowPosition],
 	);
 
 	const connectStart = useCallback<OnConnectStart>(() => {
@@ -292,29 +299,30 @@ export function useRoutingGraph() {
 	const createPendingNode = useCallback(
 		(kind: CreatableNodeKind) => {
 			if (!pendingConnection) return;
-			const { source, branch, position } = pendingConnection;
+			const { source, sourceKind, branch, position } = pendingConnection;
 			if (source === "input") {
-				if (kind === "jev" && nodes.some((node) => node.id === "jev")) return;
 				if (kind !== "jev" && kind !== "model") return;
-				const targetId = kind === "jev" ? "jev" : crypto.randomUUID();
-				if (kind === "jev") {
-					createNode("jev", { x: position.x, y: position.y - 72 });
-				} else {
-					setNodes((current) => [
-						...current.map((node) => ({ ...node, selected: false })),
-						{
-							id: targetId,
-							type: "route",
-							selected: true,
-							position: { x: position.x, y: position.y - 72 },
-							data: {
-								kind: "openai",
-								active: false,
-								model: defaultConfig.openaiModel,
-							},
-						},
-					]);
-				}
+				const targetId =
+					kind === "jev" && !nodes.some((node) => node.id === "jev")
+						? "jev"
+						: crypto.randomUUID();
+				setNodes((current) => [
+					...current.map((node) => ({ ...node, selected: false })),
+					{
+						id: targetId,
+						type: "route",
+						selected: true,
+						position: { x: position.x, y: position.y - 72 },
+						data:
+							kind === "jev"
+								? { kind: "jev", active: false, question: defaultJevQuestion() }
+								: {
+										kind: "openai",
+										active: false,
+										model: defaultConfig.openaiModel,
+									},
+					},
+				]);
 				setGraphEdges((current) => [
 					...current.filter((edge) => edge.source !== "input"),
 					{
@@ -327,37 +335,40 @@ export function useRoutingGraph() {
 				setPendingConnection(null);
 				return;
 			}
-			if (kind !== "model" || !branch) return;
+			if (
+				!branch ||
+				(kind !== "model" && !(kind === "jev" && sourceKind === "jev"))
+			)
+				return;
 			const id = crypto.randomUUID();
-			const providerKind = outputs[0]?.id === branch ? "google" : "openai";
+			const sourceQuestion = nodes.find((node) => node.id === source)?.data
+				.question;
+			const providerKind =
+				sourceQuestion && questionOutputs(sourceQuestion)[0]?.id === branch
+					? "google"
+					: "openai";
 			const model =
 				providerKind === "google"
 					? defaultConfig.googleModel
 					: defaultConfig.openaiModel;
-			replaceBranch(branch, id, {
+			replaceBranch(source, branch, id, {
 				id,
 				type: "route",
 				selected: true,
 				position: { x: position.x, y: position.y - 72 },
-				data: { kind: providerKind, active: false, model },
+				data:
+					kind === "jev"
+						? { kind: "jev", active: false, question: defaultJevQuestion() }
+						: { kind: providerKind, active: false, model },
 			});
 			setPendingConnection(null);
 		},
-		[
-			pendingConnection,
-			outputs,
-			replaceBranch,
-			createNode,
-			nodes,
-			setNodes,
-			setGraphEdges,
-		],
+		[pendingConnection, replaceBranch, nodes, setNodes, setGraphEdges],
 	);
 
 	return {
 		nodes,
 		requestPrompt,
-		outputs,
 		graphEdges,
 		onNodesChange,
 		onEdgesChange,
@@ -366,6 +377,7 @@ export function useRoutingGraph() {
 		onQuestionChange,
 		onDuplicateNode,
 		onRemoveNode,
+		onRemoveNodes,
 		createNode,
 		routes,
 		connect,

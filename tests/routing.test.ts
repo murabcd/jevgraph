@@ -9,6 +9,7 @@ import {
 describe("routing policy", () => {
 	const routes = {
 		kind: "jev" as const,
+		nodeId: "jev",
 		question: defaultJevQuestion(),
 		targets: {
 			fast: {
@@ -87,6 +88,7 @@ describe("routing policy", () => {
 			expect(
 				selectRoute({ branch: selected, confidence: 0.9 }, defaultConfig, {
 					kind: "jev",
+					nodeId: "jev",
 					question,
 					targets,
 				}).target.provider,
@@ -108,6 +110,18 @@ describe("routing policy", () => {
 		const parsed = routeRequestSchema.parse(request);
 		expect(parsed.requestPrompt).toBe("Answer in one sentence.");
 		expect(parsed.messages.at(-1)?.content).toBe("What is my name?");
+		expect(
+			routeRequestSchema.parse({
+				...request,
+				metadata: { accountTier: "paid", currentLoad: 2.4 },
+			}).metadata,
+		).toEqual({ accountTier: "paid", currentLoad: 2.4 });
+		expect(
+			routeRequestSchema.safeParse({
+				...request,
+				context: { obsolete: true },
+			}).success,
+		).toBe(false);
 		expect(
 			routeRequestSchema.safeParse({
 				...request,

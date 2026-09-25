@@ -5,6 +5,7 @@ import {
 	type NodeChange,
 	type OnNodesChange,
 	ReactFlow,
+	useNodesInitialized,
 	useReactFlow,
 } from "@xyflow/react";
 import { Zap } from "lucide-react";
@@ -39,24 +40,48 @@ import {
 import { CanvasControls, RouteNode } from "@/flow/route-node";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
 import { questionOutputs } from "@/lib/jev-question";
-import type { RouteResult } from "@/lib/routing";
+import type { NodeTiming, RouteResult } from "@/lib/routing";
 
 type CanvasNode = FlowNode | NodePickerNode;
 const nodeTypes = { route: RouteNode, "node-picker": NodeConnectionPicker };
 
+function nodeDecision(
+	node: FlowNode,
+	result: RouteResult | null,
+): string | undefined {
+	const step = result?.jevSteps?.find(
+		(decision) => decision.nodeId === node.id,
+	);
+	const legacy =
+		result?.mode === "jev" && result.path[1]?.nodeId === node.id
+			? result.jev
+			: undefined;
+	const branch = step?.branch ?? legacy?.branch;
+	if (!branch) return undefined;
+	const label = node.data.question
+		? (questionOutputs(node.data.question).find(
+				(output) => output.id === branch,
+			)?.label ?? branch)
+		: branch;
+	const confidence = step?.confidence ?? legacy?.confidence ?? 0;
+	return `${label} · ${step?.error ? "Jev unavailable" : `${Math.round(confidence * 100)}%`}`;
+}
+
 type RoutingCanvasProps = {
 	graph: ReturnType<typeof useRoutingGraph>;
 	result: RouteResult | null;
+	timings: Record<string, NodeTiming>;
 	running: boolean;
 	chatOpen: boolean;
 	onDuplicateNode: (nodeId: string) => void;
 	onRemoveNode: (nodeId: string) => void;
-	onNodesDeleted: (nodeId: string) => void;
+	onNodesDeleted: (nodeIds: string[]) => void;
 };
 
 export function RoutingCanvas({
 	graph,
 	result,
+	timings,
 	running,
 	chatOpen,
 	onDuplicateNode,
@@ -68,6 +93,7 @@ export function RoutingCanvas({
 	const shouldFitAfterAdd = useRef(false);
 	const [initialViewport] = useState(readCanvasViewport);
 	const { screenToFlowPosition, fitView } = useReactFlow();
+	const nodesInitialized = useNodesInitialized();
 	const {
 		nodes,
 		graphEdges,
@@ -98,18 +124,13 @@ export function RoutingCanvas({
 				onDuplicateNode,
 				onRemoveNode,
 				editingDisabled: running,
-				active: Boolean(
-					result &&
-						(node.id === "input" ||
-							(node.id === "jev" && result.mode === "jev") ||
-							node.id === result.nodeId),
-				),
-				usedBranch: node.id === "jev" ? result?.finalBranch : undefined,
+				active: Boolean(result?.path.some((step) => step.nodeId === node.id)),
+				usedBranch: result?.path.find(
+					(_, index) => index > 0 && result.path[index - 1].nodeId === node.id,
+				)?.via,
 				step: stepLabels.get(node.id),
-				decision:
-					node.id === "jev" && result?.jev
-						? `${node.data.question ? (questionOutputs(node.data.question).find((output) => output.id === result.jev?.branch)?.label ?? result.jev.branch) : result.jev.branch} · ${Math.round(result.jev.confidence * 100)}%`
-						: undefined,
+				timing: timings[node.id],
+				decision: nodeDecision(node, result),
 			},
 		}));
 		if (!pendingConnection) return routeNodes;
@@ -126,11 +147,9 @@ export function RoutingCanvas({
 				deletable: false,
 				data: {
 					available:
-						pendingConnection.source === "input"
-							? nodes.some((node) => node.id === "jev")
-								? ["model"]
-								: ["jev", "model"]
-							: ["model"],
+						pendingConnection.sourceKind === "model"
+							? ["model"]
+							: ["jev", "model"],
 					onSelect: createPendingNode,
 					onDismiss: dismissPendingConnection,
 				},
@@ -140,6 +159,7 @@ export function RoutingCanvas({
 		nodes,
 		graphEdges,
 		result,
+		timings,
 		onModelChange,
 		onQuestionChange,
 		onDuplicateNode,
@@ -177,19 +197,20 @@ export function RoutingCanvas({
 		const active = "var(--route-accent)";
 		const muted = "var(--muted-foreground)";
 		const routeEdges = graphEdges.map((edge) => {
-			const onPath =
-				edge.source === "input"
-					? Boolean(result)
-					: result?.finalBranch === edge.sourceHandle &&
-						result?.nodeId === edge.target;
+			const onPath = Boolean(
+				result?.path.some(
+					(step, index) =>
+						index > 0 &&
+						result.path[index - 1].nodeId === edge.source &&
+						step.nodeId === edge.target &&
+						(step.via ?? null) === (edge.sourceHandle ?? null),
+				),
+			);
 			return {
 				...edge,
 				type: "default",
 				deletable: !running,
-				animated:
-					running &&
-					(edge.source === "input" ||
-						edge.sourceHandle === result?.finalBranch),
+				animated: running && onPath,
 				style: {
 					stroke: onPath ? active : muted,
 					strokeWidth: onPath ? 1.8 : 1.2,
@@ -220,7 +241,7 @@ export function RoutingCanvas({
 			...(!nodes.some((node) => node.id === "input")
 				? (["input"] as const)
 				: []),
-			...(!nodes.some((node) => node.id === "jev") ? (["jev"] as const) : []),
+			"jev",
 			"model",
 		],
 		[nodes],
@@ -240,13 +261,14 @@ export function RoutingCanvas({
 		[screenToFlowPosition, createNode],
 	);
 	useEffect(() => {
-		if (!shouldFitAfterAdd.current || nodes.length === 0) return;
-		shouldFitAfterAdd.current = false;
+		if (!shouldFitAfterAdd.current || !nodesInitialized || nodes.length === 0)
+			return;
 		const frame = requestAnimationFrame(() => {
+			shouldFitAfterAdd.current = false;
 			void fitView({ padding: 0.15, duration: 250 });
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [nodes.length, fitView]);
+	}, [nodesInitialized, nodes.length, fitView]);
 
 	return (
 		<section
@@ -285,14 +307,16 @@ export function RoutingCanvas({
 				nodeTypes={nodeTypes}
 				onNodesChange={handleNodesChange}
 				onEdgesChange={onEdgesChange}
-				onNodesDelete={(deleted) => {
-					for (const node of deleted) onNodesDeleted(node.id);
-				}}
+				onNodesDelete={(deleted) =>
+					onNodesDeleted(deleted.map((node) => node.id))
+				}
 				onConnect={connect}
 				onConnectStart={connectStart}
 				onConnectEnd={connectEnd}
 				nodesConnectable={!running}
-				isValidConnection={(connection) => canConnectNodes(connection, nodes)}
+				isValidConnection={(connection) =>
+					canConnectNodes(connection, nodes, graphEdges)
+				}
 				connectionLineType={ConnectionLineType.Bezier}
 				panOnDrag={false}
 				panOnScroll

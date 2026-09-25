@@ -11,22 +11,38 @@ import {
 } from "../src/lib/jev-question.ts";
 import {
 	type ChatMessage,
+	type DirectRoutes,
 	JEV_MODEL_ID,
 	type JevDecision,
 	type JevRoutes,
+	type RoutePathStep,
 	type RouteResult,
 	type RouteSelectionResult,
 	type RouteStreamEvent,
 	type RouteTarget,
 	type RoutingConfig,
+	type RoutingMetadata,
 	routeRequestSchema,
 	selectRoute,
+	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
+import { runWithOneFallback } from "./model-failover.ts";
+import { emitSystemTiming, measureNode } from "./node-timing.ts";
+import { selectWorkflow, workflowRoutingState } from "./workflow.ts";
 
 type Keys = {
 	TYPESAFE_API_KEY?: string;
 	OPENAI_API_KEY?: string;
 	GOOGLE_GENERATIVE_AI_API_KEY?: string;
+};
+
+type RouteExecution = {
+	messages: ChatMessage[];
+	requestPrompt: string;
+	config: RoutingConfig;
+	metadata: RoutingMetadata;
+	keys: Keys;
+	emit: (event: RouteStreamEvent) => void;
 };
 
 const modelInstructions =
@@ -87,7 +103,7 @@ async function runModel(
 	const result = streamText({
 		model,
 		instructions: requestPrompt
-			? `${modelInstructions}\n\nRequest node instructions:\n${requestPrompt}`
+			? `${modelInstructions}\n\nSystem instructions:\n${requestPrompt}`
 			: modelInstructions,
 		messages,
 		maxOutputTokens: 1400,
@@ -120,13 +136,12 @@ async function runModel(
 }
 
 async function routeDirectPrompt(
-	messages: ChatMessage[],
-	requestPrompt: string,
-	target: RouteTarget,
-	keys: Keys,
-	emit: (event: RouteStreamEvent) => void,
+	{ messages, requestPrompt, keys, emit }: RouteExecution,
+	routes: DirectRoutes,
 ): Promise<void> {
 	const start = performance.now();
+	const target = routes.target;
+	emitSystemTiming(routes.systemNodeId, emit);
 	const route: RouteSelectionResult = {
 		mode: "direct",
 		provider: target.provider,
@@ -136,15 +151,17 @@ async function routeDirectPrompt(
 		initialNodeId: target.nodeId,
 		branch: "direct",
 		finalBranch: "direct",
+		path: [{ nodeId: "input" }, { nodeId: target.nodeId }],
 		reason: "Direct model",
 	};
 	emit({ type: "route", route });
-	const response = await runModel(
-		messages,
-		requestPrompt,
-		target,
-		keys,
-		(text) => emit({ type: "delta", text }),
+	const response = await measureNode(
+		target.nodeId,
+		() =>
+			runModel(messages, requestPrompt, target, keys, (text) =>
+				emit({ type: "delta", text }),
+			),
+		emit,
 	);
 	emit({
 		type: "done",
@@ -157,29 +174,27 @@ async function routeDirectPrompt(
 }
 
 async function routeJevPrompt(
-	messages: ChatMessage[],
-	requestPrompt: string,
-	config: RoutingConfig,
+	{ messages, requestPrompt, config, metadata, keys, emit }: RouteExecution,
 	routes: JevRoutes,
-	keys: Keys,
-	emit: (event: RouteStreamEvent) => void,
 ): Promise<void> {
 	const start = performance.now();
+	emitSystemTiming(routes.systemNodeId, emit);
 	let jev: JevDecision | undefined;
 	let classificationError: string | undefined;
 	try {
-		if (!keys.TYPESAFE_API_KEY)
-			throw new Error("TYPESAFE_API_KEY is not configured");
-		const routingContext = [
-			...(requestPrompt ? [`request instructions: ${requestPrompt}`] : []),
-			...messages
-				.slice(-6)
-				.map((message) => `${message.role}: ${message.content}`),
-		].join("\n");
-		jev = await classify(
-			routingContext,
-			keys.TYPESAFE_API_KEY,
-			routes.question,
+		const routingContext = workflowRoutingState(
+			messages,
+			requestPrompt,
+			metadata,
+		);
+		jev = await measureNode(
+			routes.nodeId,
+			() => {
+				const key = keys.TYPESAFE_API_KEY;
+				if (!key) throw new Error("TYPESAFE_API_KEY is not configured");
+				return classify(routingContext, key, routes.question);
+			},
+			emit,
 		);
 	} catch (error) {
 		classificationError =
@@ -191,6 +206,11 @@ async function routeJevPrompt(
 	const initialProvider = initialTarget.provider;
 	let target = initialTarget;
 	let finalBranch = selection.branch;
+	let path: RoutePathStep[] = [
+		{ nodeId: "input" },
+		{ nodeId: routes.nodeId },
+		{ nodeId: target.nodeId, via: selection.branch },
+	];
 	let fallbackReason: string | undefined;
 	const routeSelection = (): RouteSelectionResult => ({
 		mode: "jev",
@@ -201,55 +221,121 @@ async function routeJevPrompt(
 		initialNodeId: initialTarget.nodeId,
 		branch: selection.branch,
 		finalBranch,
+		path,
 		reason: selection.reason,
 		classificationError,
 		fallbackReason,
 		jev,
 	});
 	emit({ type: "route", route: routeSelection() });
-	let response: Awaited<ReturnType<typeof runModel>>;
-	let streamedText = "";
-	try {
-		response = await runModel(messages, requestPrompt, target, keys, (text) => {
-			streamedText += text;
-			emit({ type: "delta", text });
-		});
-	} catch (error) {
-		const message =
-			error instanceof Error ? error.message : "Unknown model error";
-		if (!config.fallbackEnabled || streamedText)
-			throw new Error(`${target.provider} failed: ${message}`, {
-				cause: error,
-			});
-		const fallback = questionOutputs(routes.question).find(
-			(output) =>
-				output.id !== selection.branch &&
-				routes.targets[output.id].nodeId !== initialTarget.nodeId,
-		);
-		if (!fallback)
-			throw new Error(`${initialProvider} failed: ${message}`, {
-				cause: error,
-			});
-		finalBranch = fallback.id;
-		target = routes.targets[finalBranch];
-		fallbackReason = `${initialProvider} failed: ${message}`;
-		emit({ type: "route", route: routeSelection() });
-		try {
-			response = await runModel(messages, requestPrompt, target, keys, (text) =>
-				emit({ type: "delta", text }),
-			);
-		} catch (fallbackError) {
-			const secondary =
-				fallbackError instanceof Error
-					? fallbackError.message
-					: "Unknown model error";
-			throw new Error(
-				`Both models failed. ${initialTarget.model}: ${message}. ${target.model}: ${secondary}`,
-				{ cause: fallbackError },
-			);
-		}
-	}
+	const fallback = config.fallbackEnabled
+		? questionOutputs(routes.question).find(
+				(output) =>
+					output.id !== selection.branch &&
+					routes.targets[output.id].nodeId !== initialTarget.nodeId,
+			)
+		: undefined;
+	const { response } = await runWithOneFallback(
+		initialTarget,
+		fallback ? routes.targets[fallback.id] : undefined,
+		(model, onDelta) =>
+			measureNode(
+				model.nodeId,
+				() => runModel(messages, requestPrompt, model, keys, onDelta),
+				emit,
+			),
+		(text) => emit({ type: "delta", text }),
+		(reason) => {
+			if (!fallback) throw new Error("Missing fallback branch");
+			finalBranch = fallback.id;
+			target = routes.targets[finalBranch];
+			path = [
+				{ nodeId: "input" },
+				{ nodeId: routes.nodeId },
+				{ nodeId: target.nodeId, via: finalBranch },
+			];
+			fallbackReason = reason;
+			emit({ type: "route", route: routeSelection() });
+		},
+	);
 
+	emit({
+		type: "done",
+		route: {
+			...response,
+			...routeSelection(),
+			latencyMs: Math.round(performance.now() - start),
+		},
+	});
+}
+
+async function routeWorkflowPrompt(
+	{ messages, requestPrompt, config, metadata, keys, emit }: RouteExecution,
+	routes: WorkflowRoutes,
+): Promise<void> {
+	const start = performance.now();
+	emitSystemTiming(routes.systemNodeId, emit);
+	const routingState = workflowRoutingState(messages, requestPrompt, metadata);
+	const selected = await selectWorkflow(
+		routes,
+		config,
+		async (nodeId, question) => {
+			return measureNode(
+				nodeId,
+				() => {
+					if (!keys.TYPESAFE_API_KEY)
+						throw new Error("TYPESAFE_API_KEY is not configured");
+					return classify(routingState, keys.TYPESAFE_API_KEY, question);
+				},
+				emit,
+			);
+		},
+	);
+	const initialTarget = selected.target;
+	let target = initialTarget;
+	let fallbackReason: string | undefined;
+	let path = selected.path;
+	const branch =
+		selected.decisions
+			.map((decision) => `${decision.nodeId}:${decision.branch}`)
+			.join(" · ") || "direct";
+	const routeSelection = (): RouteSelectionResult => ({
+		mode: "workflow",
+		provider: target.provider,
+		model: target.model,
+		initialProvider: initialTarget.provider,
+		nodeId: target.nodeId,
+		initialNodeId: initialTarget.nodeId,
+		branch,
+		finalBranch: fallbackReason ? "fallback" : branch,
+		path,
+		reason: branch,
+		classificationError:
+			selected.decisions
+				.map((decision) => decision.error)
+				.filter(Boolean)
+				.join("; ") || undefined,
+		fallbackReason,
+		jevSteps: selected.decisions,
+	});
+	emit({ type: "route", route: routeSelection() });
+	const { response } = await runWithOneFallback(
+		initialTarget,
+		config.fallbackEnabled ? selected.fallback : undefined,
+		(model, onDelta) =>
+			measureNode(
+				model.nodeId,
+				() => runModel(messages, requestPrompt, model, keys, onDelta),
+				emit,
+			),
+		(text) => emit({ type: "delta", text }),
+		(reason) => {
+			fallbackReason = reason;
+			target = selected.fallback ?? initialTarget;
+			path = [...selected.path, { nodeId: target.nodeId, via: "fallback" }];
+			emit({ type: "route", route: routeSelection() });
+		},
+	);
 	emit({
 		type: "done",
 		route: {
@@ -282,23 +368,26 @@ export async function handleApi(
 			start(controller) {
 				const emit = (event: RouteStreamEvent) =>
 					controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-				const processing =
-					input.routes.kind === "direct"
-						? routeDirectPrompt(
-								input.messages,
-								input.requestPrompt,
-								input.routes.target,
-								keys,
-								emit,
-							)
-						: routeJevPrompt(
-								input.messages,
-								input.requestPrompt,
-								input.config,
-								input.routes,
-								keys,
-								emit,
-							);
+				const execution: RouteExecution = {
+					messages: input.messages,
+					requestPrompt: input.requestPrompt,
+					config: input.config,
+					metadata: input.metadata ?? {},
+					keys,
+					emit,
+				};
+				let processing: Promise<void>;
+				switch (input.routes.kind) {
+					case "direct":
+						processing = routeDirectPrompt(execution, input.routes);
+						break;
+					case "jev":
+						processing = routeJevPrompt(execution, input.routes);
+						break;
+					case "workflow":
+						processing = routeWorkflowPrompt(execution, input.routes);
+						break;
+				}
 				void processing
 					.catch((error) =>
 						emit({
