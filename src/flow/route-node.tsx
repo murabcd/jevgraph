@@ -10,20 +10,12 @@ import {
 	Copy,
 	Eye,
 	GitFork,
-	Maximize,
 	MessageSquareText,
-	Minus,
-	Moon,
 	MoreHorizontal,
-	Pencil,
-	Plus,
-	SquareMousePointer,
-	Sun,
 	Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GoogleIcon, OpenAIIcon } from "@/components/icons/provider-icons";
-import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,12 +28,6 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
-import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuGroup,
@@ -49,60 +35,12 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { CreatableNodeKind, FlowNode, NodeKind } from "@/flow/graph";
-import { JevQuestionEditor } from "@/flow/jev-question-editor";
-import { JevQuestionPicker } from "@/flow/jev-question-picker";
-import { ModelPicker } from "@/flow/model-picker";
+import type { FlowNode, NodeKind } from "@/flow/graph";
 import { formatNodeDuration } from "@/flow/node-duration";
-import { NodeTypeCommand } from "@/flow/node-type-command";
-import { SystemPromptEditor } from "@/flow/system-prompt-editor";
-import {
-	defaultJevQuestion,
-	questionOutputs,
-	questionTypeLabels,
-} from "@/lib/jev-question";
+import { nodeFooterValue, nodeMeta } from "@/flow/node-meta";
+import { questionOutputs } from "@/lib/jev-question";
+import type { NodeTiming } from "@/lib/routing";
 import { cn } from "@/lib/utils";
-
-const nodeMeta = {
-	input: {
-		title: "System",
-		subtitle: "Reusable instructions",
-		footerLabel: "PROMPT",
-	},
-	jev: {
-		title: "Jev",
-		subtitle: "Routing decision",
-		footerLabel: "QUESTION",
-	},
-	google: {
-		title: "Gemini",
-		subtitle: "Select a model",
-		footerLabel: "MODEL",
-	},
-	openai: {
-		title: "OpenAI",
-		subtitle: "Select a model",
-		footerLabel: "MODEL",
-	},
-} satisfies Record<
-	NodeKind,
-	{ title: string; subtitle: string; footerLabel: string }
->;
-
-function nodeFooterValue(data: FlowNode["data"]) {
-	if (data.kind === "input") return data.prompt || "No prompt";
-	if (data.kind === "jev")
-		return data.question
-			? questionTypeLabels[data.question.type]
-			: "Select question";
-	return data.model ?? "";
-}
 
 function RouteNodeToolbar({
 	id,
@@ -117,43 +55,15 @@ function RouteNodeToolbar({
 }) {
 	const { fitView } = useReactFlow();
 	const [menuOpen, setMenuOpen] = useState(false);
-	const [editOpen, setEditOpen] = useState(false);
 	const isModel = data.kind === "google" || data.kind === "openai";
 	return (
 		<NodeToolbar
 			isVisible={selected || menuOpen}
 			position={Position.Bottom}
 			className="nodrag nopan flex items-center gap-1 rounded-full border border-border bg-background p-1.5 shadow-sm"
+			onClick={(event) => event.stopPropagation()}
+			onPointerDown={(event) => event.stopPropagation()}
 		>
-			{data.kind === "input" && editOpen && (
-				<SystemPromptEditor
-					value={data.prompt ?? ""}
-					open={editOpen}
-					onOpenChange={setEditOpen}
-					onSave={(prompt) => data.onPromptChange?.(prompt)}
-				/>
-			)}
-			{data.kind === "jev" && data.question && editOpen && (
-				<JevQuestionEditor
-					question={data.question}
-					open={editOpen}
-					onOpenChange={setEditOpen}
-					onSave={(question) => data.onQuestionChange?.(id, question)}
-				/>
-			)}
-			{isModel && (
-				<ModelPicker
-					nodeId={id}
-					modelId={data.model ?? ""}
-					onChange={data.onModelChange}
-				/>
-			)}
-			{data.kind === "jev" && data.question && (
-				<JevQuestionPicker
-					question={data.question}
-					onChange={(question) => data.onQuestionChange?.(id, question)}
-				/>
-			)}
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
 				<DropdownMenuTrigger
 					render={
@@ -170,9 +80,9 @@ function RouteNodeToolbar({
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="center" sideOffset={8} className="min-w-40">
 					<DropdownMenuGroup>
-						{!isModel && (
-							<DropdownMenuItem onClick={() => setEditOpen(true)}>
-								<Pencil /> Edit
+						{(data.output || data.decision || data.timing) && (
+							<DropdownMenuItem onClick={() => data.onInspectNode?.(id)}>
+								<MessageSquareText /> Inspect last turn
 							</DropdownMenuItem>
 						)}
 						<DropdownMenuItem
@@ -258,46 +168,21 @@ function RouteNodeAvatar({ kind }: { kind: NodeKind }) {
 	);
 }
 
-function RouteNodeHandles({
-	data,
-	selected,
-}: {
-	data: FlowNode["data"];
-	selected: boolean;
-}) {
+function RouteNodeHandles({ data }: { data: FlowNode["data"] }) {
 	return (
 		<>
 			{data.kind !== "input" && (
 				<Handle
-					className={cn(
-						"route-handle",
-						(selected || data.active) && "route-handle--accent",
-					)}
+					className={cn("route-handle", data.active && "route-handle--accent")}
 					type="target"
 					position={Position.Left}
 				/>
 			)}
 			{data.kind === "input" && (
 				<Handle
-					className={cn(
-						"route-handle",
-						(selected || data.active) && "route-handle--accent",
-					)}
+					className={cn("route-handle", data.active && "route-handle--accent")}
 					type="source"
 					position={Position.Right}
-				/>
-			)}
-			{(data.kind === "google" || data.kind === "openai") && (
-				<Handle
-					className={cn(
-						"route-handle",
-						(selected || data.usedBranch === "fallback") &&
-							"route-handle--accent",
-					)}
-					type="source"
-					id="fallback"
-					position={Position.Right}
-					title="Connect a backup model for failures before text starts"
 				/>
 			)}
 		</>
@@ -306,12 +191,10 @@ function RouteNodeHandles({
 
 function JevOutputRows({
 	outputs,
-	selected,
-	usedBranch,
+	usedBranches,
 }: {
 	outputs: ReturnType<typeof questionOutputs>;
-	selected: boolean;
-	usedBranch?: string;
+	usedBranches?: ReadonlySet<string>;
 }) {
 	return (
 		<CardContent className="grid gap-1 px-0">
@@ -326,7 +209,7 @@ function JevOutputRows({
 					<Handle
 						className={cn(
 							"route-handle",
-							(selected || usedBranch === output.id) && "route-handle--accent",
+							usedBranches?.has(output.id) && "route-handle--accent",
 						)}
 						type="source"
 						id={output.id}
@@ -338,16 +221,107 @@ function JevOutputRows({
 	);
 }
 
+function ModelOutputRows({
+	usedBranches,
+	fallbackConnected,
+}: {
+	usedBranches?: ReadonlySet<string>;
+	fallbackConnected?: boolean;
+}) {
+	return (
+		<CardContent className="grid gap-1 px-0">
+			{[
+				{
+					id: "next",
+					label: "Continue",
+					title:
+						"Continue with another node; connect several for parallel work",
+				},
+				{
+					id: "fallback",
+					label: "On error",
+					title: "Connect a backup model for failures before text starts",
+				},
+			].map((output) => (
+				<div
+					key={output.id}
+					className="relative flex min-h-7 items-center justify-end px-3 py-1"
+				>
+					<span className="text-xs font-medium">{output.label}</span>
+					<Handle
+						className={cn(
+							"route-handle",
+							usedBranches?.has(output.id) && "route-handle--accent",
+							output.id === "fallback" &&
+								fallbackConnected &&
+								"route-handle--occupied",
+						)}
+						type="source"
+						id={output.id}
+						position={Position.Right}
+						isConnectableStart={output.id !== "fallback" || !fallbackConnected}
+						onMouseDown={
+							output.id === "fallback" && fallbackConnected
+								? (event) => event.stopPropagation()
+								: undefined
+						}
+						onTouchStart={
+							output.id === "fallback" && fallbackConnected
+								? (event) => event.stopPropagation()
+								: undefined
+						}
+						title={
+							output.id === "fallback" && fallbackConnected
+								? "Remove the current backup connection before adding another"
+								: output.title
+						}
+					/>
+				</div>
+			))}
+		</CardContent>
+	);
+}
+
+function RouteNodeStatus({
+	step,
+	timing,
+}: {
+	step?: string;
+	timing?: NodeTiming;
+}) {
+	return (
+		<div className="route-node__eyebrow">
+			<Badge
+				variant="outline"
+				className="bg-background text-[10px] tracking-wider"
+			>
+				{step}
+			</Badge>
+			{timing && (
+				<span
+					className={cn(
+						"font-mono text-[10px] tabular-nums",
+						timing.status === "failed"
+							? "text-destructive"
+							: "text-muted-foreground",
+					)}
+					title={`${timing.status === "failed" ? "Failed" : "Completed"} in ${formatNodeDuration(timing.durationMs)}`}
+				>
+					{formatNodeDuration(timing.durationMs)}
+					{timing.attempts && timing.attempts > 1 ? ` ×${timing.attempts}` : ""}
+				</span>
+			)}
+		</div>
+	);
+}
+
 export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 	const updateNodeInternals = useUpdateNodeInternals();
-	const outputs =
-		data.kind === "jev"
-			? questionOutputs(data.question ?? defaultJevQuestion())
-			: [];
+	const outputs = data.kind === "jev" ? questionOutputs(data.question) : [];
 	const outputIds = outputs.map(({ id }) => id).join("|");
 	const { title, subtitle, footerLabel } = nodeMeta[data.kind];
+	const isModel = data.kind === "google" || data.kind === "openai";
 	const footerValue = nodeFooterValue(data);
-	const timing = data.timing;
 	useEffect(() => {
 		if (outputIds) updateNodeInternals(id);
 	}, [outputIds, id, updateNodeInternals]);
@@ -356,46 +330,21 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 			className={cn(
 				"route-node",
 				data.kind === "jev" && "route-node--jev",
+				isModel && !data.isBackup && "route-node--model",
+				data.isBackup && "route-node--backup",
 				data.active && "route-node--active",
 				selected && "route-node--selected",
 			)}
 		>
 			<RouteNodeToolbar id={id} data={data} selected={selected} title={title} />
-			<div className="route-node__eyebrow">
-				<div className="flex items-center gap-1">
-					<Badge
-						variant="outline"
-						className="bg-background text-[10px] tracking-wider"
-					>
-						{data.step}
-					</Badge>
-					{data.active && (
-						<Badge variant="secondary" className="text-[10px]">
-							On path
-						</Badge>
-					)}
-				</div>
-				{timing && (
-					<span
-						className={cn(
-							"font-mono text-[10px] tabular-nums",
-							timing.status === "failed"
-								? "text-destructive"
-								: "text-muted-foreground",
-						)}
-						title={`${timing.status === "failed" ? "Failed" : "Completed"} in ${formatNodeDuration(timing.durationMs)}`}
-					>
-						{formatNodeDuration(timing.durationMs)}
-					</span>
-				)}
-			</div>
+			<RouteNodeStatus step={data.step} timing={data.timing} />
 
 			<Card
 				size="sm"
 				className={cn(
-					data.kind === "jev" ? "min-h-36 overflow-visible" : "h-full",
-					"justify-between bg-card shadow-sm",
-					(selected || data.active) && "ring-[var(--route-accent)]",
+					data.kind === "jev" ? "min-h-36" : "h-full",
+					"justify-between overflow-visible bg-card shadow-sm",
+					data.active ? "ring-[var(--route-accent)]" : selected && "ring-ring",
 				)}
 			>
 				<CardHeader className="grid grid-cols-[36px_1fr] items-center gap-x-3">
@@ -403,18 +352,20 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 					<div className="min-w-0">
 						<CardTitle className="truncate text-base">{title}</CardTitle>
 						<CardDescription className="truncate text-xs">
-							{subtitle}
+							{data.isBackup ? "Runs if primary fails" : subtitle}
 						</CardDescription>
 					</div>
 				</CardHeader>
 				{data.kind === "jev" && (
-					<JevOutputRows
-						outputs={outputs}
-						selected={selected}
-						usedBranch={data.usedBranch}
+					<JevOutputRows outputs={outputs} usedBranches={data.usedBranches} />
+				)}
+				{isModel && !data.isBackup && (
+					<ModelOutputRows
+						usedBranches={data.usedBranches}
+						fallbackConnected={data.fallbackConnected}
 					/>
 				)}
-				<CardFooter className="min-w-0 justify-between gap-2 py-3">
+				<CardFooter className="h-11 min-w-0 shrink-0 justify-between gap-2 px-3 py-0">
 					<span className="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground">
 						{footerLabel}
 					</span>
@@ -426,126 +377,7 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 					</span>
 				</CardFooter>
 			</Card>
-			<RouteNodeHandles data={data} selected={selected} />
+			<RouteNodeHandles data={data} />
 		</div>
-	);
-}
-
-export function CanvasControls({
-	available,
-	onAddNode,
-	addingDisabled,
-}: {
-	available: CreatableNodeKind[];
-	onAddNode: (kind: CreatableNodeKind) => void;
-	addingDisabled: boolean;
-}) {
-	const { zoomIn, zoomOut, fitView } = useReactFlow();
-	const { theme, setTheme } = useTheme();
-	const [addOpen, setAddOpen] = useState(false);
-	return (
-		<Card size="sm" className="canvas-controls flex-row gap-0 p-1 shadow-sm">
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Zoom in"
-							onClick={() => void zoomIn()}
-						/>
-					}
-				>
-					<Plus />
-				</TooltipTrigger>
-				<TooltipContent>Zoom in</TooltipContent>
-			</Tooltip>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Zoom out"
-							onClick={() => void zoomOut()}
-						/>
-					}
-				>
-					<Minus />
-				</TooltipTrigger>
-				<TooltipContent>Zoom out</TooltipContent>
-			</Tooltip>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Fit canvas"
-							onClick={() => void fitView({ padding: 0.12 })}
-						/>
-					}
-				>
-					<Maximize />
-				</TooltipTrigger>
-				<TooltipContent>Fit canvas</TooltipContent>
-			</Tooltip>
-			<Separator orientation="vertical" className="mx-1 my-1" />
-			<Dialog open={addOpen} onOpenChange={setAddOpen}>
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label="Add node"
-								disabled={addingDisabled}
-								onClick={() => setAddOpen(true)}
-							/>
-						}
-					>
-						<SquareMousePointer />
-					</TooltipTrigger>
-					<TooltipContent>Add node</TooltipContent>
-				</Tooltip>
-				<DialogContent
-					className="w-[min(360px,calc(100vw-2rem))] gap-0 p-0"
-					showCloseButton={false}
-				>
-					<DialogHeader className="sr-only">
-						<DialogTitle>Add node</DialogTitle>
-					</DialogHeader>
-					<NodeTypeCommand
-						available={available}
-						onSelect={(kind) => {
-							onAddNode(kind);
-							setAddOpen(false);
-						}}
-					/>
-				</DialogContent>
-			</Dialog>
-			<Separator orientation="vertical" className="mx-1 my-1" />
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={
-								theme === "dark"
-									? "Switch to light theme"
-									: "Switch to dark theme"
-							}
-							onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-						/>
-					}
-				>
-					{theme === "dark" ? <Sun /> : <Moon />}
-				</TooltipTrigger>
-				<TooltipContent>
-					{theme === "dark" ? "Light theme" : "Dark theme"}
-				</TooltipContent>
-			</Tooltip>
-		</Card>
 	);
 }

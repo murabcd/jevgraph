@@ -76,3 +76,23 @@ test("reports the primary provider when no backup is available", async () => {
 		),
 	).rejects.toThrow("openai failed: unavailable");
 });
+
+test("does not call the backup after the request is cancelled", async () => {
+	const attempts: string[] = [];
+	let cancelled = false;
+	await expect(
+		runWithOneFallback(
+			primary,
+			backup,
+			async (target) => {
+				attempts.push(target.nodeId);
+				cancelled = true;
+				throw new Error("cancelled");
+			},
+			() => {},
+			() => {},
+			() => !cancelled,
+		),
+	).rejects.toThrow("cancelled");
+	expect(attempts).toEqual(["primary"]);
+});

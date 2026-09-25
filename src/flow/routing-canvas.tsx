@@ -20,6 +20,11 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CanvasControls } from "@/flow/canvas-controls";
+import {
+	type CanvasNode,
+	useCanvasPresentation,
+} from "@/flow/canvas-presentation";
 import {
 	maxCanvasZoom,
 	minCanvasZoom,
@@ -30,46 +35,22 @@ import {
 	type CreatableNodeKind,
 	canConnectNodes,
 	type FlowNode,
-	nodeStepLabels,
 } from "@/flow/graph";
 import {
 	NODE_PICKER_NODE_ID,
 	NodeConnectionPicker,
-	type NodePickerNode,
 } from "@/flow/node-connection-picker";
-import { CanvasControls, RouteNode } from "@/flow/route-node";
+import { nodeMeta } from "@/flow/node-meta";
+import { RouteNode } from "@/flow/route-node";
+import { RouteNodePanel } from "@/flow/route-node-panel";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
-import { questionOutputs } from "@/lib/jev-question";
-import type { NodeTiming, RouteResult } from "@/lib/routing";
+import type { NodeTiming, RouteTrace } from "@/lib/routing";
 
-type CanvasNode = FlowNode | NodePickerNode;
 const nodeTypes = { route: RouteNode, "node-picker": NodeConnectionPicker };
-
-function nodeDecision(
-	node: FlowNode,
-	result: RouteResult | null,
-): string | undefined {
-	const step = result?.jevSteps?.find(
-		(decision) => decision.nodeId === node.id,
-	);
-	const legacy =
-		result?.mode === "jev" && result.path[1]?.nodeId === node.id
-			? result.jev
-			: undefined;
-	const branch = step?.branch ?? legacy?.branch;
-	if (!branch) return undefined;
-	const label = node.data.question
-		? (questionOutputs(node.data.question).find(
-				(output) => output.id === branch,
-			)?.label ?? branch)
-		: branch;
-	const confidence = step?.confidence ?? legacy?.confidence ?? 0;
-	return `${label} · ${step?.error ? "Jev unavailable" : `${Math.round(confidence * 100)}%`}`;
-}
 
 type RoutingCanvasProps = {
 	graph: ReturnType<typeof useRoutingGraph>;
-	result: RouteResult | null;
+	result: RouteTrace | null;
 	timings: Record<string, NodeTiming>;
 	running: boolean;
 	chatOpen: boolean;
@@ -91,85 +72,44 @@ export function RoutingCanvas({
 	const { theme } = useTheme();
 	const canvasRef = useRef<HTMLElement>(null);
 	const shouldFitAfterAdd = useRef(false);
+	const [panel, setPanel] = useState<{
+		nodeId: string;
+		view: "edit" | "inspect";
+	} | null>(null);
 	const [initialViewport] = useState(readCanvasViewport);
 	const { screenToFlowPosition, fitView } = useReactFlow();
 	const nodesInitialized = useNodesInitialized();
+	const onInspectNode = useCallback(
+		(nodeId: string) => setPanel({ nodeId, view: "inspect" }),
+		[],
+	);
 	const {
 		nodes,
 		graphEdges,
 		onNodesChange,
 		onEdgesChange,
-		onModelChange,
-		onPromptChange,
-		onQuestionChange,
 		connect,
 		connectStart,
 		connectEnd,
-		pendingConnection,
-		createPendingNode,
 		createNode,
-		dismissPendingConnection,
 		measurePendingConnection,
 	} = graph;
-	const displayNodes = useMemo<CanvasNode[]>(() => {
-		const stepLabels = nodeStepLabels(nodes, graphEdges);
-		const routeNodes = nodes.map((node) => ({
-			...node,
-			deletable: !running,
-			data: {
-				...node.data,
-				onModelChange,
-				onQuestionChange,
-				onPromptChange,
-				onDuplicateNode,
-				onRemoveNode,
-				editingDisabled: running,
-				active: Boolean(result?.path.some((step) => step.nodeId === node.id)),
-				usedBranch: result?.path.find(
-					(_, index) => index > 0 && result.path[index - 1].nodeId === node.id,
-				)?.via,
-				step: stepLabels.get(node.id),
-				timing: timings[node.id],
-				decision: nodeDecision(node, result),
-			},
-		}));
-		if (!pendingConnection) return routeNodes;
-		return [
-			...routeNodes,
-			{
-				id: NODE_PICKER_NODE_ID,
-				type: "node-picker",
-				position: pendingConnection.position,
-				measured: pendingConnection.measured,
-				origin: [0, 0.5],
-				draggable: false,
-				selectable: true,
-				deletable: false,
-				data: {
-					available:
-						pendingConnection.sourceKind === "model"
-							? ["model"]
-							: ["jev", "model"],
-					onSelect: createPendingNode,
-					onDismiss: dismissPendingConnection,
-				},
-			},
-		];
-	}, [
-		nodes,
-		graphEdges,
-		result,
+	const activePanel =
+		panel && nodes.some((node) => node.id === panel.nodeId) ? panel : null;
+	const { displayNodes, displayEdges } = useCanvasPresentation({
+		graph,
+		trace: result,
 		timings,
-		onModelChange,
-		onQuestionChange,
+		running,
 		onDuplicateNode,
 		onRemoveNode,
-		running,
-		onPromptChange,
-		pendingConnection,
-		createPendingNode,
-		dismissPendingConnection,
-	]);
+		onInspectNode,
+	});
+	const panelNode = activePanel
+		? displayNodes.find(
+				(node) => node.type === "route" && node.id === activePanel.nodeId,
+			)
+		: undefined;
 
 	const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
 		(changes) => {
@@ -192,49 +132,6 @@ export function RoutingCanvas({
 		},
 		[onNodesChange, measurePendingConnection],
 	);
-
-	const edges = useMemo<Edge[]>(() => {
-		const active = "var(--route-accent)";
-		const muted = "var(--muted-foreground)";
-		const routeEdges = graphEdges.map((edge) => {
-			const onPath = Boolean(
-				result?.path.some(
-					(step, index) =>
-						index > 0 &&
-						result.path[index - 1].nodeId === edge.source &&
-						step.nodeId === edge.target &&
-						(step.via ?? null) === (edge.sourceHandle ?? null),
-				),
-			);
-			return {
-				...edge,
-				type: "default",
-				deletable: !running,
-				animated: running && onPath,
-				style: {
-					stroke: onPath ? active : muted,
-					strokeWidth: onPath ? 1.8 : 1.2,
-				},
-			};
-		});
-		if (!pendingConnection) return routeEdges;
-		return [
-			...routeEdges,
-			{
-				id: "pending-node-connection",
-				source: pendingConnection.source,
-				sourceHandle: pendingConnection.branch,
-				target: NODE_PICKER_NODE_ID,
-				type: "default",
-				selectable: false,
-				style: {
-					stroke: muted,
-					strokeWidth: 1.2,
-					strokeDasharray: "4 4",
-				},
-			},
-		];
-	}, [graphEdges, result, running, pendingConnection]);
 
 	const availableNodeTypes = useMemo<CreatableNodeKind[]>(
 		() => [
@@ -303,9 +200,13 @@ export function RoutingCanvas({
 			</Card>
 			<ReactFlow<CanvasNode, Edge>
 				nodes={displayNodes}
-				edges={edges}
+				edges={displayEdges}
 				nodeTypes={nodeTypes}
 				onNodesChange={handleNodesChange}
+				onNodeClick={(_, node) => {
+					if (!running && node.id !== NODE_PICKER_NODE_ID)
+						setPanel({ nodeId: node.id, view: "edit" });
+				}}
 				onEdgesChange={onEdgesChange}
 				onNodesDelete={(deleted) =>
 					onNodesDeleted(deleted.map((node) => node.id))
@@ -340,6 +241,17 @@ export function RoutingCanvas({
 					addingDisabled={running}
 				/>
 			</ReactFlow>
+			{panelNode?.type === "route" && activePanel && (
+				<RouteNodePanel
+					key={panelNode.id}
+					id={panelNode.id}
+					data={panelNode.data}
+					title={nodeMeta[panelNode.data.kind].title}
+					view={activePanel.view}
+					onClose={() => setPanel(null)}
+					actions={graph}
+				/>
+			)}
 		</section>
 	);
 }

@@ -55,10 +55,21 @@ function App() {
 
 	return (
 		<main className="studio">
-			<Popover open={chatOpen} onOpenChange={onChatOpenChange}>
+			<Popover
+				open={chatOpen}
+				onOpenChange={(open, details) => {
+					if (
+						!open &&
+						(details.reason === "outside-press" ||
+							details.reason === "focus-out")
+					)
+						return;
+					onChatOpenChange(open);
+				}}
+			>
 				<RoutingCanvas
 					graph={graph}
-					result={chat.result}
+					result={chat.trace}
 					timings={chat.nodeTimings}
 					running={chat.running}
 					chatOpen={chatOpen}

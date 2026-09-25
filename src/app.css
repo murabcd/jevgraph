@@ -44,6 +44,37 @@ body {
 	min-height: 144px;
 }
 
+.route-node--model {
+	height: 176px;
+}
+
+.route-node--backup {
+	height: 120px;
+}
+
+.route-node [data-slot="card"] {
+	position: relative;
+}
+
+.route-node--active {
+	--route-node-outline: var(--route-accent);
+}
+
+.route-node--selected:not(.route-node--active) {
+	--route-node-outline: var(--ring);
+}
+
+.route-node--active [data-slot="card"]::after,
+.route-node--selected [data-slot="card"]::after {
+	position: absolute;
+	z-index: 1;
+	inset: -1px;
+	border: 1px solid var(--route-node-outline);
+	border-radius: inherit;
+	content: "";
+	pointer-events: none;
+}
+
 .route-node__eyebrow {
 	position: absolute;
 	top: -30px;
@@ -64,4 +95,20 @@ body {
 
 .react-flow__handle.route-handle--accent {
 	border-color: var(--route-accent);
+}
+
+.react-flow__handle.route-handle--occupied {
+	pointer-events: all;
+	cursor: not-allowed;
+}
+
+@media (max-width: 849px) {
+	body:has([data-slot="sheet-content"][data-variant="floating"])
+		[data-slot="sheet-content"][data-variant="floating"] {
+		bottom: calc(50dvh + 4rem);
+	}
+
+	body:has([data-slot="sheet-content"][data-variant="floating"]) #routing-chat {
+		height: 50dvh;
+	}
 }

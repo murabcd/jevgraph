@@ -7,128 +7,172 @@ export type Provider = z.infer<typeof providerSchema>;
 export type KeyStatus = { jev: boolean; openai: boolean; google: boolean };
 
 export const JEV_MODEL_ID = "jev-latest";
-export const MAX_REQUEST_PROMPT_LENGTH = 12000;
+export const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
+export const DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite";
+export const MAX_PROMPT_LENGTH = 12000;
 
-export const routingConfigSchema = z.object({
-	openaiModel: z
-		.string()
-		.trim()
-		.min(1)
-		.max(100)
-		.regex(/^[a-zA-Z0-9._:-]+$/),
-	googleModel: z
-		.string()
-		.trim()
-		.min(1)
-		.max(100)
-		.regex(/^[a-zA-Z0-9._:-]+$/),
+export const routingConfigSchema = z.strictObject({
 	confidenceThreshold: z.number().min(0).max(1),
-	defaultProvider: providerSchema,
 	fallbackEnabled: z.boolean(),
 });
-
 export type RoutingConfig = z.infer<typeof routingConfigSchema>;
 
-export const routeTargetSchema = z.object({
-	nodeId: z.string().min(1).max(100),
+export const defaultConfig: RoutingConfig = {
+	confidenceThreshold: 0.7,
+	fallbackEnabled: true,
+};
+
+const nodeIdSchema = z.string().min(1).max(100);
+const modelIdSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(100)
+	.regex(/^[a-zA-Z0-9._:-]+$/);
+
+export const routeTargetSchema = z.strictObject({
+	nodeId: nodeIdSchema,
 	provider: providerSchema,
-	model: z
-		.string()
-		.trim()
-		.min(1)
-		.max(100)
-		.regex(/^[a-zA-Z0-9._:-]+$/),
+	model: modelIdSchema,
+	prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 });
 export type RouteTarget = z.infer<typeof routeTargetSchema>;
-const jevRoutesSchema = z
-	.strictObject({
-		kind: z.literal("jev"),
-		nodeId: routeTargetSchema.shape.nodeId,
-		systemNodeId: z.literal("input").optional(),
-		question: jevQuestionSchema,
-		targets: z.record(z.string(), routeTargetSchema),
-	})
-	.refine(
-		(routes) => {
-			const outputIds = questionOutputs(routes.question).map(({ id }) => id);
-			return (
-				Object.keys(routes.targets).length === outputIds.length &&
-				outputIds.every((id) => Boolean(routes.targets[id]))
-			);
-		},
-		{ message: "Every Jev output must connect to a model" },
-	);
-const directRoutesSchema = z.strictObject({
-	kind: z.literal("direct"),
-	systemNodeId: z.literal("input").optional(),
-	target: routeTargetSchema,
-});
+
 const workflowNodeSchema = z.discriminatedUnion("kind", [
-	z.strictObject({ id: z.string().min(1).max(100), kind: z.literal("input") }),
+	z.strictObject({ id: nodeIdSchema, kind: z.literal("input") }),
 	z.strictObject({
-		id: z.string().min(1).max(100),
+		id: nodeIdSchema,
 		kind: z.literal("jev"),
 		question: jevQuestionSchema,
+		maxRepeats: z.number().int().min(1).max(5).optional(),
 	}),
 	z.strictObject({
-		id: z.string().min(1).max(100),
+		id: nodeIdSchema,
 		kind: z.literal("model"),
 		provider: providerSchema,
-		model: routeTargetSchema.shape.model,
+		model: modelIdSchema,
+		prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 	}),
 ]);
 const workflowEdgeSchema = z.strictObject({
-	source: z.string().min(1).max(100),
+	id: nodeIdSchema,
+	source: nodeIdSchema,
 	sourceHandle: z.string().min(1).max(100).optional(),
-	target: z.string().min(1).max(100),
+	target: nodeIdSchema,
+	repeat: z.boolean().optional(),
 });
-type WorkflowNode = z.infer<typeof workflowNodeSchema>;
-type WorkflowEdge = z.infer<typeof workflowEdgeSchema>;
+export type WorkflowNode = z.infer<typeof workflowNodeSchema>;
+export type WorkflowEdge = z.infer<typeof workflowEdgeSchema>;
 
 function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
-	if (byId.size !== nodes.length || byId.get("input")?.kind !== "input")
+	if (
+		byId.size !== nodes.length ||
+		byId.get("input")?.kind !== "input" ||
+		nodes.filter((node) => node.kind === "input").length !== 1 ||
+		new Set(edges.map((edge) => edge.id)).size !== edges.length
+	)
 		return false;
 	if (edges.some((edge) => !byId.has(edge.source) || !byId.has(edge.target)))
 		return false;
-	const visiting = new Set<string>();
-	const visited = new Set<string>();
-	const check = (id: string): boolean => {
-		if (visiting.has(id)) return false;
-		if (visited.has(id)) return true;
-		const node = byId.get(id);
-		if (!node) return false;
-		const outgoing = edges.filter((edge) => edge.source === id);
-		visiting.add(id);
-		let valid = false;
+	const outgoingEdges = edges.filter(
+		(edge) => edge.sourceHandle !== "fallback",
+	);
+	const normal = outgoingEdges.filter((edge) => !edge.repeat);
+	const backups = edges.filter((edge) => edge.sourceHandle === "fallback");
+	if (
+		backups.some(
+			(edge) =>
+				byId.get(edge.source)?.kind !== "model" ||
+				byId.get(edge.target)?.kind !== "model" ||
+				edges.some((other) => other !== edge && other.target === edge.target) ||
+				edges.some((other) => other.source === edge.target),
+		)
+	)
+		return false;
+	if (
+		edges.some(
+			(edge) =>
+				edge.repeat &&
+				(edge.sourceHandle === "fallback" ||
+					byId.get(edge.source)?.kind !== "jev" ||
+					byId.get(edge.target)?.kind !== "model"),
+		) ||
+		nodes.some(
+			(node) =>
+				node.kind === "jev" &&
+				outgoingEdges.filter((edge) => edge.source === node.id && edge.repeat)
+					.length > 1,
+		)
+	)
+		return false;
+	for (const node of nodes) {
+		const outgoing = outgoingEdges.filter((edge) => edge.source === node.id);
 		if (node.kind === "input") {
-			valid =
-				outgoing.length === 1 &&
-				!outgoing[0].sourceHandle &&
-				check(outgoing[0].target);
+			if (outgoing.length === 0 || outgoing.some((edge) => edge.sourceHandle))
+				return false;
 		} else if (node.kind === "jev") {
 			const outputs = questionOutputs(node.question);
-			valid =
-				outgoing.length === outputs.length &&
-				outputs.every((output) => {
-					const edge = outgoing.find(
-						(candidate) => candidate.sourceHandle === output.id,
-					);
-					return Boolean(edge && check(edge.target));
-				});
-		} else {
-			valid =
-				outgoing.length === 0 ||
-				(outgoing.length === 1 &&
-					outgoing[0].sourceHandle === "fallback" &&
-					byId.get(outgoing[0].target)?.kind === "model" &&
-					edges.every((edge) => edge.source !== outgoing[0].target));
+			if (
+				outgoing.length !== outputs.length ||
+				(outgoing.some((edge) => edge.repeat) &&
+					outgoing.every((edge) => edge.repeat)) ||
+				outputs.some(
+					(output) =>
+						outgoing.filter((edge) => edge.sourceHandle === output.id)
+							.length !== 1,
+				)
+			)
+				return false;
+		} else if (outgoing.some((edge) => edge.sourceHandle !== "next")) {
+			return false;
+		}
+		if (node.kind !== "jev" && outgoing.some((edge) => edge.repeat))
+			return false;
+		if (backups.filter((edge) => edge.source === node.id).length > 1)
+			return false;
+	}
+	if (normal.some((edge) => edge.target === "input")) return false;
+	if (
+		nodes.every((node) => node.kind !== "jev") &&
+		nodes.filter(
+			(node) =>
+				node.kind === "model" &&
+				!normal.some((edge) => edge.source === node.id),
+		).length > 1
+	)
+		return false;
+	const visiting = new Set<string>();
+	const visited = new Set<string>();
+	const visit = (id: string): boolean => {
+		if (visiting.has(id)) return false;
+		if (visited.has(id)) return true;
+		visiting.add(id);
+		for (const edge of normal.filter((entry) => entry.source === id)) {
+			if (!visit(edge.target)) return false;
 		}
 		visiting.delete(id);
-		if (valid) visited.add(id);
-		return valid;
+		visited.add(id);
+		return true;
 	};
-	return check("input");
+	if (!visit("input")) return false;
+	for (const edge of outgoingEdges.filter((candidate) => candidate.repeat)) {
+		const pending = [edge.target];
+		const seen = new Set<string>();
+		while (pending.length > 0) {
+			const current = pending.pop();
+			if (!current || seen.has(current)) continue;
+			seen.add(current);
+			pending.push(
+				...normal
+					.filter((entry) => entry.source === current)
+					.map((entry) => entry.target),
+			);
+		}
+		if (!seen.has(edge.source)) return false;
+	}
+	const backupIds = new Set(backups.map((edge) => edge.target));
+	return nodes.every((node) => visited.has(node.id) || backupIds.has(node.id));
 }
 
 export const workflowRoutesSchema = z
@@ -139,31 +183,14 @@ export const workflowRoutesSchema = z
 		edges: z.array(workflowEdgeSchema).min(1).max(200),
 	})
 	.refine((routes) => validWorkflow(routes.nodes, routes.edges), {
-		message: "Every Jev output must reach a model without a cycle",
+		message: "Connect every Jev output and keep the chatflow acyclic",
 	});
-export const routesSchema = z.union([
-	jevRoutesSchema,
-	directRoutesSchema,
-	workflowRoutesSchema,
-]);
-export type Routes = z.infer<typeof routesSchema>;
-export type DirectRoutes = Extract<Routes, { kind: "direct" }>;
-export type JevRoutes = Extract<Routes, { kind: "jev" }>;
-export type WorkflowRoutes = Extract<Routes, { kind: "workflow" }>;
+export type WorkflowRoutes = z.infer<typeof workflowRoutesSchema>;
 
-export const defaultConfig: RoutingConfig = {
-	openaiModel: "gpt-5-mini",
-	googleModel: "gemini-3.5-flash-lite",
-	confidenceThreshold: 0.7,
-	defaultProvider: "openai",
-	fallbackEnabled: true,
-};
-
-export const chatMessageSchema = z.object({
+export const chatMessageSchema = z.strictObject({
 	role: z.enum(["user", "assistant"]),
 	content: z.string().trim().min(1).max(12000),
 });
-
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 export const routingMetadataSchema = z
@@ -178,7 +205,7 @@ export const routingMetadataSchema = z
 export type RoutingMetadata = z.infer<typeof routingMetadataSchema>;
 
 export const routeRequestSchema = z.strictObject({
-	requestPrompt: z.string().trim().max(MAX_REQUEST_PROMPT_LENGTH),
+	requestPrompt: z.string().trim().max(MAX_PROMPT_LENGTH),
 	metadata: routingMetadataSchema.optional(),
 	messages: z
 		.array(chatMessageSchema)
@@ -186,7 +213,7 @@ export const routeRequestSchema = z.strictObject({
 		.max(30)
 		.refine((messages) => messages.at(-1)?.role === "user"),
 	config: routingConfigSchema,
-	routes: routesSchema,
+	routes: workflowRoutesSchema,
 });
 
 export type JevDecision = {
@@ -204,82 +231,66 @@ export type NodeTiming = {
 	nodeId: string;
 	durationMs: number;
 	status: "completed" | "failed";
+	attempts?: number;
 };
 export type WorkflowDecision = {
 	nodeId: string;
 	branch: string;
 	confidence?: number;
 	error?: string;
+	limitReached?: boolean;
+};
+export type NodeOutput = {
+	nodeId: string;
+	kind: "jev" | "model";
+	text: string;
 };
 
-export type RouteResult = {
-	mode: Routes["kind"];
+export type RouteTrace = {
+	path: RoutePathStep[];
+	traversedEdges: WorkflowEdge[];
+	jevSteps: WorkflowDecision[];
+	outputs: NodeOutput[];
+};
+
+export type RouteResult = RouteTrace & {
 	text: string;
 	provider: Provider;
 	model: string;
-	initialProvider: Provider;
 	nodeId: string;
-	initialNodeId: string;
-	branch: string;
-	finalBranch: string;
-	path: RoutePathStep[];
 	reason: string;
-	classificationError?: string;
 	fallbackReason?: string;
-	jev?: JevDecision;
-	jevSteps?: WorkflowDecision[];
 	usage?: { inputTokens?: number; outputTokens?: number };
 	latencyMs: number;
 };
-
 export type RouteSelectionResult = Omit<
 	RouteResult,
 	"text" | "usage" | "latencyMs"
 >;
 
 export type RouteStreamEvent =
+	| { type: "progress"; trace: RouteTrace }
 	| { type: "route"; route: RouteSelectionResult }
 	| { type: "timing"; timing: NodeTiming }
 	| { type: "delta"; text: string }
 	| { type: "done"; route: RouteResult }
 	| { type: "error"; error: string };
 
-export function selectRoute(
-	decision: Pick<JevDecision, "branch" | "confidence"> | undefined,
-	config: RoutingConfig,
-	routes: JevRoutes,
-): { branch: string; target: RouteTarget; reason: string } {
-	const outputs = questionOutputs(routes.question);
-	const defaultBranch =
-		outputs.find(
-			({ id }) => routes.targets[id]?.provider === config.defaultProvider,
-		)?.id ?? outputs[0].id;
-	const branch =
-		!decision ||
-		decision.confidence < config.confidenceThreshold ||
-		!routes.targets[decision.branch]
-			? defaultBranch
-			: decision.branch;
-	const reason = !decision
-		? "Jev unavailable · default route"
-		: decision.confidence < config.confidenceThreshold
-			? "Below confidence threshold · default route"
-			: `${outputs.find((output) => output.id === branch)?.label ?? branch} · ${routes.targets[branch].model}`;
-	return { branch, target: routes.targets[branch], reason };
-}
-
-export function routeTargets(routes: Routes) {
-	return routes.kind === "direct"
-		? [routes.target]
-		: routes.kind === "jev"
-			? Object.values(routes.targets)
-			: routes.nodes.filter((node) => node.kind === "model");
-}
-
-export function routesUseJev(routes: Routes): boolean {
-	return (
-		routes.kind === "jev" ||
-		(routes.kind === "workflow" &&
-			routes.nodes.some((node) => node.kind === "jev"))
+export function routeTargets(routes: WorkflowRoutes): RouteTarget[] {
+	return routes.nodes.flatMap((node) =>
+		node.kind === "model"
+			? [
+					{
+						nodeId: node.id,
+						provider: node.provider,
+						model: node.model,
+						prompt: node.prompt,
+					},
+				]
+			: [],
 	);
+}
+
+export function routesUseJev(routes: WorkflowRoutes): boolean {
+	return routes.nodes.some((node) => node.kind === "jev");
 }

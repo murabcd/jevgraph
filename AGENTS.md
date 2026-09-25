@@ -22,7 +22,7 @@ There are no existing users who need legacy formats or adapters. Remove supersed
 
 ## Architecture Boundaries
 
-Input can connect directly to a Model or through Jev. Jev evaluates the configured Choice, Noul, or Score question only on the routed path. The server calls Jev, OpenAI, and Gemini through direct AI SDK provider packages; do not add AI Gateway. The React Flow graph determines the selected model for direct paths and each Jev output. Keep provider calls and API keys on the server. Chat messages live in memory, while graph layout, theme, and chat panel visibility persist in browser local storage.
+The chat composer supplies input for each turn. An optional Prompt node supplies reusable system instructions; the graph can start directly at a Model or Jev when Prompt is absent. Jev evaluates its configured Choice, Noul, or Score question only on a reached path. Model nodes can continue to other nodes, run in parallel, join, or use an explicit backup; Jev can repeat a bounded branch. The server calls Jev, OpenAI, and Gemini through direct AI SDK provider packages; do not add AI Gateway. Keep provider calls and API keys on the server. Chat messages live in memory, while the graph, viewport, theme, and chat panel visibility persist in browser local storage.
 
 ## Build, Test, and Development Commands
 

@@ -7,37 +7,66 @@ import {
 	questionOutputs,
 } from "@/lib/jev-question";
 import {
-	defaultConfig,
-	type JevRoutes,
-	MAX_REQUEST_PROMPT_LENGTH,
+	DEFAULT_GOOGLE_MODEL,
+	DEFAULT_OPENAI_MODEL,
+	MAX_PROMPT_LENGTH,
 	type NodeTiming,
-	type Routes,
-	routesSchema,
+	type WorkflowRoutes,
+	workflowRoutesSchema,
 } from "@/lib/routing";
 
 export type NodeKind = "input" | "jev" | "google" | "openai";
 export type CreatableNodeKind = "input" | "jev" | "model";
-export type FlowNode = Node<
-	{
-		kind: NodeKind;
-		active: boolean;
-		model?: string;
-		question?: JevQuestion;
-		prompt?: string;
-		entry?: boolean;
-		decision?: string;
-		usedBranch?: string;
-		step?: string;
-		timing?: NodeTiming;
-		onModelChange?: (nodeId: string, model: string) => void;
-		onPromptChange?: (prompt: string) => void;
-		onQuestionChange?: (nodeId: string, question: JevQuestion) => void;
-		onDuplicateNode?: (nodeId: string) => void;
-		onRemoveNode?: (nodeId: string) => void;
-		editingDisabled?: boolean;
-	},
-	"route"
->;
+type NodeViewData = {
+	active: boolean;
+	entry?: boolean;
+	hasRepeat?: boolean;
+	fallbackConnected?: boolean;
+	isBackup?: boolean;
+	decision?: string;
+	output?: string;
+	usedBranches?: ReadonlySet<string>;
+	step?: string;
+	timing?: NodeTiming;
+	onDuplicateNode?: (nodeId: string) => void;
+	onRemoveNode?: (nodeId: string) => void;
+	editingDisabled?: boolean;
+	onInspectNode?: (nodeId: string) => void;
+};
+
+type NodeData = NodeViewData &
+	(
+		| { kind: "input"; prompt?: string; question?: never; model?: never }
+		| {
+				kind: "jev";
+				question: JevQuestion;
+				maxRepeats?: number;
+				prompt?: never;
+				model?: never;
+		  }
+		| {
+				kind: "google" | "openai";
+				model: string;
+				prompt?: string;
+				question?: never;
+		  }
+	);
+
+export type FlowNode = Node<NodeData, "route">;
+
+export function defaultNodeData(
+	kind: CreatableNodeKind,
+	provider: "google" | "openai" = "openai",
+): FlowNode["data"] {
+	if (kind === "input") return { kind, active: false };
+	if (kind === "jev")
+		return { kind, active: false, question: defaultJevQuestion() };
+	return {
+		kind: provider,
+		active: false,
+		model: provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL,
+	};
+}
 const startingNodes: FlowNode[] = [
 	{
 		id: "input",
@@ -55,13 +84,13 @@ const startingNodes: FlowNode[] = [
 		id: "google",
 		type: "route",
 		position: { x: 730, y: 65 },
-		data: { kind: "google", active: false, model: defaultConfig.googleModel },
+		data: { kind: "google", active: false, model: DEFAULT_GOOGLE_MODEL },
 	},
 	{
 		id: "openai",
 		type: "route",
 		position: { x: 730, y: 405 },
-		data: { kind: "openai", active: false, model: defaultConfig.openaiModel },
+		data: { kind: "openai", active: false, model: DEFAULT_OPENAI_MODEL },
 	},
 ];
 
@@ -94,21 +123,24 @@ const persistedNodeSchema = z.object({
 	data: z.discriminatedUnion("kind", [
 		z.object({
 			kind: z.literal("input"),
-			prompt: z.string().max(MAX_REQUEST_PROMPT_LENGTH).optional(),
+			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 		}),
 		z.object({
 			kind: z.literal("jev"),
 			question: jevQuestionSchema,
+			maxRepeats: z.number().int().min(1).max(5).optional(),
 			entry: z.boolean().optional(),
 		}),
 		z.object({
 			kind: z.literal("google"),
-			model: z.string().optional(),
+			model: z.string().min(1),
+			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 			entry: z.boolean().optional(),
 		}),
 		z.object({
 			kind: z.literal("openai"),
-			model: z.string().optional(),
+			model: z.string().min(1),
+			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 			entry: z.boolean().optional(),
 		}),
 	]),
@@ -119,7 +151,29 @@ const persistedEdgeSchema = z.object({
 	source: z.string(),
 	sourceHandle: z.string().nullish(),
 	target: z.string(),
+	data: z.object({ repeat: z.boolean() }).optional(),
 });
+
+export function reachesNode(
+	start: string,
+	target: string,
+	edges: Edge[],
+): boolean {
+	const seen = new Set<string>();
+	const pending = [start];
+	while (pending.length > 0) {
+		const current = pending.pop();
+		if (!current || seen.has(current)) continue;
+		if (current === target) return true;
+		seen.add(current);
+		pending.push(
+			...edges
+				.filter((edge) => edge.source === current && !edge.data?.repeat)
+				.map((edge) => edge.target),
+		);
+	}
+	return false;
+}
 
 export function canConnectNodes(
 	connection: { source: string; sourceHandle?: string | null; target: string },
@@ -129,19 +183,42 @@ export function canConnectNodes(
 	const source = nodes.find((node) => node.id === connection.source);
 	const target = nodes.find((node) => node.id === connection.target);
 	if (!source || !target || source.id === target.id) return false;
-	const visited = new Set<string>();
-	const stack = [target.id];
-	while (stack.length > 0) {
-		const current = stack.pop();
-		if (!current || visited.has(current)) continue;
-		if (current === source.id) return false;
-		visited.add(current);
-		stack.push(
-			...edges
-				.filter((edge) => edge.source === current)
-				.map((edge) => edge.target),
-		);
-	}
+	if (
+		connection.sourceHandle === "fallback" &&
+		hasFallbackConnection(source.id, edges)
+	)
+		return false;
+	if (
+		connection.sourceHandle !== "fallback" &&
+		edges.some(
+			(edge) =>
+				edge.sourceHandle === "fallback" &&
+				(edge.target === target.id || edge.target === source.id),
+		)
+	)
+		return false;
+	if (
+		edges.some(
+			(edge) =>
+				edge.source === connection.source &&
+				(edge.sourceHandle ?? null) === (connection.sourceHandle ?? null) &&
+				edge.target === connection.target,
+		)
+	)
+		return false;
+	const createsCycle = reachesNode(target.id, source.id, edges);
+	if (
+		createsCycle &&
+		(source.data.kind !== "jev" ||
+			(target.data.kind !== "google" && target.data.kind !== "openai") ||
+			edges.some(
+				(edge) =>
+					edge.source === source.id &&
+					edge.data?.repeat &&
+					edge.sourceHandle !== connection.sourceHandle,
+			))
+	)
+		return false;
 	if (source.data.kind === "input") {
 		return (
 			target.data.kind === "jev" ||
@@ -159,10 +236,24 @@ export function canConnectNodes(
 				) &&
 				(targetIsModel || target.data.kind === "jev"),
 		);
+	if (connection.sourceHandle === "next")
+		return targetIsModel || target.data.kind === "jev";
 	return (
+		(source.data.kind === "google" || source.data.kind === "openai") &&
 		targetIsModel &&
 		connection.sourceHandle === "fallback" &&
-		!edges.some((edge) => edge.source === target.id)
+		!edges.some(
+			(edge) => edge.source === target.id || edge.target === target.id,
+		)
+	);
+}
+
+export function hasFallbackConnection(
+	sourceId: string,
+	edges: Edge[],
+): boolean {
+	return edges.some(
+		(edge) => edge.source === sourceId && edge.sourceHandle === "fallback",
 	);
 }
 
@@ -219,7 +310,13 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 				data: {
 					kind: node.data.kind,
 					...(node.data.kind === "input" ? { prompt: node.data.prompt } : {}),
+					...(node.data.kind === "google" || node.data.kind === "openai"
+						? { prompt: node.data.prompt }
+						: {}),
 					...(node.data.entry ? { entry: true } : {}),
+					...(node.data.kind === "jev" && node.data.maxRepeats
+						? { maxRepeats: node.data.maxRepeats }
+						: {}),
 					model: node.data.model,
 					question: node.data.question,
 				},
@@ -229,6 +326,7 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 				source: edge.source,
 				sourceHandle: edge.sourceHandle,
 				target: edge.target,
+				data: edge.data?.repeat ? { repeat: true } : undefined,
 				type: "default",
 			})),
 		}),
@@ -240,16 +338,19 @@ export function removeGraphNode(
 	edges: Edge[],
 	nodeId: string,
 ) {
-	const nextEntry =
+	const nextEntries = new Set(
 		nodeId === "input"
-			? edges.find((edge) => edge.source === nodeId)?.target
-			: undefined;
+			? edges
+					.filter((edge) => edge.source === nodeId)
+					.map((edge) => edge.target)
+			: [],
+	);
 	return {
 		nodes: nodes
 			.filter((node) => node.id !== nodeId)
 			.map((node) =>
-				nextEntry
-					? { ...node, data: { ...node.data, entry: node.id === nextEntry } }
+				nextEntries.size > 0
+					? { ...node, data: { ...node.data, entry: nextEntries.has(node.id) } }
 					: node,
 			),
 		edges: edges.filter(
@@ -258,28 +359,27 @@ export function removeGraphNode(
 	};
 }
 
-function graphEntryNode(nodes: FlowNode[], edges: Edge[]) {
+function graphEntryNodes(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
 	const system = nodes.find(
 		(node) => node.id === "input" && node.data.kind === "input",
 	);
-	if (system) return system;
+	if (system) return [system];
 	const explicit = nodes.filter((node) => node.data.entry);
-	if (explicit.length === 1) return explicit[0];
-	if (explicit.length > 1) return null;
+	if (explicit.length > 0) return explicit;
 	const targets = new Set(edges.map((edge) => edge.target));
 	const roots = nodes.filter((node) => !targets.has(node.id));
-	return roots.length === 1 ? roots[0] : null;
+	return roots.length === 1 ? roots : [];
 }
 
 export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 	const nodesById = new Map(nodes.map((node) => [node.id, node]));
 	const targetsBySource = new Map<string, string[]>();
-	const connectedTargets = new Set<string>();
+	const backupTargets = new Set<string>();
 	for (const edge of edges) {
 		const targets = targetsBySource.get(edge.source) ?? [];
 		targets.push(edge.target);
 		targetsBySource.set(edge.source, targets);
-		connectedTargets.add(edge.target);
+		if (edge.sourceHandle === "fallback") backupTargets.add(edge.target);
 	}
 
 	const ordered: FlowNode[] = [];
@@ -292,20 +392,24 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 		for (const target of targetsBySource.get(id) ?? []) visit(target);
 	}
 
-	const entry = graphEntryNode(nodes, edges);
-	if (entry) visit(entry.id);
+	for (const entry of graphEntryNodes(nodes, edges)) visit(entry.id);
 	for (const node of nodes) visit(node.id);
 
 	return new Map(
 		ordered.map((node, index) => {
 			const type =
 				node.data.kind === "input"
-					? "SYSTEM"
+					? "PROMPT"
 					: node.data.kind === "jev"
 						? "ROUTER"
-						: connectedTargets.has(node.id) || entry?.id === node.id
-							? "OUTPUT"
-							: "MODEL";
+						: backupTargets.has(node.id)
+							? "BACKUP"
+							: edges.some(
+										(edge) =>
+											edge.source === node.id && edge.sourceHandle === "next",
+									)
+								? "MODEL"
+								: "OUTPUT";
 			return [node.id, `${String(index + 1).padStart(2, "0")} / ${type}`];
 		}),
 	);
@@ -314,52 +418,26 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 export function routesFromGraph(
 	nodes: FlowNode[],
 	edges: Edge[],
-): Routes | null {
-	const entry = graphEntryNode(nodes, edges);
-	if (!entry) return null;
-	const systemNodeId =
-		entry.data.kind === "input" ? ("input" as const) : undefined;
-	const inputEdges = edges.filter((edge) => edge.source === "input");
-	if (entry.data.kind === "input" && inputEdges.length !== 1) return null;
-	const firstTarget =
-		entry.data.kind === "input" ? inputEdges[0].target : entry.id;
+): WorkflowRoutes | null {
+	const entries = graphEntryNodes(nodes, edges);
+	if (entries.length === 0) return null;
 	const reachable = new Set<string>();
 	const visit = (id: string) => {
 		if (reachable.has(id)) return;
 		reachable.add(id);
-		for (const edge of edges.filter((entry) => entry.source === id))
+		for (const edge of edges.filter((candidate) => candidate.source === id))
 			visit(edge.target);
 	};
-	visit(entry.id);
-	const relevantNodes = nodes.filter((node) => reachable.has(node.id));
-	const relevantEdges = edges.filter((edge) => reachable.has(edge.source));
-	const targetFor = (nodeId: string | undefined) => {
-		const node = nodes.find((entry) => entry.id === nodeId);
-		if (
-			!node ||
-			(node.data.kind !== "google" && node.data.kind !== "openai") ||
-			!node.data.model
-		)
-			return null;
-		return {
-			nodeId: node.id,
-			provider: node.data.kind,
-			model: node.data.model,
-		};
-	};
-	const jevNodes = relevantNodes.filter((node) => node.data.kind === "jev");
-	const hasFallback = relevantEdges.some(
-		(edge) => edge.sourceHandle === "fallback",
-	);
-	if (jevNodes.length > 1 || hasFallback) {
-		const workflow = {
-			kind: "workflow" as const,
-			...(systemNodeId ? { systemNodeId } : {}),
-			nodes: [
-				...(entry.data.kind === "input"
-					? []
-					: [{ id: "input", kind: "input" as const }]),
-				...relevantNodes.map((node) => {
+	for (const entry of entries) visit(entry.id);
+	const hasSystem = entries[0].data.kind === "input";
+	const workflow = {
+		kind: "workflow" as const,
+		...(hasSystem ? { systemNodeId: "input" as const } : {}),
+		nodes: [
+			...(!hasSystem ? [{ id: "input", kind: "input" as const }] : []),
+			...nodes
+				.filter((node) => reachable.has(node.id))
+				.map((node) => {
 					if (node.data.kind === "input")
 						return { id: node.id, kind: "input" as const };
 					if (node.data.kind === "jev")
@@ -367,55 +445,40 @@ export function routesFromGraph(
 							id: node.id,
 							kind: "jev" as const,
 							question: node.data.question,
+							...(node.data.maxRepeats
+								? { maxRepeats: node.data.maxRepeats }
+								: {}),
 						};
 					return {
 						id: node.id,
 						kind: "model" as const,
 						provider: node.data.kind,
 						model: node.data.model,
+						...(node.data.prompt ? { prompt: node.data.prompt } : {}),
 					};
 				}),
-			],
-			edges: [
-				...(entry.data.kind === "input"
-					? []
-					: [{ source: "input", target: entry.id }]),
-				...relevantEdges.map((edge) => ({
+		],
+		edges: [
+			...(!hasSystem
+				? entries.map((entry) => ({
+						id: `chat-entry-${entry.id}`,
+						source: "input",
+						target: entry.id,
+					}))
+				: []),
+			...edges
+				.filter((edge) => reachable.has(edge.source))
+				.map((edge) => ({
+					id: edge.id,
 					source: edge.source,
 					...(edge.sourceHandle ? { sourceHandle: edge.sourceHandle } : {}),
+					...(edge.data?.repeat ? { repeat: true } : {}),
 					target: edge.target,
 				})),
-			],
-		};
-		const parsed = routesSchema.safeParse(workflow);
-		return parsed.success ? parsed.data : null;
-	}
-	if (jevNodes.length === 0) {
-		const target = targetFor(firstTarget);
-		return target
-			? { kind: "direct", ...(systemNodeId ? { systemNodeId } : {}), target }
-			: null;
-	}
-	const jevId = jevNodes[0].id;
-	if (firstTarget !== jevId) return null;
-	const question = jevNodes[0].data.question;
-	if (!question) return null;
-	const targets: JevRoutes["targets"] = {};
-	for (const output of questionOutputs(question)) {
-		const edge = edges.find(
-			(entry) => entry.source === jevId && entry.sourceHandle === output.id,
-		);
-		const target = targetFor(edge?.target);
-		if (!target) return null;
-		targets[output.id] = target;
-	}
-	return {
-		kind: "jev",
-		nodeId: jevId,
-		...(systemNodeId ? { systemNodeId } : {}),
-		question,
-		targets,
+		],
 	};
+	const parsed = workflowRoutesSchema.safeParse(workflow);
+	return parsed.success ? parsed.data : null;
 }
 
 type OutputTier = "low" | "high";

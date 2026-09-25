@@ -32,14 +32,14 @@ import {
 } from "@/components/ui/popover";
 import {
 	type KeyStatus,
-	type Routes,
 	routesUseJev,
 	routeTargets,
+	type WorkflowRoutes,
 } from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
 export type ChatPanelProps = {
-	routes: Routes | null;
+	routes: WorkflowRoutes | null;
 	onClose: () => void;
 	draft: string;
 	onDraftChange: (value: string) => void;
@@ -59,7 +59,7 @@ function KeyStatusNotice({
 }: {
 	status?: KeyStatus;
 	unavailable: boolean;
-	routes: Routes | null;
+	routes: WorkflowRoutes | null;
 }) {
 	const targets = routes ? routeTargets(routes) : [];
 	const usesJev = routes ? routesUseJev(routes) : false;
@@ -200,9 +200,9 @@ export function ChatPanel({
 								</EmptyMedia>
 								<EmptyTitle>Ask anything</EmptyTitle>
 								<EmptyDescription>
-									{routes && !routesUseJev(routes)
-										? "Start a conversation with the connected model."
-										: "Start a conversation. Jev chooses a model for every message."}
+									{routes
+										? "Each message runs through the connected chatflow."
+										: "Connect the chatflow to start a conversation."}
 								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>

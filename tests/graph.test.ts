@@ -10,11 +10,7 @@ import {
 	routesFromGraph,
 	saveGraph,
 } from "../src/flow/graph";
-import {
-	defaultJevQuestion,
-	type JevQuestionType,
-	questionOutputs,
-} from "../src/lib/jev-question";
+import { defaultJevQuestion, questionOutputs } from "../src/lib/jev-question";
 import { routesUseJev } from "../src/lib/routing";
 import { connectedWorkflowGraph } from "./workflow-graph";
 
@@ -37,151 +33,265 @@ afterAll(() => {
 	else Reflect.deleteProperty(globalThis, "localStorage");
 });
 
-function jevRoutes(nodes: FlowNode[], edges: Edge[]) {
-	const routes = routesFromGraph(nodes, edges);
-	if (routes?.kind !== "jev") throw new Error("Expected Jev route");
-	return routes;
+function node(
+	id: string,
+	kind: "input" | "jev" | "openai" | "google",
+	x: number,
+): FlowNode {
+	return {
+		id,
+		type: "route",
+		position: { x, y: 0 },
+		data: {
+			kind,
+			active: false,
+			...(kind === "jev" ? { question: defaultJevQuestion() } : {}),
+			...(kind === "openai" ? { model: "gpt-5-mini" } : {}),
+			...(kind === "google" ? { model: "gemini-3.5-flash-lite" } : {}),
+		},
+	};
 }
 
-describe("editable routing graph", () => {
-	test("compiles and persists connected Jev routers with an explicit model fallback", () => {
-		const example = connectedWorkflowGraph();
-		const routes = routesFromGraph(example.nodes, example.edges);
+describe("editable chatflow graph", () => {
+	test("compiles, persists, and restores a connected Jev flow with a model backup", () => {
+		const graph = connectedWorkflowGraph();
+		const routes = routesFromGraph(graph.nodes, graph.edges);
 		expect(routes?.kind).toBe("workflow");
-		if (routes?.kind !== "workflow") throw new Error("Expected workflow route");
-		expect(routes.nodes.filter((node) => node.kind === "jev")).toHaveLength(2);
-		expect(
-			canConnectNodes(
-				{
-					source: "first-router",
-					sourceHandle: "no",
-					target: "second-router",
-				},
-				example.nodes,
-			),
-		).toBe(true);
-		expect(
-			canConnectNodes(
-				{
-					source: "primary-model",
-					sourceHandle: "fallback",
-					target: "backup-model",
-				},
-				example.nodes,
-			),
-		).toBe(true);
-		expect(
-			canConnectNodes(
-				{
-					source: "second-router",
-					sourceHandle: "no",
-					target: "first-router",
-				},
-				example.nodes,
-				example.edges,
-			),
-		).toBe(false);
-		expect(
-			canConnectNodes(
-				{
-					source: "backup-model",
-					sourceHandle: "fallback",
-					target: "primary-model",
-				},
-				example.nodes,
-				example.edges,
-			),
-		).toBe(false);
-		saveGraph(example.nodes, example.edges);
-		const saved = readGraph();
-		expect(routesFromGraph(saved.nodes, saved.edges)).toEqual(routes);
+		expect(routes?.nodes.filter((item) => item.kind === "jev")).toHaveLength(2);
+		saveGraph(graph.nodes, graph.edges);
+		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
+			routes,
+		);
 		expect(
 			routesFromGraph(
-				example.nodes,
-				example.edges.filter((edge) => edge.id !== "second-no"),
+				graph.nodes,
+				graph.edges.filter((edge) => edge.id !== "second-no"),
 			),
 		).toBeNull();
-		expect(
-			routesFromGraph(example.nodes, [
-				...example.edges,
-				{
-					id: "cycle",
-					source: "second-router",
-					sourceHandle: "no",
-					target: "first-router",
-				},
-			]),
-		).toBeNull();
 	});
-	test("only connects an existing source output to a compatible target", () => {
-		const nodes: FlowNode[] = [
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "jev",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "jev", active: false, question: defaultJevQuestion() },
-			},
-			{
-				id: "model",
-				type: "route",
-				position: { x: 2, y: 0 },
-				data: { kind: "openai", active: false, model: "gpt-5-mini" },
-			},
+
+	test("connects models downstream to Jev or another model, including joins", () => {
+		const nodes = [
+			node("input", "input", 0),
+			node("first", "openai", 1),
+			node("judge", "jev", 2),
+			node("final", "google", 3),
 		];
-		expect(canConnectNodes({ source: "input", target: "jev" }, nodes)).toBe(
-			true,
-		);
-		expect(canConnectNodes({ source: "input", target: "model" }, nodes)).toBe(
-			true,
-		);
+		const edges: Edge[] = [
+			{ id: "entry", source: "input", target: "first" },
+			{ id: "next", source: "first", sourceHandle: "next", target: "judge" },
+		];
 		expect(
 			canConnectNodes(
-				{ source: "jev", sourceHandle: "fast", target: "model" },
+				{ source: "first", sourceHandle: "next", target: "judge" },
 				nodes,
 			),
 		).toBe(true);
 		expect(
 			canConnectNodes(
-				{ source: "jev", sourceHandle: "missing", target: "model" },
+				{ source: "first", sourceHandle: "next", target: "final" },
 				nodes,
+				edges,
+			),
+		).toBe(true);
+		expect(
+			canConnectNodes(
+				{ source: "first", sourceHandle: "next", target: "judge" },
+				nodes,
+				edges,
 			),
 		).toBe(false);
-		expect(canConnectNodes({ source: "model", target: "jev" }, nodes)).toBe(
-			false,
+		expect(
+			canConnectNodes(
+				{ source: "judge", sourceHandle: "fast", target: "first" },
+				nodes,
+				edges,
+			),
+		).toBe(true);
+		expect(
+			canConnectNodes(
+				{ source: "final", sourceHandle: "fallback", target: "first" },
+				nodes,
+				edges,
+			),
+		).toBe(false);
+	});
+
+	test("does not replace an occupied error branch with another backup", () => {
+		const nodes = [
+			node("input", "input", 0),
+			node("primary", "openai", 1),
+			node("backup", "google", 2),
+			node("another", "openai", 3),
+		];
+		const occupied: Edge[] = [
+			{ id: "entry", source: "input", target: "primary" },
+			{
+				id: "backup-edge",
+				source: "primary",
+				sourceHandle: "fallback",
+				target: "backup",
+			},
+		];
+		const connection = {
+			source: "primary",
+			sourceHandle: "fallback",
+			target: "another",
+		};
+		expect(canConnectNodes(connection, nodes, occupied)).toBe(false);
+		expect(canConnectNodes(connection, nodes, occupied.slice(0, 1))).toBe(true);
+	});
+
+	test("compiles sequential model output into Jev and a final model", () => {
+		const nodes = [
+			node("input", "input", 0),
+			node("first", "openai", 1),
+			node("judge", "jev", 2),
+			node("final", "google", 3),
+		];
+		nodes[1].data.prompt = "Write a draft";
+		const edges: Edge[] = [
+			{ id: "entry", source: "input", target: "first" },
+			{ id: "next", source: "first", sourceHandle: "next", target: "judge" },
+			{ id: "fast", source: "judge", sourceHandle: "fast", target: "final" },
+			{ id: "deep", source: "judge", sourceHandle: "deep", target: "final" },
+		];
+		const routes = routesFromGraph(nodes, edges);
+		if (!routes) throw new Error("Expected valid routes");
+		expect(routesUseJev(routes)).toBe(true);
+		expect(routes?.nodes.find((item) => item.id === "first")).toMatchObject({
+			prompt: "Write a draft",
+		});
+		expect(nodeStepLabels(nodes, edges).get("first")).toBe("02 / MODEL");
+		expect(nodeStepLabels(nodes, edges).get("final")).toBe("04 / OUTPUT");
+		saveGraph(nodes, edges);
+		expect(
+			readGraph().nodes.find((item) => item.id === "first")?.data.prompt,
+		).toBe("Write a draft");
+	});
+
+	test("keeps a direct chatflow when System is removed", () => {
+		const nodes = [node("input", "input", 0), node("model", "openai", 1)];
+		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
+		const withSystem = routesFromGraph(nodes, edges);
+		expect(withSystem?.systemNodeId).toBe("input");
+		const removed = removeGraphNode(nodes, edges, "input");
+		const withoutSystem = routesFromGraph(removed.nodes, removed.edges);
+		expect(withoutSystem?.systemNodeId).toBeUndefined();
+		expect(withoutSystem?.edges).toEqual([
+			{ id: "chat-entry-model", source: "input", target: "model" },
+		]);
+		expect(withoutSystem?.nodes[0]).toEqual({ id: "input", kind: "input" });
+	});
+
+	test("preserves every parallel chat entry when System is removed", () => {
+		const nodes = [
+			node("input", "input", 0),
+			node("first", "openai", 1),
+			node("second", "google", 2),
+			node("join", "jev", 3),
+			node("final", "openai", 4),
+		];
+		const edges: Edge[] = [
+			{ id: "first-entry", source: "input", target: "first" },
+			{ id: "second-entry", source: "input", target: "second" },
+			{
+				id: "first-join",
+				source: "first",
+				sourceHandle: "next",
+				target: "join",
+			},
+			{
+				id: "second-join",
+				source: "second",
+				sourceHandle: "next",
+				target: "join",
+			},
+			{ id: "yes", source: "join", sourceHandle: "fast", target: "final" },
+			{ id: "no", source: "join", sourceHandle: "deep", target: "final" },
+		];
+		const removed = removeGraphNode(nodes, edges, "input");
+		const routes = routesFromGraph(removed.nodes, removed.edges);
+		expect(
+			routes?.edges
+				.filter((edge) => edge.source === "input")
+				.map((edge) => edge.target),
+		).toEqual(["first", "second"]);
+	});
+
+	test("keeps a bounded Jev feedback edge after saving the graph", () => {
+		const nodes = [
+			node("input", "input", 0),
+			node("draft", "openai", 1),
+			node("judge", "jev", 2),
+			node("final", "openai", 3),
+		];
+		nodes[2].data.maxRepeats = 2;
+		const edges: Edge[] = [
+			{ id: "entry", source: "input", target: "draft" },
+			{ id: "check", source: "draft", sourceHandle: "next", target: "judge" },
+			{
+				id: "retry",
+				source: "judge",
+				sourceHandle: "fast",
+				target: "draft",
+				data: { repeat: true },
+			},
+			{ id: "done", source: "judge", sourceHandle: "deep", target: "final" },
+		];
+		const routes = routesFromGraph(nodes, edges);
+		expect(routes?.edges.find((edge) => edge.id === "retry")?.repeat).toBe(
+			true,
 		);
-		expect(canConnectNodes({ source: "input", target: "input" }, nodes)).toBe(
-			false,
+		expect(routes?.nodes.find((item) => item.id === "judge")).toMatchObject({
+			maxRepeats: 2,
+		});
+		saveGraph(nodes, edges);
+		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
+			routes,
 		);
 	});
 
-	test("keeps an intentionally empty graph after refresh", () => {
+	test("requires every configured Jev output before chat can send", () => {
+		const nodes = [
+			node("input", "input", 0),
+			node("judge", "jev", 1),
+			node("model", "openai", 2),
+		];
+		const edges: Edge[] = [
+			{ id: "entry", source: "input", target: "judge" },
+			{ id: "fast", source: "judge", sourceHandle: "fast", target: "model" },
+		];
+		expect(routesFromGraph(nodes, edges)).toBeNull();
+		expect(
+			routesFromGraph(nodes, [
+				...edges,
+				{ id: "deep", source: "judge", sourceHandle: "deep", target: "model" },
+			]),
+		).not.toBeNull();
+	});
+
+	test("preserves stable Choice edges when labels change", () => {
+		const previous = defaultJevQuestion("choice");
+		if (previous.type !== "choice") throw new Error("Expected Choice");
+		const next = {
+			...previous,
+			options: previous.options.map((option) =>
+				option.id === "fast" ? { ...option, label: "Cheap" } : option,
+			),
+		};
+		const edges: Edge[] = [
+			{ id: "fast", source: "judge", sourceHandle: "fast", target: "model" },
+		];
+		expect(questionOutputs(next)[0].label).toBe("Cheap");
+		expect(remapQuestionEdges(previous, next, edges, "judge")[0]).toMatchObject(
+			{ sourceHandle: "fast", target: "model" },
+		);
+	});
+
+	test("keeps an intentionally empty graph and rejects malformed persisted nodes", () => {
 		saveGraph([], []);
 		expect(readGraph()).toEqual({ nodes: [], edges: [] });
-	});
-
-	test("persists the System node prompt across graph reloads", () => {
-		const prompt = "Answer every message in one sentence.";
-		saveGraph(
-			[
-				{
-					id: "input",
-					type: "route",
-					position: { x: 0, y: 0 },
-					data: { kind: "input", active: false, prompt },
-				},
-			],
-			[],
-		);
-		expect(readGraph().nodes[0].data.prompt).toBe(prompt);
-	});
-
-	test("loads valid graph entries without trusting malformed persisted data", () => {
 		stored.set(
 			"router:graph:v2",
 			JSON.stringify({
@@ -205,375 +315,8 @@ describe("editable routing graph", () => {
 			}),
 		);
 		const graph = readGraph();
-		expect(graph.nodes.map((node) => node.id)).toEqual(["input", "model"]);
-		expect(graph.edges.map((edge) => edge.id)).toEqual(["valid"]);
-		expect(routesFromGraph(graph.nodes, graph.edges)?.kind).toBe("direct");
-	});
-
-	test("routes through Jev after removing the optional System node", () => {
-		const nodes: FlowNode[] = [
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "jev",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "jev", active: false, question: defaultJevQuestion() },
-			},
-			{
-				id: "fast",
-				type: "route",
-				position: { x: 2, y: 0 },
-				data: { kind: "google", active: false, model: "gemini-3.5-flash-lite" },
-			},
-			{
-				id: "deep",
-				type: "route",
-				position: { x: 2, y: 1 },
-				data: { kind: "openai", active: false, model: "gpt-5-mini" },
-			},
-		];
-		const branches: Edge[] = [
-			{ id: "fast-edge", source: "jev", sourceHandle: "fast", target: "fast" },
-			{ id: "deep-edge", source: "jev", sourceHandle: "deep", target: "deep" },
-		];
-		expect(routesFromGraph(nodes, branches)).toBeNull();
-		const withoutSystem = removeGraphNode(
-			nodes,
-			[{ id: "input-edge", source: "input", target: "jev" }, ...branches],
-			"input",
-		);
-		expect(
-			jevRoutes(withoutSystem.nodes, withoutSystem.edges).targets.fast.nodeId,
-		).toBe("fast");
-		expect(
-			withoutSystem.nodes.find((node) => node.id === "jev")?.data.entry,
-		).toBe(true);
-		saveGraph(withoutSystem.nodes, withoutSystem.edges);
-		const restored = readGraph();
-		expect(jevRoutes(restored.nodes, restored.edges).targets.deep.nodeId).toBe(
-			"deep",
-		);
-		expect(
-			jevRoutes(nodes, [
-				{ id: "input-edge", source: "input", target: "jev" },
-				...branches,
-			]).targets.fast.nodeId,
-		).toBe("fast");
-		const renamedNodes = withoutSystem.nodes.map((node) =>
-			node.id === "jev" ? { ...node, id: "router-a" } : node,
-		);
-		const renamedEdges = withoutSystem.edges.map((edge) => ({
-			...edge,
-			source: edge.source === "jev" ? "router-a" : edge.source,
-			target: edge.target === "jev" ? "router-a" : edge.target,
-		}));
-		const renamed = jevRoutes(renamedNodes, renamedEdges);
-		expect(renamed.nodeId).toBe("router-a");
-		expect(renamed.targets).toEqual(
-			jevRoutes(withoutSystem.nodes, withoutSystem.edges).targets,
-		);
-	});
-
-	test("requires every configured Choice output to have a model connection", () => {
-		const question = defaultJevQuestion("choice");
-		if (question.type !== "choice") throw new Error("Expected Choice question");
-		question.options.push({
-			id: "balanced",
-			label: "Balanced",
-			description: "Moderate reasoning.",
-		});
-		const nodes: FlowNode[] = [
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "jev",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "jev", active: false, question },
-			},
-			{
-				id: "model",
-				type: "route",
-				position: { x: 2, y: 0 },
-				data: { kind: "google", active: false, model: "gemini-3.5-flash-lite" },
-			},
-		];
-		const edges: Edge[] = [
-			{ id: "input-jev", source: "input", target: "jev" },
-			{ id: "fast", source: "jev", sourceHandle: "fast", target: "model" },
-			{ id: "deep", source: "jev", sourceHandle: "deep", target: "model" },
-		];
-		expect(routesFromGraph(nodes, edges)).toBeNull();
-		expect(
-			jevRoutes(nodes, [
-				...edges,
-				{
-					id: "balanced",
-					source: "jev",
-					sourceHandle: "balanced",
-					target: "model",
-				},
-			]).targets.balanced.nodeId,
-		).toBe("model");
-	});
-
-	test("keeps the simpler and deeper model connections across question types", () => {
-		const types: JevQuestionType[] = ["choice", "noul", "score"];
-		const branchIds = {
-			choice: ["fast", "deep"],
-			noul: ["no", "yes"],
-			score: ["score-0", "score-2"],
-		} as const;
-		const nodes: FlowNode[] = [
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "jev",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "jev", active: false },
-			},
-			{
-				id: "simple",
-				type: "route",
-				position: { x: 2, y: 0 },
-				data: { kind: "google", active: false, model: "gemini-3.5-flash-lite" },
-			},
-			{
-				id: "complex",
-				type: "route",
-				position: { x: 2, y: 1 },
-				data: { kind: "openai", active: false, model: "gpt-5-mini" },
-			},
-		];
-		for (const previousType of types) {
-			const previousQuestion = defaultJevQuestion(previousType);
-			const [previousLow, previousHigh] = branchIds[previousType];
-			const edges: Edge[] = [
-				{ id: "input-jev", source: "input", target: "jev" },
-				{
-					id: "simple",
-					source: "jev",
-					sourceHandle: previousLow,
-					target: "simple",
-				},
-				{
-					id: "complex",
-					source: "jev",
-					sourceHandle: previousHigh,
-					target: "complex",
-				},
-				...(previousType === "score"
-					? [
-							{
-								id: "middle",
-								source: "jev",
-								sourceHandle: "score-1",
-								target: "simple",
-							},
-						]
-					: []),
-			];
-			for (const nextType of types) {
-				const question = defaultJevQuestion(nextType);
-				const [low, high] = branchIds[nextType];
-				const remapped = remapQuestionEdges(previousQuestion, question, edges);
-				const nextNodes = nodes.map((node) =>
-					node.id === "jev"
-						? { ...node, data: { ...node.data, question } }
-						: node,
-				);
-				const connected = jevRoutes(nextNodes, remapped);
-				expect(connected.targets[low].nodeId).toBe("simple");
-				expect(connected.targets[high].nodeId).toBe("complex");
-				if (nextType === "score")
-					expect(connected.targets["score-1"].nodeId).toBe("simple");
-				expect(remapped).toHaveLength(nextType === "score" ? 4 : 3);
-			}
-		}
-	});
-
-	test("keeps a Choice connection when its label changes", () => {
-		const previous = defaultJevQuestion("choice");
-		if (previous.type !== "choice") throw new Error("Expected Choice");
-		const next = {
-			...previous,
-			options: previous.options.map((option) =>
-				option.id === "fast" ? { ...option, label: "Cheap" } : option,
-			),
-		};
-		const edges: Edge[] = [
-			{
-				id: "fast-model",
-				source: "jev",
-				sourceHandle: "fast",
-				target: "model",
-			},
-		];
-		expect(questionOutputs(next)[0].label).toBe("Cheap");
-		expect(remapQuestionEdges(previous, next, edges)[0]).toMatchObject({
-			sourceHandle: "fast",
-			target: "model",
-		});
-	});
-
-	test("keeps surviving Score connections when a level is removed", () => {
-		const previous = defaultJevQuestion("score");
-		if (previous.type !== "score") throw new Error("Expected Score");
-		const next = { ...previous, levels: previous.levels.slice(1) };
-		const edges: Edge[] = previous.levels.map((level) => ({
-			id: level.id,
-			source: "jev",
-			sourceHandle: level.id,
-			target: level.id,
-		}));
-		expect(
-			remapQuestionEdges(previous, next, edges).map(
-				(edge) => edge.sourceHandle,
-			),
-		).toEqual(["score-1", "score-2"]);
-		expect(questionOutputs(next).map((output) => output.label)).toEqual([
-			"Level 0",
-			"Level 1",
-		]);
-	});
-
-	test("connects System directly to a selected model without Jev", () => {
-		const nodes: FlowNode[] = [
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "selected-model",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "openai", active: false, model: "gpt-4.1" },
-			},
-		];
-		const edges: Edge[] = [
-			{ id: "input-model", source: "input", target: "selected-model" },
-		];
-		expect(routesFromGraph(nodes, edges)).toEqual({
-			kind: "direct",
-			systemNodeId: "input",
-			target: {
-				nodeId: "selected-model",
-				provider: "openai",
-				model: "gpt-4.1",
-			},
-		});
-		expect(nodeStepLabels(nodes, edges).get("selected-model")).toBe(
-			"02 / OUTPUT",
-		);
-		saveGraph(nodes, edges);
-		const saved = readGraph();
-		expect(routesFromGraph(saved.nodes, saved.edges)).toEqual(
-			routesFromGraph(nodes, edges),
-		);
-		const withoutSystem = removeGraphNode(nodes, edges, "input");
-		expect(routesFromGraph(withoutSystem.nodes, withoutSystem.edges)).toEqual({
-			kind: "direct",
-			target: {
-				nodeId: "selected-model",
-				provider: "openai",
-				model: "gpt-4.1",
-			},
-		});
-		expect(
-			nodeStepLabels(withoutSystem.nodes, withoutSystem.edges).get(
-				"selected-model",
-			),
-		).toBe("01 / OUTPUT");
-	});
-
-	test("a model-only fallback does not require Jev", () => {
-		const nodes: FlowNode[] = [
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "primary",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "openai", active: false, model: "gpt-5-mini" },
-			},
-			{
-				id: "backup",
-				type: "route",
-				position: { x: 2, y: 0 },
-				data: { kind: "google", active: false, model: "gemini-3.5-flash-lite" },
-			},
-		];
-		const routes = routesFromGraph(nodes, [
-			{ id: "input-primary", source: "input", target: "primary" },
-			{
-				id: "primary-backup",
-				source: "primary",
-				sourceHandle: "fallback",
-				target: "backup",
-			},
-		]);
-		expect(routes?.kind).toBe("workflow");
-		if (!routes) throw new Error("Expected model-only workflow");
-		expect(routesUseJev(routes)).toBe(false);
-	});
-
-	test("numbers routing outputs uniquely even when node storage order differs", () => {
-		const nodes: FlowNode[] = [
-			{
-				id: "high",
-				type: "route",
-				position: { x: 2, y: 1 },
-				data: { kind: "openai", active: false, model: "gpt-5-mini" },
-			},
-			{
-				id: "input",
-				type: "route",
-				position: { x: 0, y: 0 },
-				data: { kind: "input", active: false },
-			},
-			{
-				id: "low",
-				type: "route",
-				position: { x: 2, y: 0 },
-				data: { kind: "google", active: false, model: "gemini-3.5-flash-lite" },
-			},
-			{
-				id: "jev",
-				type: "route",
-				position: { x: 1, y: 0 },
-				data: { kind: "jev", active: false, question: defaultJevQuestion() },
-			},
-		];
-		const edges: Edge[] = [
-			{ id: "input-jev", source: "input", target: "jev" },
-			{ id: "jev-low", source: "jev", sourceHandle: "fast", target: "low" },
-			{ id: "jev-high", source: "jev", sourceHandle: "deep", target: "high" },
-		];
-		expect([...nodeStepLabels(nodes, edges)]).toEqual([
-			["input", "01 / SYSTEM"],
-			["jev", "02 / ROUTER"],
-			["low", "03 / OUTPUT"],
-			["high", "04 / OUTPUT"],
-		]);
+		expect(graph.nodes.map((item) => item.id)).toEqual(["input", "model"]);
+		expect(graph.edges.map((item) => item.id)).toEqual(["valid"]);
+		expect(routesFromGraph(graph.nodes, graph.edges)?.kind).toBe("workflow");
 	});
 });

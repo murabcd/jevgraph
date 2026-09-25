@@ -1,4 +1,4 @@
-import { Plus, X } from "lucide-react";
+import { Plus, Repeat2, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
 	Sheet,
 	SheetClose,
 	SheetContent,
@@ -21,7 +28,14 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { type JevQuestion, jevQuestionSchema } from "@/lib/jev-question";
+import {
+	defaultJevQuestion,
+	type JevQuestion,
+	type JevQuestionType,
+	jevQuestionSchema,
+	jevQuestionTypes,
+	questionTypeLabels,
+} from "@/lib/jev-question";
 import { cn } from "@/lib/utils";
 
 type ChoiceQuestion = Extract<JevQuestion, { type: "choice" }>;
@@ -37,6 +51,28 @@ const sectionFrameClassName =
 	"relative min-h-[132px] gap-1 rounded-lg border border-input bg-transparent px-3 py-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30";
 const sectionTextareaClassName =
 	"min-h-20 max-h-52 rounded-none border-0 bg-transparent px-0 py-0 text-sm leading-6 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent";
+
+function QuestionTypeOption({ type }: { type: JevQuestionType }) {
+	return (
+		<span className="flex items-center gap-2">
+			<img
+				src="/brands/typesafe.png"
+				alt=""
+				className="size-4 object-contain"
+			/>
+			{questionTypeLabels[type]}
+		</span>
+	);
+}
+
+function RepeatOption({ limit }: { limit: number }) {
+	return (
+		<span className="flex items-center gap-2">
+			<Repeat2 className="size-4" />
+			{limit} {limit === 1 ? "repeat" : "repeats"}
+		</span>
+	);
+}
 
 function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 	const updateOption = (
@@ -250,18 +286,25 @@ function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
 
 type Props = {
 	question: JevQuestion;
+	hasRepeat?: boolean;
+	maxRepeats: number;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onSave: (question: JevQuestion) => void;
+	onRepeatLimitChange: (limit: number) => void;
 };
 
 export function JevQuestionEditor({
 	question,
+	hasRepeat,
+	maxRepeats,
 	open,
 	onOpenChange,
 	onSave,
+	onRepeatLimitChange,
 }: Props) {
 	const [draft, setDraft] = useState<JevQuestion>(question);
+	const [repeatDraft, setRepeatDraft] = useState(maxRepeats);
 	const [error, setError] = useState("");
 	const save = () => {
 		const parsed = jevQuestionSchema.safeParse(draft);
@@ -270,16 +313,62 @@ export function JevQuestionEditor({
 			return;
 		}
 		onSave(parsed.data);
+		if (hasRepeat && repeatDraft !== maxRepeats)
+			onRepeatLimitChange(repeatDraft);
 		onOpenChange(false);
 	};
 	return (
-		<Sheet open={open} onOpenChange={onOpenChange}>
-			<SheetContent>
+		<Sheet
+			modal={false}
+			disablePointerDismissal
+			open={open}
+			onOpenChange={onOpenChange}
+		>
+			<SheetContent variant="floating">
 				<SheetHeader>
 					<SheetTitle>Router</SheetTitle>
 				</SheetHeader>
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-6 px-4 pb-4">
+						<Field>
+							<FieldLabel
+								htmlFor="jev-question-type"
+								className="text-xs text-muted-foreground"
+							>
+								Question type
+							</FieldLabel>
+							<Select
+								value={draft.type}
+								onValueChange={(value) => {
+									const type = jevQuestionTypes.find(
+										(candidate) => candidate === value,
+									);
+									if (type) {
+										setDraft(defaultJevQuestion(type));
+										setError("");
+									}
+								}}
+							>
+								<SelectTrigger id="jev-question-type" className="w-full">
+									<SelectValue>
+										{(selected: JevQuestionType | null) =>
+											selected ? (
+												<QuestionTypeOption type={selected} />
+											) : (
+												"Select a type"
+											)
+										}
+									</SelectValue>
+								</SelectTrigger>
+								<SelectContent alignItemWithTrigger={false} className="p-1">
+									{jevQuestionTypes.map((type) => (
+										<SelectItem key={type} value={type}>
+											<QuestionTypeOption type={type} />
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</Field>
 						<Field>
 							<FieldLabel
 								htmlFor="jev-instructions"
@@ -305,6 +394,41 @@ export function JevQuestionEditor({
 						)}
 						{draft.type === "score" && (
 							<ScoreFields question={draft} onChange={setDraft} />
+						)}
+						{hasRepeat && (
+							<Field>
+								<FieldLabel
+									htmlFor="jev-repeat-limit"
+									className="text-xs text-muted-foreground"
+								>
+									Repeat limit
+								</FieldLabel>
+								<Select
+									value={String(repeatDraft)}
+									onValueChange={(value) => {
+										if (value) setRepeatDraft(Number(value));
+									}}
+								>
+									<SelectTrigger id="jev-repeat-limit" className="w-full">
+										<SelectValue>
+											{(selected: string | null) =>
+												selected ? (
+													<RepeatOption limit={Number(selected)} />
+												) : (
+													"Select a limit"
+												)
+											}
+										</SelectValue>
+									</SelectTrigger>
+									<SelectContent alignItemWithTrigger={false} className="p-1">
+										{[1, 2, 3, 4, 5].map((limit) => (
+											<SelectItem key={limit} value={String(limit)}>
+												<RepeatOption limit={limit} />
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</Field>
 						)}
 						{error && <FieldError>{error}</FieldError>}
 					</div>

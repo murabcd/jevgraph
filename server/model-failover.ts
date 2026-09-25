@@ -6,6 +6,7 @@ export async function runWithOneFallback<T>(
 	run: (target: RouteTarget, onDelta: (text: string) => void) => Promise<T>,
 	onDelta: (text: string) => void,
 	onFallback: (reason: string) => void,
+	shouldRetry: () => boolean = () => true,
 ): Promise<{ response: T; target: RouteTarget }> {
 	let streamed = false;
 	try {
@@ -17,7 +18,7 @@ export async function runWithOneFallback<T>(
 	} catch (error) {
 		const primaryError =
 			error instanceof Error ? error.message : "Unknown model error";
-		if (!fallback || streamed)
+		if (!fallback || streamed || !shouldRetry())
 			throw new Error(`${primary.provider} failed: ${primaryError}`, {
 				cause: error,
 			});

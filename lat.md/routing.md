@@ -1,25 +1,33 @@
 # Routing
 
-The server follows a direct model path or traverses connected Jev nodes before streaming a response. Each Jev node uses its configured Choice, Noul, or Score question. See [[canvas]] and [[chat]].
+One workflow graph runs for each chat turn. The server calls models, evaluates Jev questions, joins parallel results, repeats a bounded branch, and returns the final Model result. See [[canvas]] and [[chat]].
 
-## Decision and model call
+## Execution contract
 
-[server/api.ts](../server/api.ts) uses the TypeSafe AI SDK provider for Jev and direct Google or OpenAI providers for the response. [src/lib/routing.ts](../src/lib/routing.ts) validates the request and graph contract. [server/workflow.ts](../server/workflow.ts) traverses connected Jev nodes and selects a model.
+The workflow schema describes connected forward stages and bounded Jev feedback edges.
 
-The graph determines each next step through its connections. The browser sends the graph configuration but never calls providers.
+[src/lib/routing.ts](../src/lib/routing.ts) validates the single workflow route shape. The graph has an implicit chat input, an optional Prompt node for system instructions, Jev nodes, and Model nodes. Forward edges form an acyclic graph; a Jev output may have one explicit repeat edge to an upstream Model. A Model can have several Continue edges for parallel work and one explicit backup Model. Every connected Jev output has one target.
 
-The direct path calls only its connected model. Jev paths use `experimental_evaluate`; both paths use `streamText` for the response. The optional System node prompt is a separate request field, sent as an empty string when the node is absent or unset: Jev sees it with recent conversation context, and the selected model receives it as reusable instructions for each turn. The workflow contract uses an implicit chat entry when the canvas has no System node. [src/lib/jev-question.ts](../src/lib/jev-question.ts) defines the Choice, Noul, and Score question contracts, defaults, validation, and output labels. Choice criteria are editable named answers, initially Fast and Deep. Noul maps Jev's yes probability to Yes or No. Score has one output per rubric level, with the same Level 0, Level 1, and later labels shown in the editor and node. Jev's expected score selects the nearest level, with half scores rounded upward. In a connected multi-Jev workflow, each Jev runs only if its node is reached; low confidence or Jev failure takes that node's first configured output. A single-Jev path instead uses the configured default provider on low confidence or Jev failure. The 70% confidence threshold is a policy setting, not an accuracy claim.
+[server/workflow.ts](../server/workflow.ts) evaluates only reached nodes. It runs up to four independent nodes concurrently, waits for reachable upstream work to finish before running a join, and carries the newest output of each upstream node forward. This wait also covers a branch that repeats before joining. Model results can feed later Jev evaluations or Model prompts. Intermediate model text is buffered; a terminal Model streams directly to chat. Multiple unjoined final results are an error.
 
-[server/workflow.ts](../server/workflow.ts) passes optional System instructions, recent conversation messages, and any validated metadata supplied by an API client to each reached Jev node. Its decisions use the questions saved in the graph. The chat UI sends no special test metadata; future clients can supply named values without adding case-specific fields to the server.
+A Jev repeat edge reruns its upstream Model and following stages. The Jev node's repeat limit is configurable from one to five, with three as the default. At the limit, execution takes its non-repeat output. A turn also has a 20-pass, 100-node-operation, and two-minute budget.
 
-## Failures and wire format
+## Jev and provider calls
 
-Single-Jev routes can retry through another connected output; workflow Model nodes can use an explicit backup. Both retry only before output begins.
+Jev evaluates decisions; OpenAI and Gemini generate prose through direct providers.
 
-The single-Jev path depends on graph shape, not the Router node's ID.
+[server/api.ts](../server/api.ts) calls Jev through the TypeSafe AI SDK provider and experimental_evaluate, and calls OpenAI or Gemini through their direct AI SDK packages. Jev supports Choice, Noul, and Score evaluations; the installed Jev provider does not generate prose. [src/lib/jev-question.ts](../src/lib/jev-question.ts) owns question validation, answer resolution, and stable output IDs. Choice has editable named answers, Noul has Yes and No, and Score has one output per configured level.
 
-[server/model-failover.ts](../server/model-failover.ts) tries that backup once when the primary fails before any text; it never retries after a partial stream. A direct path without a connected backup returns the model error.
+Each reached Jev node sees recent conversation messages, optional System instructions, validated API metadata, and upstream results. When Jev fails, returns an invalid answer, or misses the 70% confidence threshold, that node takes its first non-repeat output; request cancellation stops the turn instead. The threshold is a policy setting, not an accuracy claim. Every reached Model receives conversation history, optional System instructions, its own optional prompt, and upstream results as data. Model output is capped at 1,400 tokens.
 
-The API streams newline-delimited JSON events parsed by [src/lib/route-stream.ts](../src/lib/route-stream.ts).
+## Provider failures
 
-Events cover route, per-node timing, text delta, completion, and error. A timing event records elapsed server time for each reached Jev evaluation and each model attempt, including failures and fallback attempts. Model time includes streaming through completion. The optional System node is static configuration and reports 0 ms because it makes no provider call. Unreached nodes have no timing event. Workflow route events include the traversed node path and each Jev decision so [[canvas]] and [[chat]] can show the selected route. Failover is an intentional runtime behavior, not preservation of an old API or graph format.
+Model failover is one explicit backup attempt.
+
+[server/model-failover.ts](../server/model-failover.ts) tries a connected backup Model once when the primary fails before producing text. It never retries after a partial stream or after request cancellation. This is an intentional runtime failure policy, not a compatibility path.
+
+## Stream and observation
+
+The API streams progress, text, timings, and the final route to chat and canvas.
+
+The API streams newline-delimited JSON parsed by [src/lib/route-stream.ts](../src/lib/route-stream.ts). Events report progress, route selection, per-node timing, text deltas, completion, and error. Progress includes reached nodes, traversed edges, Jev decisions, and bounded output previews. The optional Prompt node reports zero milliseconds because it makes no provider call; unreached nodes have no timing. Request cancellation and a two-minute server deadline abort provider work.

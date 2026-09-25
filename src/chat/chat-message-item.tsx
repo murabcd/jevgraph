@@ -23,7 +23,7 @@ function pendingLabel(message: ChatTurn) {
 		return `Waiting for ${providerName(message.route.provider)}…`;
 	}
 
-	return message.mode === "direct" ? "Connecting to model…" : "Jev is routing…";
+	return "Running chatflow…";
 }
 
 function AssistantContent({ message }: { message: ChatTurn }) {
@@ -56,15 +56,18 @@ function RouteBadge({ message }: { message: ChatTurn }) {
 
 	return (
 		<MessageFooter>
-			<Badge
-				variant="outline"
-				title={`${message.route.reason}${message.route.jev ? ` · Jev ${Math.round(message.route.jev.confidence * 100)}%` : ""}`}
-			>
+			<Badge variant="outline" title={message.route.reason}>
 				{providerName(message.route.provider)} · {message.route.model}
 			</Badge>
-			{message.route.classificationError && (
-				<Badge variant="destructive" title={message.route.classificationError}>
-					Jev fallback
+			{message.route.jevSteps.some((step) => step.error) && (
+				<Badge
+					variant="destructive"
+					title={message.route.jevSteps
+						.map((step) => step.error)
+						.filter(Boolean)
+						.join("; ")}
+				>
+					Jev unavailable
 				</Badge>
 			)}
 		</MessageFooter>

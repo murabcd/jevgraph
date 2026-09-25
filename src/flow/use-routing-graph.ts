@@ -11,26 +11,23 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	type CreatableNodeKind,
 	canConnectNodes,
+	defaultNodeData,
 	duplicatePosition,
 	type FlowNode,
+	hasFallbackConnection,
 	openPosition,
+	reachesNode,
 	readGraph,
 	remapQuestionEdges,
 	removeGraphNode,
 	routesFromGraph,
 	saveGraph,
 } from "@/flow/graph";
-import {
-	defaultJevQuestion,
-	type JevQuestion,
-	questionOutputs,
-} from "@/lib/jev-question";
+import { type JevQuestion, questionOutputs } from "@/lib/jev-question";
 import { providerForModel } from "@/lib/models";
-import { defaultConfig } from "@/lib/routing";
 
 type PendingConnection = {
 	source: string;
-	sourceKind: "input" | "jev" | "model";
 	branch?: string;
 	position: { x: number; y: number };
 	measured?: { width: number; height: number };
@@ -60,8 +57,36 @@ export function useRoutingGraph() {
 			if (!provider) return;
 			setNodes((current) =>
 				current.map((node) =>
-					node.id === nodeId
+					node.id === nodeId &&
+					(node.data.kind === "google" || node.data.kind === "openai")
 						? { ...node, data: { ...node.data, kind: provider, model } }
+						: node,
+				),
+			);
+		},
+		[setNodes],
+	);
+
+	const onModelPromptChange = useCallback(
+		(nodeId: string, prompt: string) => {
+			setNodes((current) =>
+				current.map((node) =>
+					node.id === nodeId &&
+					(node.data.kind === "google" || node.data.kind === "openai")
+						? { ...node, data: { ...node.data, prompt } }
+						: node,
+				),
+			);
+		},
+		[setNodes],
+	);
+
+	const onRepeatLimitChange = useCallback(
+		(nodeId: string, maxRepeats: number) => {
+			setNodes((current) =>
+				current.map((node) =>
+					node.id === nodeId && node.data.kind === "jev"
+						? { ...node, data: { ...node.data, maxRepeats } }
 						: node,
 				),
 			);
@@ -89,7 +114,7 @@ export function useRoutingGraph() {
 			if (!currentQuestion) return;
 			setNodes((current) =>
 				current.map((node) =>
-					node.id === nodeId
+					node.id === nodeId && node.data.kind === "jev"
 						? { ...node, data: { ...node.data, question: nextQuestion } }
 						: node,
 				),
@@ -123,6 +148,7 @@ export function useRoutingGraph() {
 							kind: original.data.kind,
 							active: false,
 							model: original.data.model,
+							prompt: original.data.prompt,
 						},
 					},
 				];
@@ -149,7 +175,6 @@ export function useRoutingGraph() {
 
 	const createNode = useCallback(
 		(kind: CreatableNodeKind, position: { x: number; y: number }) => {
-			const nodeKind = kind === "model" ? "openai" : kind;
 			setNodes((current) => {
 				const id =
 					kind === "input"
@@ -166,13 +191,10 @@ export function useRoutingGraph() {
 						position: openPosition(position, current),
 						selected: true,
 						data: {
-							kind: nodeKind,
-							active: false,
+							...defaultNodeData(kind),
 							...(current.length === 0 && kind !== "input"
 								? { entry: true }
 								: {}),
-							...(kind === "model" ? { model: defaultConfig.openaiModel } : {}),
-							...(kind === "jev" ? { question: defaultJevQuestion() } : {}),
 						},
 					},
 				];
@@ -193,25 +215,33 @@ export function useRoutingGraph() {
 			targetId: string,
 			createdNode?: FlowNode,
 		) => {
+			if (branch === "fallback" && hasFallbackConnection(source, graphEdges))
+				return;
 			if (createdNode)
 				setNodes((current) => [
 					...current.map((node) => ({ ...node, selected: false })),
 					createdNode,
 				]);
 			setGraphEdges((current) => [
-				...current.filter(
-					(edge) => !(edge.source === source && edge.sourceHandle === branch),
+				...current.filter((edge) =>
+					branch === "next" || source === "input"
+						? true
+						: !(edge.source === source && edge.sourceHandle === branch),
 				),
 				{
 					id: `${source}-${branch}-${targetId}`,
 					source,
 					sourceHandle: branch,
 					target: targetId,
+					...(nodes.find((node) => node.id === source)?.data.kind === "jev" &&
+					reachesNode(targetId, source, current)
+						? { data: { repeat: true } }
+						: {}),
 					type: "default",
 				},
 			]);
 		},
-		[setNodes, setGraphEdges],
+		[setNodes, setGraphEdges, nodes, graphEdges],
 	);
 
 	const connect = useCallback(
@@ -220,7 +250,7 @@ export function useRoutingGraph() {
 			if (connection.source === "input") {
 				setPendingConnection(null);
 				setGraphEdges((current) => [
-					...current.filter((edge) => edge.source !== "input"),
+					...current,
 					{
 						id: `input-${connection.target}`,
 						source: "input",
@@ -257,7 +287,10 @@ export function useRoutingGraph() {
 					))
 			)
 				return;
-			if (sourceKind === "model" && branch !== "fallback") return;
+			if (sourceKind === "model" && branch !== "fallback" && branch !== "next")
+				return;
+			if (branch === "fallback" && hasFallbackConnection(source, graphEdges))
+				return;
 			const point = "changedTouches" in event ? event.changedTouches[0] : event;
 			const position = screenToFlowPosition({
 				x: point.clientX,
@@ -265,12 +298,11 @@ export function useRoutingGraph() {
 			});
 			setPendingConnection({
 				source,
-				sourceKind,
 				branch: branch ?? undefined,
 				position,
 			});
 		},
-		[nodes, screenToFlowPosition],
+		[nodes, graphEdges, screenToFlowPosition],
 	);
 
 	const connectStart = useCallback<OnConnectStart>(() => {
@@ -299,7 +331,7 @@ export function useRoutingGraph() {
 	const createPendingNode = useCallback(
 		(kind: CreatableNodeKind) => {
 			if (!pendingConnection) return;
-			const { source, sourceKind, branch, position } = pendingConnection;
+			const { source, branch, position } = pendingConnection;
 			if (source === "input") {
 				if (kind !== "jev" && kind !== "model") return;
 				const targetId =
@@ -313,18 +345,11 @@ export function useRoutingGraph() {
 						type: "route",
 						selected: true,
 						position: { x: position.x, y: position.y - 72 },
-						data:
-							kind === "jev"
-								? { kind: "jev", active: false, question: defaultJevQuestion() }
-								: {
-										kind: "openai",
-										active: false,
-										model: defaultConfig.openaiModel,
-									},
+						data: defaultNodeData(kind),
 					},
 				]);
 				setGraphEdges((current) => [
-					...current.filter((edge) => edge.source !== "input"),
+					...current,
 					{
 						id: `input-${targetId}`,
 						source: "input",
@@ -337,9 +362,14 @@ export function useRoutingGraph() {
 			}
 			if (
 				!branch ||
-				(kind !== "model" && !(kind === "jev" && sourceKind === "jev"))
+				(kind !== "model" && kind !== "jev") ||
+				(branch === "fallback" && kind !== "model")
 			)
 				return;
+			if (branch === "fallback" && hasFallbackConnection(source, graphEdges)) {
+				setPendingConnection(null);
+				return;
+			}
 			const id = crypto.randomUUID();
 			const sourceQuestion = nodes.find((node) => node.id === source)?.data
 				.question;
@@ -347,23 +377,23 @@ export function useRoutingGraph() {
 				sourceQuestion && questionOutputs(sourceQuestion)[0]?.id === branch
 					? "google"
 					: "openai";
-			const model =
-				providerKind === "google"
-					? defaultConfig.googleModel
-					: defaultConfig.openaiModel;
 			replaceBranch(source, branch, id, {
 				id,
 				type: "route",
 				selected: true,
 				position: { x: position.x, y: position.y - 72 },
-				data:
-					kind === "jev"
-						? { kind: "jev", active: false, question: defaultJevQuestion() }
-						: { kind: providerKind, active: false, model },
+				data: defaultNodeData(kind, providerKind),
 			});
 			setPendingConnection(null);
 		},
-		[pendingConnection, replaceBranch, nodes, setNodes, setGraphEdges],
+		[
+			pendingConnection,
+			replaceBranch,
+			nodes,
+			graphEdges,
+			setNodes,
+			setGraphEdges,
+		],
 	);
 
 	return {
@@ -373,6 +403,8 @@ export function useRoutingGraph() {
 		onNodesChange,
 		onEdgesChange,
 		onModelChange,
+		onModelPromptChange,
+		onRepeatLimitChange,
 		onPromptChange,
 		onQuestionChange,
 		onDuplicateNode,

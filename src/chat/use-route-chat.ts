@@ -7,18 +7,19 @@ import {
 	type NodeTiming,
 	type RouteResult,
 	type RouteStreamEvent,
-	type Routes,
-	routesUseJev,
+	type RouteTrace,
+	type WorkflowRoutes,
 } from "@/lib/routing";
 
 export function useRouteChat(
-	routes: Routes | null,
+	routes: WorkflowRoutes | null,
 	requestPrompt: string,
 	onRequestStarted: () => void,
 ) {
 	const [draft, setDraft] = useState("");
 	const [messages, setMessages] = useState<ChatTurn[]>([]);
 	const [result, setResult] = useState<RouteResult | null>(null);
+	const [trace, setTrace] = useState<RouteTrace | null>(null);
 	const [resultRouteKey, setResultRouteKey] = useState<string | null>(null);
 	const [nodeTimings, setNodeTimings] = useState<Record<string, NodeTiming>>(
 		{},
@@ -34,9 +35,7 @@ export function useRouteChat(
 		const question = draft.trim();
 		if (!question || running) return;
 		if (!routes) {
-			setError(
-				"Connect every Jev output to a model or another Jev node before sending a message.",
-			);
+			setError("Complete the chatflow connections before sending a message.");
 			return;
 		}
 		const history: ChatMessage[] = [
@@ -54,7 +53,6 @@ export function useRouteChat(
 				id: assistantId,
 				role: "assistant",
 				content: "",
-				mode: routesUseJev(routes) ? "jev" : "direct",
 				streaming: true,
 			},
 		]);
@@ -62,6 +60,7 @@ export function useRouteChat(
 		setRunning(true);
 		setError("");
 		setResult(null);
+		setTrace(null);
 		setNodeTimings({});
 		setResultRouteKey(routeKey);
 		onRequestStarted();
@@ -77,10 +76,19 @@ export function useRouteChat(
 				}),
 			});
 			await readRouteStream(response, (event: RouteStreamEvent) => {
+				if (event.type === "progress") setTrace(event.trace);
 				if (event.type === "timing") {
 					setNodeTimings((current) => ({
 						...current,
-						[event.timing.nodeId]: event.timing,
+						[event.timing.nodeId]: current[event.timing.nodeId]
+							? {
+									...event.timing,
+									durationMs:
+										current[event.timing.nodeId].durationMs +
+										event.timing.durationMs,
+									attempts: (current[event.timing.nodeId].attempts ?? 1) + 1,
+								}
+							: event.timing,
 					}));
 				}
 				if (event.type === "route") {
@@ -90,6 +98,7 @@ export function useRouteChat(
 						latencyMs: 0,
 					};
 					setResult(preview);
+					setTrace(event.route);
 					setMessages((previous) =>
 						previous.map((message) =>
 							message.id === assistantId
@@ -109,6 +118,7 @@ export function useRouteChat(
 				}
 				if (event.type === "done") {
 					setResult(event.route);
+					setTrace(event.route);
 					setMessages((previous) =>
 						previous.map((message) =>
 							message.id === assistantId
@@ -152,6 +162,7 @@ export function useRouteChat(
 	const clearChat = () => {
 		setMessages([]);
 		setResult(null);
+		setTrace(null);
 		setNodeTimings({});
 		setResultRouteKey(null);
 		setError("");
@@ -167,6 +178,9 @@ export function useRouteChat(
 		setResult((current) =>
 			current?.path.some((step) => step.nodeId === nodeId) ? null : current,
 		);
+		setTrace((current) =>
+			current?.path.some((step) => step.nodeId === nodeId) ? null : current,
+		);
 	};
 
 	return {
@@ -174,6 +188,7 @@ export function useRouteChat(
 		setDraft,
 		messages,
 		result: routeKey === resultRouteKey ? result : null,
+		trace: routeKey === resultRouteKey ? trace : null,
 		nodeTimings: routeKey === resultRouteKey ? nodeTimings : {},
 		error,
 		running,

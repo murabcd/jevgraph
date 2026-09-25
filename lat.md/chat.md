@@ -1,15 +1,9 @@
 # Chat
 
-Chat keeps the conversation in memory and follows the current graph for each turn. See [[routing]] for server events and [[canvas]] for graph behavior.
+Chat is a continuing conversation. Each sent message runs the current graph once, and the canvas observes that turn's execution. There is no separate workflow-run button. See [[routing]] and [[canvas]].
 
-The chat composer supplies the message on every turn. The chosen model receives recent history and, when a System node exists, its reusable instructions. Removing System leaves chat available through a connected Jev or Model entry. The composer does not edit the node prompt.
+The composer supplies the latest user message and recent history. System instructions are optional and independent of the composer. Model prompts apply only to their own nodes. A turn can route through Jev, call several models in parallel or sequence, repeat a bounded branch, and end at a Model node. The chat UI sends no hardcoded test metadata; API clients can supply validated metadata separately.
 
-A direct path keeps the selected model; a Jev path evaluates each reached Jev node for every turn. A model-only workflow with a backup displays as a direct conversation in chat. The chat composer sends the conversation without example-specific test fields.
+[src/chat/use-route-chat.ts](../src/chat/use-route-chat.ts) owns in-memory messages, the request lifecycle, and the current turn's trace and timings. [src/chat/chat-panel.tsx](../src/chat/chat-panel.tsx) renders the floating chat and composer. [src/chat/chat-message-item.tsx](../src/chat/chat-message-item.tsx) renders turns and the final provider badge. [src/lib/route-stream.ts](../src/lib/route-stream.ts) decodes newline-delimited server events.
 
-The composer starts compact, grows as text is entered, and scrolls internally after reaching its maximum height. It remains editable while a response streams.
-
-[src/chat/use-route-chat.ts](../src/chat/use-route-chat.ts) owns messages, request state, and streamed assistant updates. [src/chat/chat-panel.tsx](../src/chat/chat-panel.tsx) renders the floating chat and composer above the canvas. [src/chat/chat-message-item.tsx](../src/chat/chat-message-item.tsx) renders user and assistant messages. [src/lib/route-stream.ts](../src/lib/route-stream.ts) decodes server events before chat applies them.
-
-The chat opens from a persistent bottom-right canvas button, starts closed without a saved preference, and never resizes the canvas. Its open state persists in browser local storage and restores on refresh. Closing retains the current in-memory conversation. Clearing chat removes it; a page reload starts a new conversation.
-
-The latest request's node timings stay in memory alongside the route result. Sending another message clears the previous timings, and editing the route hides timings from the old graph. The [[canvas]] displays each timing beside its node.
+The composer starts compact, grows as text is entered, and scrolls after its maximum height. It remains editable while a response streams. Starting a new message clears the previous path, while older answers remain in chat. Closing chat retains the conversation and current path; clearing it or reloading the page starts a new one. Graph edits hide traces recorded for another configuration. Chat panel visibility persists in browser local storage. Clicking the canvas keeps chat open; the explicit close control and launcher toggle hide it. When a floating node editor is also open, the editor stays left and chat stays right on wide screens; on narrow screens, chat stacks below the editor.
