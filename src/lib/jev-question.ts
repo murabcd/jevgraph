@@ -4,56 +4,58 @@ import type {
 } from "ai";
 import { z } from "zod";
 
-const instructions = z.string().trim().min(1).max(500);
-const description = z.string().trim().min(1).max(500);
+function questionSchema(text: z.ZodString) {
+	const choiceQuestionSchema = z.object({
+		type: z.literal("choice"),
+		instructions: text,
+		options: z
+			.array(
+				z.object({
+					id: z.string().min(1).max(100),
+					label: z.string().trim().min(1).max(80),
+					description: text,
+				}),
+			)
+			.min(2)
+			.max(255)
+			.refine(
+				(options) =>
+					new Set(options.map((option) => option.id)).size === options.length &&
+					new Set(options.map((option) => option.label)).size ===
+						options.length,
+				"Choice IDs and labels must be unique",
+			),
+	});
+	const noulQuestionSchema = z.object({
+		type: z.literal("noul"),
+		instructions: text,
+		yesDescription: text,
+		noDescription: text,
+	});
+	const scoreQuestionSchema = z.object({
+		type: z.literal("score"),
+		instructions: text,
+		levels: z
+			.array(z.object({ id: z.string().min(1).max(100), description: text }))
+			.min(2)
+			.max(10)
+			.refine(
+				(levels) =>
+					new Set(levels.map((level) => level.id)).size === levels.length,
+				"Score level IDs must be unique",
+			),
+	});
+	return z.union([
+		choiceQuestionSchema,
+		noulQuestionSchema,
+		scoreQuestionSchema,
+	]);
+}
 
-const choiceQuestionSchema = z.object({
-	type: z.literal("choice"),
-	instructions,
-	options: z
-		.array(
-			z.object({
-				id: z.string().min(1).max(100),
-				label: z.string().trim().min(1).max(80),
-				description,
-			}),
-		)
-		.min(2)
-		.max(255)
-		.refine(
-			(options) =>
-				new Set(options.map((option) => option.id)).size === options.length &&
-				new Set(options.map((option) => option.label)).size === options.length,
-			"Choice IDs and labels must be unique",
-		),
-});
-
-const noulQuestionSchema = z.object({
-	type: z.literal("noul"),
-	instructions,
-	yesDescription: description,
-	noDescription: description,
-});
-
-const scoreQuestionSchema = z.object({
-	type: z.literal("score"),
-	instructions,
-	levels: z
-		.array(z.object({ id: z.string().min(1).max(100), description }))
-		.min(2)
-		.max(10)
-		.refine(
-			(levels) =>
-				new Set(levels.map((level) => level.id)).size === levels.length,
-			"Score level IDs must be unique",
-		),
-});
-
-export const jevQuestionSchema = z.union([
-	choiceQuestionSchema,
-	noulQuestionSchema,
-	scoreQuestionSchema,
-]);
+export const jevQuestionSchema = questionSchema(z.string().trim().max(500));
+export const configuredJevQuestionSchema = questionSchema(
+	z.string().trim().min(1).max(500),
+);
 export type JevQuestion = z.infer<typeof jevQuestionSchema>;
 export type JevQuestionType = JevQuestion["type"];
 
@@ -70,41 +72,35 @@ export function defaultJevQuestion(
 	if (type === "noul") {
 		return {
 			type,
-			instructions: "Does this request require complex reasoning?",
-			yesDescription: "Complex reasoning or high precision is required.",
-			noDescription: "A direct response is sufficient.",
+			instructions: "",
+			yesDescription: "",
+			noDescription: "",
 		};
 	}
 	if (type === "score") {
 		return {
 			type,
-			instructions: "How much reasoning does this request require?",
+			instructions: "",
 			levels: [
-				{ id: "score-0", description: "A direct response is sufficient." },
-				{ id: "score-1", description: "Some reasoning is needed." },
-				{
-					id: "score-2",
-					description: "Complex, multi-step reasoning is required.",
-				},
+				{ id: "score-0", description: "" },
+				{ id: "score-1", description: "" },
+				{ id: "score-2", description: "" },
 			],
 		};
 	}
 	return {
 		type: "choice",
-		instructions:
-			"Which level of generative model is appropriate to answer this request accurately?",
+		instructions: "",
 		options: [
 			{
-				id: "fast",
-				label: "Fast",
-				description:
-					"Straightforward writing, extraction, summary, translation, or direct questions with limited reasoning.",
+				id: "choice-1",
+				label: "Choice 1",
+				description: "",
 			},
 			{
-				id: "deep",
-				label: "Deep",
-				description:
-					"Complex reasoning, multi-step analysis, coding, nuanced synthesis, or high precision instructions.",
+				id: "choice-2",
+				label: "Choice 2",
+				description: "",
 			},
 		],
 	};

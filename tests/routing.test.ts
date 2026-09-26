@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { defaultJevQuestion } from "../src/lib/jev-question";
 import {
-	defaultConfig,
 	routeRequestSchema,
 	routesUseJev,
 	workflowRoutesSchema,
 } from "../src/lib/routing";
+import { configuredJevQuestion } from "./jev-question-fixture";
 
 const direct = {
 	kind: "workflow" as const,
@@ -30,7 +29,6 @@ const direct = {
 };
 
 const request = {
-	config: defaultConfig,
 	routes: direct,
 	messages: [
 		{ role: "user", content: "My name is Alex" },
@@ -69,7 +67,7 @@ describe("chatflow contract", () => {
 		expect(
 			routeRequestSchema.safeParse({
 				...request,
-				metadata: { currentLoad: "fast" },
+				metadata: { undeclaredField: "value" },
 			}).success,
 		).toBe(false);
 		const required = {
@@ -121,6 +119,60 @@ describe("chatflow contract", () => {
 		).toBe(false);
 	});
 
+	test("validates visible Jev and Model settings", () => {
+		const jev = {
+			kind: "workflow",
+			nodes: [
+				{ id: "input", kind: "input", fields: [] },
+				{
+					id: "judge",
+					kind: "jev",
+					question: configuredJevQuestion(),
+					confidenceThreshold: 0.85,
+					fallbackOutputId: "choice-2",
+				},
+			],
+			edges: [{ id: "entry", source: "input", target: "judge" }],
+		};
+		expect(workflowRoutesSchema.safeParse(jev).success).toBe(true);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...jev,
+				nodes: [jev.nodes[0], { ...jev.nodes[1], fallbackOutputId: "missing" }],
+			}).success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...jev,
+				nodes: [jev.nodes[0], { ...jev.nodes[1], confidenceThreshold: 1.2 }],
+			}).success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...direct,
+				nodes: [
+					direct.nodes[0],
+					{ ...direct.nodes[1], maxOutputTokens: 640, reasoningEffort: "low" },
+				],
+			}).success,
+		).toBe(true);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...direct,
+				nodes: [direct.nodes[0], { ...direct.nodes[1], maxOutputTokens: 0 }],
+			}).success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...direct,
+				nodes: [
+					direct.nodes[0],
+					{ ...direct.nodes[1], provider: "google", reasoningEffort: "low" },
+				],
+			}).success,
+		).toBe(false);
+	});
+
 	test("validates model continuation, joins, and optional Jev outputs", () => {
 		const flow = {
 			kind: "workflow",
@@ -133,7 +185,7 @@ describe("chatflow contract", () => {
 					provider: "google",
 					model: "gemini-3.5-flash-lite",
 				},
-				{ id: "judge", kind: "jev", question: defaultJevQuestion() },
+				{ id: "judge", kind: "jev", question: configuredJevQuestion() },
 				{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
 			],
 			edges: [
@@ -141,8 +193,8 @@ describe("chatflow contract", () => {
 				{ id: "b", source: "input", target: "second" },
 				{ id: "c", source: "first", sourceHandle: "next", target: "judge" },
 				{ id: "d", source: "second", sourceHandle: "next", target: "judge" },
-				{ id: "e", source: "judge", sourceHandle: "fast", target: "final" },
-				{ id: "f", source: "judge", sourceHandle: "deep", target: "final" },
+				{ id: "e", source: "judge", sourceHandle: "choice-1", target: "final" },
+				{ id: "f", source: "judge", sourceHandle: "choice-2", target: "final" },
 			],
 		};
 		const parsed = workflowRoutesSchema.parse(flow);

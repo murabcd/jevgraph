@@ -5,13 +5,18 @@ import {
 	type FlowNode,
 	nodeStepLabels,
 	readGraph,
-	remapQuestionEdges,
 	removeGraphNode,
+	retainQuestionEdges,
 	routesFromGraph,
 	saveGraph,
 } from "../src/flow/graph";
 import { defaultJevQuestion, questionOutputs } from "../src/lib/jev-question";
-import { routesUseJev } from "../src/lib/routing";
+import {
+	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+	routesUseJev,
+} from "../src/lib/routing";
+import { configuredJevQuestion } from "./jev-question-fixture";
 import { connectedWorkflowGraph } from "./workflow-graph";
 
 const stored = new Map<string, string>();
@@ -46,9 +51,24 @@ function node(
 			kind,
 			active: false,
 			...(kind === "input" ? { fields: [] } : {}),
-			...(kind === "jev" ? { question: defaultJevQuestion() } : {}),
-			...(kind === "openai" ? { model: "gpt-5-mini" } : {}),
-			...(kind === "google" ? { model: "gemini-3.5-flash-lite" } : {}),
+			...(kind === "jev"
+				? {
+						question: configuredJevQuestion(),
+						confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+					}
+				: {}),
+			...(kind === "openai"
+				? {
+						model: "gpt-5-mini",
+						maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+					}
+				: {}),
+			...(kind === "google"
+				? {
+						model: "gemini-3.5-flash-lite",
+						maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+					}
+				: {}),
 		},
 	};
 }
@@ -94,6 +114,7 @@ describe("editable chatflow graph", () => {
 					kind: "openai" as const,
 					active: false,
 					model: "gpt-5-mini",
+					maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 					variables: ["plan"],
 				},
 			},
@@ -159,7 +180,7 @@ describe("editable chatflow graph", () => {
 		).toBe(false);
 		expect(
 			canConnectNodes(
-				{ source: "judge", sourceHandle: "fast", target: "first" },
+				{ source: "judge", sourceHandle: "choice-1", target: "first" },
 				nodes,
 				edges,
 			),
@@ -209,8 +230,18 @@ describe("editable chatflow graph", () => {
 		const edges: Edge[] = [
 			{ id: "entry", source: "input", target: "first" },
 			{ id: "next", source: "first", sourceHandle: "next", target: "judge" },
-			{ id: "fast", source: "judge", sourceHandle: "fast", target: "final" },
-			{ id: "deep", source: "judge", sourceHandle: "deep", target: "final" },
+			{
+				id: "choice-1",
+				source: "judge",
+				sourceHandle: "choice-1",
+				target: "final",
+			},
+			{
+				id: "choice-2",
+				source: "judge",
+				sourceHandle: "choice-2",
+				target: "final",
+			},
 		];
 		const routes = routesFromGraph(nodes, edges);
 		if (!routes) throw new Error("Expected valid routes");
@@ -264,8 +295,8 @@ describe("editable chatflow graph", () => {
 				sourceHandle: "next",
 				target: "join",
 			},
-			{ id: "yes", source: "join", sourceHandle: "fast", target: "final" },
-			{ id: "no", source: "join", sourceHandle: "deep", target: "final" },
+			{ id: "yes", source: "join", sourceHandle: "choice-1", target: "final" },
+			{ id: "no", source: "join", sourceHandle: "choice-2", target: "final" },
 		];
 		const routes = routesFromGraph(nodes, edges);
 		expect(
@@ -289,11 +320,16 @@ describe("editable chatflow graph", () => {
 			{
 				id: "retry",
 				source: "judge",
-				sourceHandle: "fast",
+				sourceHandle: "choice-1",
 				target: "draft",
 				data: { repeat: true },
 			},
-			{ id: "done", source: "judge", sourceHandle: "deep", target: "final" },
+			{
+				id: "done",
+				source: "judge",
+				sourceHandle: "choice-2",
+				target: "final",
+			},
 		];
 		const routes = routesFromGraph(nodes, edges);
 		expect(routes?.edges.find((edge) => edge.id === "retry")?.repeat).toBe(
@@ -316,7 +352,12 @@ describe("editable chatflow graph", () => {
 		];
 		const edges: Edge[] = [
 			{ id: "entry", source: "input", target: "judge" },
-			{ id: "fast", source: "judge", sourceHandle: "fast", target: "model" },
+			{
+				id: "choice-1",
+				source: "judge",
+				sourceHandle: "choice-1",
+				target: "model",
+			},
 		];
 		expect(routesFromGraph(nodes, edges)).not.toBeNull();
 		expect(
@@ -337,34 +378,61 @@ describe("editable chatflow graph", () => {
 	});
 
 	test("preserves stable Choice edges when labels change", () => {
-		const previous = defaultJevQuestion("choice");
+		const previous = configuredJevQuestion("choice");
 		if (previous.type !== "choice") throw new Error("Expected Choice");
 		const next = {
 			...previous,
 			options: previous.options.map((option) =>
-				option.id === "fast" ? { ...option, label: "Cheap" } : option,
+				option.id === "choice-1" ? { ...option, label: "Cheap" } : option,
 			),
 		};
 		const edges: Edge[] = [
-			{ id: "fast", source: "judge", sourceHandle: "fast", target: "model" },
+			{
+				id: "choice-1",
+				source: "judge",
+				sourceHandle: "choice-1",
+				target: "model",
+			},
 		];
 		expect(questionOutputs(next)[0].label).toBe("Cheap");
-		expect(remapQuestionEdges(previous, next, edges, "judge")[0]).toMatchObject(
-			{ sourceHandle: "fast", target: "model" },
-		);
+		expect(
+			retainQuestionEdges(previous, next, edges, "judge")[0],
+		).toMatchObject({
+			sourceHandle: "choice-1",
+			target: "model",
+		});
+	});
+
+	test("drops stale Jev connections when the question type changes", () => {
+		const previous = configuredJevQuestion("choice");
+		if (previous.type !== "choice") throw new Error("Expected Choice");
+		previous.options[0].id = "yes";
+		const edges: Edge[] = [
+			{ id: "entry", source: "input", target: "judge" },
+			{
+				id: "choice-yes",
+				source: "judge",
+				sourceHandle: "yes",
+				target: "model",
+			},
+		];
+		expect(
+			retainQuestionEdges(previous, defaultJevQuestion("noul"), edges, "judge"),
+		).toEqual([edges[0]]);
 	});
 
 	test("restores the initial graph when Start is missing and rejects malformed nodes", () => {
 		saveGraph([], []);
-		expect(readGraph().nodes.map((item) => item.id)).toEqual([
-			"input",
-			"jev",
-			"google",
-			"openai",
-		]);
-		expect(readGraph().edges).toHaveLength(3);
+		const initial = readGraph();
+		expect(initial.nodes.map((item) => item.id)).toEqual(["input", "jev"]);
+		expect(initial.edges).toHaveLength(1);
+		expect(routesFromGraph(initial.nodes, initial.edges)).toBeNull();
+		saveGraph(initial.nodes, initial.edges);
+		expect(readGraph().nodes[1]?.data.question).toEqual(
+			defaultJevQuestion("choice"),
+		);
 		stored.set(
-			"router:graph:v2",
+			"router:graph:v3",
 			JSON.stringify({
 				nodes: [
 					{
@@ -375,7 +443,11 @@ describe("editable chatflow graph", () => {
 					{
 						id: "model",
 						position: { x: 1, y: 0 },
-						data: { kind: "openai", model: "gpt-5-mini" },
+						data: {
+							kind: "openai",
+							model: "gpt-5-mini",
+							maxOutputTokens: 1400,
+						},
 					},
 					{
 						id: "bad",

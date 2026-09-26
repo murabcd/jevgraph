@@ -8,10 +8,17 @@ import {
 	questionOutputs,
 } from "@/lib/jev-question";
 import {
+	confidenceThresholdSchema,
 	DEFAULT_GOOGLE_MODEL,
+	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	DEFAULT_OPENAI_MODEL,
 	MAX_PROMPT_LENGTH,
+	maxOutputTokensSchema,
+	modelIdSchema,
 	type NodeTiming,
+	type ReasoningEffort,
+	reasoningEffortSchema,
 	type StartField,
 	startFieldsSchema,
 	type WorkflowRoutes,
@@ -48,32 +55,49 @@ type NodeData = NodeViewData &
 		| {
 				kind: "jev";
 				question: JevQuestion;
+				confidenceThreshold: number;
+				fallbackOutputId?: string;
 				maxRepeats?: number;
 				variables?: string[];
 				prompt?: never;
-				model?: never;
 		  }
 		| {
 				kind: "google" | "openai";
 				model: string;
 				prompt?: string;
 				variables?: string[];
+				maxOutputTokens: number;
+				reasoningEffort?: ReasoningEffort;
 				question?: never;
 		  }
 	);
 
 export type FlowNode = Node<NodeData, "route">;
+export type JevNodeSettings = Pick<
+	Extract<FlowNode["data"], { kind: "jev" }>,
+	| "question"
+	| "confidenceThreshold"
+	| "fallbackOutputId"
+	| "variables"
+	| "maxRepeats"
+>;
 
 export function defaultNodeData(
 	kind: CreatableNodeKind,
 	provider: "google" | "openai" = "openai",
 ): FlowNode["data"] {
 	if (kind === "jev")
-		return { kind, active: false, question: defaultJevQuestion() };
+		return {
+			kind,
+			active: false,
+			question: defaultJevQuestion(),
+			confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+		};
 	return {
 		kind: provider,
 		active: false,
 		model: provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL,
+		maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	};
 }
 const startingNodes: FlowNode[] = [
@@ -87,19 +111,7 @@ const startingNodes: FlowNode[] = [
 		id: "jev",
 		type: "route",
 		position: { x: 355, y: 235 },
-		data: { kind: "jev", active: false, question: defaultJevQuestion() },
-	},
-	{
-		id: "google",
-		type: "route",
-		position: { x: 730, y: 65 },
-		data: { kind: "google", active: false, model: DEFAULT_GOOGLE_MODEL },
-	},
-	{
-		id: "openai",
-		type: "route",
-		position: { x: 730, y: 405 },
-		data: { kind: "openai", active: false, model: DEFAULT_OPENAI_MODEL },
+		data: defaultNodeData("jev"),
 	},
 ];
 
@@ -110,21 +122,9 @@ const startingEdges: Edge[] = [
 		target: "jev",
 		type: "default",
 	},
-	{
-		id: "jev-fast-google",
-		source: "jev",
-		sourceHandle: "fast",
-		target: "google",
-		type: "default",
-	},
-	{
-		id: "jev-deep-openai",
-		source: "jev",
-		sourceHandle: "deep",
-		target: "openai",
-		type: "default",
-	},
 ];
+
+const graphStorageKey = "router:graph:v3";
 
 const persistedNodeSchema = z.object({
 	id: z.string(),
@@ -137,23 +137,42 @@ const persistedNodeSchema = z.object({
 		z.object({
 			kind: z.literal("jev"),
 			question: jevQuestionSchema,
+			confidenceThreshold: confidenceThresholdSchema,
+			fallbackOutputId: z.string().optional(),
 			maxRepeats: z.number().int().min(1).max(5).optional(),
 			variables: z.array(z.string()).optional(),
 		}),
 		z.object({
-			kind: z.literal("google"),
-			model: z.string().min(1),
-			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
-			variables: z.array(z.string()).optional(),
-		}),
-		z.object({
-			kind: z.literal("openai"),
-			model: z.string().min(1),
+			kind: z.enum(["google", "openai"]),
+			model: modelIdSchema,
+			maxOutputTokens: maxOutputTokensSchema,
+			reasoningEffort: reasoningEffortSchema.optional(),
 			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 			variables: z.array(z.string()).optional(),
 		}),
 	]),
 });
+
+function persistedNodeData(data: FlowNode["data"]) {
+	if (data.kind === "input") return { kind: data.kind, fields: data.fields };
+	if (data.kind === "jev")
+		return {
+			kind: data.kind,
+			question: data.question,
+			confidenceThreshold: data.confidenceThreshold,
+			fallbackOutputId: data.fallbackOutputId,
+			maxRepeats: data.maxRepeats,
+			variables: data.variables,
+		};
+	return {
+		kind: data.kind,
+		model: data.model,
+		maxOutputTokens: data.maxOutputTokens,
+		reasoningEffort: data.reasoningEffort,
+		prompt: data.prompt,
+		variables: data.variables,
+	};
+}
 
 const persistedEdgeSchema = z.object({
 	id: z.string(),
@@ -161,6 +180,11 @@ const persistedEdgeSchema = z.object({
 	sourceHandle: z.string().nullish(),
 	target: z.string(),
 	data: z.object({ repeat: z.boolean() }).optional(),
+});
+
+const persistedGraphSchema = z.object({
+	nodes: z.array(z.unknown()),
+	edges: z.array(z.unknown()),
 });
 
 export function reachesNode(
@@ -268,18 +292,11 @@ export function hasFallbackConnection(
 
 export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 	try {
-		const savedGraph: unknown = JSON.parse(
-			localStorage.getItem("router:graph:v2") ?? "null",
+		const savedGraph = persistedGraphSchema.safeParse(
+			JSON.parse(localStorage.getItem(graphStorageKey) ?? "null"),
 		);
-		if (
-			typeof savedGraph === "object" &&
-			savedGraph !== null &&
-			"nodes" in savedGraph &&
-			"edges" in savedGraph &&
-			Array.isArray(savedGraph.nodes) &&
-			Array.isArray(savedGraph.edges)
-		) {
-			const nodes: FlowNode[] = savedGraph.nodes.flatMap((value) => {
+		if (savedGraph.success) {
+			const nodes: FlowNode[] = savedGraph.data.nodes.flatMap((value) => {
 				const parsed = persistedNodeSchema.safeParse(value);
 				return parsed.success
 					? [
@@ -292,7 +309,7 @@ export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 					: [];
 			});
 			const ids = new Set(nodes.map((node) => node.id));
-			const edges: Edge[] = savedGraph.edges.flatMap((value) => {
+			const edges: Edge[] = savedGraph.data.edges.flatMap((value) => {
 				const parsed = persistedEdgeSchema.safeParse(value);
 				return parsed.success &&
 					ids.has(parsed.data.source) &&
@@ -314,27 +331,12 @@ export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 
 export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 	localStorage.setItem(
-		"router:graph:v2",
+		graphStorageKey,
 		JSON.stringify({
 			nodes: nodes.map((node) => ({
 				id: node.id,
-				type: "route",
 				position: node.position,
-				data: {
-					kind: node.data.kind,
-					...(node.data.kind === "input" ? { fields: node.data.fields } : {}),
-					...(node.data.kind === "google" || node.data.kind === "openai"
-						? { prompt: node.data.prompt }
-						: {}),
-					...(node.data.kind === "jev" && node.data.maxRepeats
-						? { maxRepeats: node.data.maxRepeats }
-						: {}),
-					...(node.data.kind !== "input"
-						? { variables: node.data.variables }
-						: {}),
-					model: node.data.model,
-					question: node.data.question,
-				},
+				data: persistedNodeData(node.data),
 			})),
 			edges: edges.map((edge) => ({
 				id: edge.id,
@@ -342,7 +344,6 @@ export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
 				sourceHandle: edge.sourceHandle,
 				target: edge.target,
 				data: edge.data?.repeat ? { repeat: true } : undefined,
-				type: "default",
 			})),
 		}),
 	);
@@ -442,6 +443,10 @@ export function routesFromGraph(
 							id: node.id,
 							kind: "jev" as const,
 							question: node.data.question,
+							confidenceThreshold: node.data.confidenceThreshold,
+							...(node.data.fallbackOutputId
+								? { fallbackOutputId: node.data.fallbackOutputId }
+								: {}),
 							...(node.data.variables?.length
 								? { variables: node.data.variables }
 								: {}),
@@ -454,6 +459,10 @@ export function routesFromGraph(
 						kind: "model" as const,
 						provider: node.data.kind,
 						model: node.data.model,
+						maxOutputTokens: node.data.maxOutputTokens,
+						...(node.data.reasoningEffort
+							? { reasoningEffort: node.data.reasoningEffort }
+							: {}),
 						...(node.data.variables?.length
 							? { variables: node.data.variables }
 							: {}),
@@ -477,54 +486,21 @@ export function routesFromGraph(
 	return parsed.success ? parsed.data : null;
 }
 
-type OutputTier = "low" | "high";
-
-function outputTier(question: JevQuestion, id: string): OutputTier | undefined {
-	if (question.type === "noul") return id === "no" ? "low" : "high";
-	if (question.type === "score") {
-		const index = question.levels.findIndex((level) => level.id === id);
-		if (index < 0) return undefined;
-		return index < question.levels.length / 2 ? "low" : "high";
-	}
-	const index = question.options.findIndex((option) => option.id === id);
-	if (index === 0) return "low";
-	if (index === question.options.length - 1) return "high";
-	return undefined;
-}
-
-export function remapQuestionEdges(
+export function retainQuestionEdges(
 	previousQuestion: JevQuestion,
 	nextQuestion: JevQuestion,
 	edges: Edge[],
 	sourceId = "jev",
 ): Edge[] {
-	const previousOutputs = questionOutputs(previousQuestion);
-	const nextOutputs = questionOutputs(nextQuestion);
-	const otherEdges = edges.filter((edge) => edge.source !== sourceId);
-	const oldBranchEdges = edges.filter((edge) => edge.source === sourceId);
-	const branchEdges = nextOutputs.flatMap((output) => {
-		const previousId =
-			previousQuestion.type === nextQuestion.type
-				? output.id
-				: previousOutputs.find(
-						(candidate) =>
-							outputTier(previousQuestion, candidate.id) ===
-							outputTier(nextQuestion, output.id),
-					)?.id;
-		const previous = oldBranchEdges.find(
-			(edge) => edge.sourceHandle === previousId,
-		);
-		return previous
-			? [
-					{
-						...previous,
-						id: `${sourceId}-${output.id}-${previous.target}`,
-						sourceHandle: output.id,
-					},
-				]
-			: [];
-	});
-	return [...otherEdges, ...branchEdges];
+	if (previousQuestion.type !== nextQuestion.type)
+		return edges.filter((edge) => edge.source !== sourceId);
+	const outputIds = new Set(
+		questionOutputs(nextQuestion).map((output) => output.id),
+	);
+	return edges.filter(
+		(edge) =>
+			edge.source !== sourceId || outputIds.has(edge.sourceHandle ?? ""),
+	);
 }
 
 export function duplicatePosition(node: FlowNode, nodes: FlowNode[]) {

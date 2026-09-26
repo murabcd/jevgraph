@@ -1,42 +1,59 @@
 import { describe, expect, test } from "bun:test";
 import {
+	configuredJevQuestionSchema,
 	defaultJevQuestion,
+	jevQuestionSchema,
 	questionForJev,
 	questionOutputs,
 	resolveJevAnswer,
 } from "../src/lib/jev-question";
+import { configuredJevQuestion } from "./jev-question-fixture";
 
 describe("Jev question modes", () => {
 	test("sends each configured question in the provider's format", () => {
-		expect(questionForJev(defaultJevQuestion("choice")).type).toBe("choice");
-		expect(questionForJev(defaultJevQuestion("noul"))).toMatchObject({
+		expect(questionForJev(configuredJevQuestion("choice")).type).toBe("choice");
+		expect(questionForJev(configuredJevQuestion("noul"))).toMatchObject({
 			type: "boolean",
-			criteria: { true: "Complex reasoning or high precision is required." },
+			criteria: { true: "The condition is met." },
 		});
-		expect(questionForJev(defaultJevQuestion("score"))).toMatchObject({
+		expect(questionForJev(configuredJevQuestion("score"))).toMatchObject({
 			type: "score",
-			criteria: [
-				"A direct response is sufficient.",
-				"Some reasoning is needed.",
-				"Complex, multi-step reasoning is required.",
-			],
+			criteria: ["Level 0 criteria.", "Level 1 criteria.", "Level 2 criteria."],
 		});
 	});
 
+	test("keeps new questions generic until configured", () => {
+		for (const type of ["choice", "noul", "score"] as const) {
+			const question = defaultJevQuestion(type);
+			expect(jevQuestionSchema.safeParse(question).success).toBe(true);
+			expect(configuredJevQuestionSchema.safeParse(question).success).toBe(
+				false,
+			);
+			expect(
+				configuredJevQuestionSchema.safeParse(configuredJevQuestion(type))
+					.success,
+			).toBe(true);
+		}
+		expect(questionOutputs(defaultJevQuestion("choice"))).toEqual([
+			{ id: "choice-1", label: "Choice 1" },
+			{ id: "choice-2", label: "Choice 2" },
+		]);
+	});
+
 	test("maps a Choice label to its stable output ID", () => {
-		const question = defaultJevQuestion("choice");
+		const question = configuredJevQuestion("choice");
 		if (question.type !== "choice") throw new Error("Expected Choice question");
 		question.options[0].label = "Cheap";
 		expect(
 			resolveJevAnswer(question, { type: "choice", choice: "Cheap" }, 0.9),
-		).toMatchObject({ branch: "fast", confidence: 0.9 });
+		).toMatchObject({ branch: "choice-1", confidence: 0.9 });
 		expect(() =>
 			resolveJevAnswer(question, { type: "choice", choice: "Unknown" }, 0.9),
 		).toThrow("unknown choice");
 	});
 
 	test("routes Noul by yes probability and derives confidence", () => {
-		const question = defaultJevQuestion("noul");
+		const question = configuredJevQuestion("noul");
 		expect(
 			resolveJevAnswer(
 				question,
@@ -61,7 +78,7 @@ describe("Jev question modes", () => {
 	});
 
 	test("routes Score to the nearest numbered level", () => {
-		const question = defaultJevQuestion("score");
+		const question = configuredJevQuestion("score");
 		expect(questionOutputs(question)).toEqual([
 			{ id: "score-0", label: "Level 0" },
 			{ id: "score-1", label: "Level 1" },

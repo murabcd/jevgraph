@@ -1,16 +1,19 @@
 import { expect, test } from "bun:test";
 import { runWithOneFallback } from "../server/model-failover";
 import type { RouteTarget } from "../src/lib/routing";
+import { DEFAULT_MODEL_MAX_OUTPUT_TOKENS } from "../src/lib/routing";
 
 const primary: RouteTarget = {
 	nodeId: "primary",
 	provider: "openai",
 	model: "gpt-5-mini",
+	maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 };
 const backup: RouteTarget = {
 	nodeId: "backup",
 	provider: "google",
 	model: "gemini-2.5-flash",
+	maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 };
 
 test("tries the connected backup once when the primary fails before text", async () => {

@@ -15,17 +15,18 @@ import {
 	duplicatePosition,
 	type FlowNode,
 	hasFallbackConnection,
+	type JevNodeSettings,
 	openPosition,
 	reachesNode,
 	readGraph,
-	remapQuestionEdges,
 	removeGraphNode,
+	retainQuestionEdges,
 	routesFromGraph,
 	saveGraph,
 } from "@/flow/graph";
-import { type JevQuestion, questionOutputs } from "@/lib/jev-question";
+import { questionOutputs } from "@/lib/jev-question";
 import { providerForModel } from "@/lib/models";
-import type { StartField } from "@/lib/routing";
+import type { ReasoningEffort, StartField } from "@/lib/routing";
 
 type PendingConnection = {
 	source: string;
@@ -52,7 +53,13 @@ export function useRoutingGraph() {
 	const onModelSettingsChange = useCallback(
 		(
 			nodeId: string,
-			settings: { model: string; prompt: string; variables: string[] },
+			settings: {
+				model: string;
+				prompt: string;
+				variables: string[];
+				maxOutputTokens: number;
+				reasoningEffort?: ReasoningEffort;
+			},
 		) => {
 			const provider = providerForModel(settings.model);
 			if (!provider) return;
@@ -100,12 +107,8 @@ export function useRoutingGraph() {
 	);
 
 	const onQuestionChange = useCallback(
-		(
-			nodeId: string,
-			nextQuestion: JevQuestion,
-			variables: string[],
-			maxRepeats: number,
-		) => {
+		(nodeId: string, settings: JevNodeSettings) => {
+			const nextQuestion = settings.question;
 			const currentQuestion = nodes.find((node) => node.id === nodeId)?.data
 				.question;
 			if (!currentQuestion) return;
@@ -116,16 +119,19 @@ export function useRoutingGraph() {
 								...node,
 								data: {
 									...node.data,
-									question: nextQuestion,
-									variables,
-									maxRepeats,
+									...settings,
+									fallbackOutputId: questionOutputs(nextQuestion).some(
+										(output) => output.id === settings.fallbackOutputId,
+									)
+										? settings.fallbackOutputId
+										: undefined,
 								},
 							}
 						: node,
 				),
 			);
 			setGraphEdges((current) =>
-				remapQuestionEdges(currentQuestion, nextQuestion, current, nodeId),
+				retainQuestionEdges(currentQuestion, nextQuestion, current, nodeId),
 			);
 			setPendingConnection(null);
 		},
@@ -155,6 +161,8 @@ export function useRoutingGraph() {
 							model: original.data.model,
 							prompt: original.data.prompt,
 							variables: original.data.variables,
+							maxOutputTokens: original.data.maxOutputTokens,
+							reasoningEffort: original.data.reasoningEffort,
 						},
 					},
 				];

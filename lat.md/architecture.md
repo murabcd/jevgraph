@@ -1,6 +1,6 @@
 # Architecture
 
-Router Studio is a local Vite and React chatflow editor. Every chat turn runs the current graph on the local API; the canvas observes execution and edits the graph for later turns. See [[routing]], [[canvas]], and [[chat]].
+Route Studio is a local Vite and React chatflow editor. Every chat turn runs the current graph on the local API; the canvas observes execution and edits the graph for later turns. See [[routing]], [[canvas]], and [[chat]].
 
 ## Module ownership
 

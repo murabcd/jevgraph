@@ -1,13 +1,15 @@
 import { type JevQuestion, questionOutputs } from "../src/lib/jev-question.ts";
 import {
 	type ChatMessage,
+	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+	JEV_MODEL_ID,
 	type JevDecision,
+	modelTarget,
 	type NodeOutput,
 	type RouteResult,
 	type RouteSelectionResult,
 	type RouteTarget,
 	type RouteTrace,
-	type RoutingConfig,
 	type RoutingMetadata,
 	resolveStartVariables,
 	selectedVariables,
@@ -71,7 +73,6 @@ type WorkflowResponse = {
 
 type Execution = {
 	routes: WorkflowRoutes;
-	config: RoutingConfig;
 	messages: ChatMessage[];
 	metadata: RoutingMetadata;
 	evaluate: (
@@ -190,7 +191,6 @@ function workflowTopology(routes: WorkflowRoutes): {
 
 export async function executeWorkflow({
 	routes,
-	config,
 	messages,
 	metadata,
 	evaluate,
@@ -303,21 +303,16 @@ export async function executeWorkflow({
 					signal?.throwIfAborted();
 					const acceptedBranch =
 						decision &&
-						decision.confidence >= config.confidenceThreshold &&
+						decision.confidence >=
+							(node.confidenceThreshold ?? DEFAULT_JEV_CONFIDENCE_THRESHOLD) &&
 						options.some((option) => option.id === decision.branch)
 							? decision.branch
 							: undefined;
-					const preferredBranch =
-						acceptedBranch ??
-						options.find((option) =>
-							outgoingEdges.some(
-								(edge) =>
-									edge.source === id &&
-									edge.sourceHandle === option.id &&
-									!edge.repeat,
-							),
-						)?.id ??
-						options[0].id;
+					const preferredBranch = acceptedBranch ?? node.fallbackOutputId;
+					if (!preferredBranch)
+						throw new Error(
+							`Jev ${id} could not choose a reliable answer${error ? `: ${error}` : ""}`,
+						);
 					let chosenEdge = outgoingEdges.find(
 						(edge) =>
 							edge.source === id && edge.sourceHandle === preferredBranch,
@@ -348,19 +343,18 @@ export async function executeWorkflow({
 						text: chosenEdge ? `Decision: ${label}` : label,
 					};
 					if (!chosenEdge) {
-						if (!acceptedBranch || !decision)
-							throw new Error(`Jev ${id} could not choose a reliable answer`);
+						const jevModel = decision?.model ?? JEV_MODEL_ID;
 						return {
 							lineage: [...inputs, output],
 							decision: workflowDecision,
 							output,
 							edges: [],
 							terminal: {
-								target: { nodeId: id, provider: "jev", model: decision.model },
+								target: { nodeId: id, provider: "jev", model: jevModel },
 								response: {
 									text: label,
-									model: decision.model,
-									usage: decision.usage,
+									model: jevModel,
+									usage: decision?.usage,
 								},
 							},
 						};
@@ -372,13 +366,7 @@ export async function executeWorkflow({
 						edges: [chosenEdge],
 					};
 				}
-				const target: RouteTarget = {
-					nodeId: id,
-					provider: node.provider,
-					model: node.model,
-					prompt: node.prompt,
-					variables: node.variables,
-				};
+				const target = modelTarget(node);
 				const next = normal.filter((edge) => edge.source === id);
 				const fallbackEdge = routes.edges.find(
 					(edge) => edge.source === id && edge.sourceHandle === "fallback",
@@ -386,16 +374,8 @@ export async function executeWorkflow({
 				const backupNode = fallbackEdge
 					? byId.get(fallbackEdge.target)
 					: undefined;
-				const backup: RouteTarget | undefined =
-					config.fallbackEnabled && backupNode?.kind === "model"
-						? {
-								nodeId: backupNode.id,
-								provider: backupNode.provider,
-								model: backupNode.model,
-								prompt: backupNode.prompt,
-								variables: backupNode.variables,
-							}
-						: undefined;
+				const backup =
+					backupNode?.kind === "model" ? modelTarget(backupNode) : undefined;
 				const canStream = next.length === 0 && solePendingNode;
 				if (canStream) onRoute(selection(target));
 				let usedFallback: { edge: WorkflowEdge; reason: string } | undefined;

@@ -29,7 +29,9 @@ Keep actual keys only in .env.local. A turn needs keys for the providers it reac
 
 Send a chat message to run the graph; there is no separate Run button. The canvas highlights reached nodes and edges, displays each node's elapsed time, and offers a last-turn output inspector. Chat history stays in memory. The graph, layout, viewport, theme, and chat visibility persist in browser local storage.
 
-The server uses direct AI SDK provider packages for Jev, OpenAI, and Gemini. The installed Jev provider evaluates Choice, Noul, and Score questions; it does not generate prose. An explicit backup Model gets one attempt only if the primary fails before producing text. Jev failures or low confidence take the first connected non-repeat output, or report an error if none is available. See [routing](lat.md/routing.md) for bounds, failure policy, and stream events.
+The server uses direct AI SDK provider packages for Jev, OpenAI, and Gemini. The installed Jev provider evaluates Choice, Noul, and Score questions; it does not generate prose. Each Jev node configures a minimum provider confidence for Choice and Score or a minimum selected-answer probability for Noul, plus an output for evaluations below that threshold or provider errors. A Model node configures its model, instructions, maximum output tokens, and supported reasoning effort. An explicit backup Model gets one attempt only if the primary fails before producing text. See [routing](lat.md/routing.md) for bounds, failure policy, and stream events.
+
+New Jev nodes start as neutral drafts: Choice 1/Choice 2, Yes/No, or numbered Score levels with blank instructions and criteria. Complete the question in the node editor before sending a chat message. The initial canvas contains only Start and an unconfigured Jev node; model paths are added in the UI.
 
 ## Commands
 

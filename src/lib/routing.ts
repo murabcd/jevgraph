@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { jevQuestionSchema, questionOutputs } from "./jev-question.ts";
+import {
+	configuredJevQuestionSchema,
+	questionOutputs,
+} from "./jev-question.ts";
 
 export const providerSchema = z.enum(["openai", "google"]);
 export type Provider = z.infer<typeof providerSchema>;
@@ -9,21 +12,28 @@ export type KeyStatus = { jev: boolean; openai: boolean; google: boolean };
 export const JEV_MODEL_ID = "jev-latest";
 export const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
 export const DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite";
+export const DEFAULT_JEV_CONFIDENCE_THRESHOLD = 0.7;
+export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 1400;
 export const MAX_PROMPT_LENGTH = 12000;
+export const confidenceThresholdSchema = z.number().min(0).max(1);
+export const maxOutputTokensSchema = z.number().int().min(1).max(8192);
+export const reasoningEffortSchema = z.enum([
+	"minimal",
+	"low",
+	"medium",
+	"high",
+]);
+export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 
-export const routingConfigSchema = z.strictObject({
-	confidenceThreshold: z.number().min(0).max(1),
-	fallbackEnabled: z.boolean(),
-});
-export type RoutingConfig = z.infer<typeof routingConfigSchema>;
-
-export const defaultConfig: RoutingConfig = {
-	confidenceThreshold: 0.7,
-	fallbackEnabled: true,
-};
+export function modelSupportsReasoningEffort(
+	provider: Provider,
+	model: string,
+): boolean {
+	return provider === "openai" && model.startsWith("gpt-5");
+}
 
 const nodeIdSchema = z.string().min(1).max(100);
-const modelIdSchema = z
+export const modelIdSchema = z
 	.string()
 	.trim()
 	.min(1)
@@ -75,6 +85,8 @@ export const routeTargetSchema = z.strictObject({
 	model: modelIdSchema,
 	prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 	variables: z.array(inputNameSchema).optional(),
+	maxOutputTokens: maxOutputTokensSchema,
+	reasoningEffort: reasoningEffortSchema.optional(),
 });
 export type RouteTarget = z.infer<typeof routeTargetSchema>;
 
@@ -87,7 +99,9 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 	z.strictObject({
 		id: nodeIdSchema,
 		kind: z.literal("jev"),
-		question: jevQuestionSchema,
+		question: configuredJevQuestionSchema,
+		confidenceThreshold: confidenceThresholdSchema.optional(),
+		fallbackOutputId: z.string().min(1).max(100).optional(),
 		variables: variableNamesSchema.optional(),
 		maxRepeats: z.number().int().min(1).max(5).optional(),
 	}),
@@ -98,6 +112,8 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 		model: modelIdSchema,
 		prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 		variables: variableNamesSchema.optional(),
+		maxOutputTokens: maxOutputTokensSchema.optional(),
+		reasoningEffort: reasoningEffortSchema.optional(),
 	}),
 ]);
 const workflowEdgeSchema = z.strictObject({
@@ -129,6 +145,15 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 			(node) =>
 				(node.kind === "jev" || node.kind === "model") &&
 				(node.variables ?? []).some((name) => !availableVariables.has(name)),
+		)
+	)
+		return false;
+	if (
+		nodes.some(
+			(node) =>
+				node.kind === "model" &&
+				Boolean(node.reasoningEffort) &&
+				!modelSupportsReasoningEffort(node.provider, node.model),
 		)
 	)
 		return false;
@@ -171,8 +196,10 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 		} else if (node.kind === "jev") {
 			const outputs = questionOutputs(node.question);
 			if (
+				(node.fallbackOutputId !== undefined &&
+					!outputs.some((output) => output.id === node.fallbackOutputId)) ||
 				(outgoing.some((edge) => edge.repeat) &&
-					outgoing.every((edge) => edge.repeat)) ||
+					outgoing.filter((edge) => !edge.repeat).length !== 1) ||
 				outputs.some(
 					(output) =>
 						outgoing.filter((edge) => edge.sourceHandle === output.id).length >
@@ -301,7 +328,6 @@ export const routeRequestSchema = z
 			.min(1)
 			.max(30)
 			.refine((messages) => messages.at(-1)?.role === "user"),
-		config: routingConfigSchema,
 		routes: workflowRoutesSchema,
 	})
 	.superRefine((request, context) => {
@@ -380,19 +406,23 @@ export type RouteStreamEvent =
 	| { type: "done"; route: RouteResult }
 	| { type: "error"; error: string };
 
+export function modelTarget(
+	node: Extract<WorkflowNode, { kind: "model" }>,
+): RouteTarget {
+	return {
+		nodeId: node.id,
+		provider: node.provider,
+		model: node.model,
+		prompt: node.prompt,
+		variables: node.variables,
+		maxOutputTokens: node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+		reasoningEffort: node.reasoningEffort,
+	};
+}
+
 export function routeTargets(routes: WorkflowRoutes): RouteTarget[] {
 	return routes.nodes.flatMap((node) =>
-		node.kind === "model"
-			? [
-					{
-						nodeId: node.id,
-						provider: node.provider,
-						model: node.model,
-						prompt: node.prompt,
-						variables: node.variables,
-					},
-				]
-			: [],
+		node.kind === "model" ? [modelTarget(node)] : [],
 	);
 }
 

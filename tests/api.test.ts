@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { handleApi } from "../server/api";
-import { defaultJevQuestion } from "../src/lib/jev-question";
-import { defaultConfig, type RouteStreamEvent } from "../src/lib/routing";
+import type { RouteStreamEvent } from "../src/lib/routing";
+import { configuredJevQuestion } from "./jev-question-fixture";
 
 async function eventsFor(
 	routes: unknown,
@@ -12,7 +12,6 @@ async function eventsFor(
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				messages: [{ role: "user", content: "Hello" }],
-				config: defaultConfig,
 				routes,
 			}),
 		}),
@@ -66,15 +65,20 @@ describe("chatflow API", () => {
 			kind: "workflow",
 			nodes: [
 				{ id: "input", kind: "input", fields: [] },
-				{ id: "custom-router", kind: "jev", question: defaultJevQuestion() },
 				{
-					id: "fast-model",
+					id: "custom-router",
+					kind: "jev",
+					question: configuredJevQuestion(),
+					fallbackOutputId: "choice-1",
+				},
+				{
+					id: "first-model",
 					kind: "model",
 					provider: "google",
 					model: "gemini-3.5-flash-lite",
 				},
 				{
-					id: "deep-model",
+					id: "second-model",
 					kind: "model",
 					provider: "openai",
 					model: "gpt-5-mini",
@@ -83,16 +87,16 @@ describe("chatflow API", () => {
 			edges: [
 				{ id: "entry", source: "input", target: "custom-router" },
 				{
-					id: "fast",
+					id: "choice-1",
 					source: "custom-router",
-					sourceHandle: "fast",
-					target: "fast-model",
+					sourceHandle: "choice-1",
+					target: "first-model",
 				},
 				{
-					id: "deep",
+					id: "choice-2",
 					source: "custom-router",
-					sourceHandle: "deep",
-					target: "deep-model",
+					sourceHandle: "choice-2",
+					target: "second-model",
 				},
 			],
 		});
@@ -109,7 +113,7 @@ describe("chatflow API", () => {
 				path: [
 					{ nodeId: "input" },
 					{ nodeId: "custom-router" },
-					{ nodeId: "fast-model" },
+					{ nodeId: "first-model" },
 				],
 			},
 		});

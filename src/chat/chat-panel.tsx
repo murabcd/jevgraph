@@ -218,7 +218,7 @@ export function ChatPanel({
 								<EmptyDescription>
 									{routes
 										? "Each message runs through the connected chatflow."
-										: "Connect the chatflow to start a conversation."}
+										: "Finish configuring the chatflow to start a conversation."}
 								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>

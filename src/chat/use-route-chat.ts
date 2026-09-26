@@ -1,14 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import type { ChatTurn } from "@/chat/types";
 import { readRouteStream } from "@/lib/route-stream";
-import {
-	type ChatMessage,
-	defaultConfig,
-	type NodeTiming,
-	type RouteResult,
-	type RouteStreamEvent,
-	type RouteTrace,
-	type WorkflowRoutes,
+import type {
+	ChatMessage,
+	NodeTiming,
+	RouteResult,
+	RouteStreamEvent,
+	RouteTrace,
+	WorkflowRoutes,
 } from "@/lib/routing";
 
 export function useRouteChat(
@@ -34,7 +33,7 @@ export function useRouteChat(
 		const question = draft.trim();
 		if (!question || running) return;
 		if (!routes) {
-			setError("Complete the chatflow connections before sending a message.");
+			setError("Finish configuring the chatflow before sending a message.");
 			return;
 		}
 		const history: ChatMessage[] = [
@@ -69,7 +68,6 @@ export function useRouteChat(
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					messages: history,
-					config: defaultConfig,
 					routes,
 				}),
 			});

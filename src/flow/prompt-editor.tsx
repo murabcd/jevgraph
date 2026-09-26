@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { GoogleIcon, OpenAIIcon } from "@/components/icons/provider-icons";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+	Field,
+	FieldError,
+	FieldGroup,
+	FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
 	Select,
@@ -23,7 +29,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
 import { textModels } from "@/lib/models";
-import { MAX_PROMPT_LENGTH, type StartField } from "@/lib/routing";
+import {
+	MAX_PROMPT_LENGTH,
+	maxOutputTokensSchema,
+	modelSupportsReasoningEffort,
+	type ReasoningEffort,
+	type StartField,
+} from "@/lib/routing";
 
 function ModelOption({ model }: { model: (typeof textModels)[number] }) {
 	return (
@@ -46,10 +58,14 @@ type Props = {
 		model: string;
 		prompt: string;
 		variables: string[];
+		maxOutputTokens: number;
+		reasoningEffort?: ReasoningEffort;
 	}) => void;
 	title: string;
 	id: string;
 	modelId: string;
+	maxOutputTokens: number;
+	reasoningEffort?: ReasoningEffort;
 	fields: StartField[];
 	variables: string[];
 };
@@ -62,12 +78,25 @@ export function PromptEditor({
 	title,
 	id,
 	modelId,
+	maxOutputTokens,
+	reasoningEffort,
 	fields,
 	variables,
 }: Props) {
 	const [draft, setDraft] = useState(value);
 	const [draftModel, setDraftModel] = useState(modelId);
 	const [variablesDraft, setVariablesDraft] = useState(variables);
+	const [outputTokensDraft, setOutputTokensDraft] = useState(
+		String(maxOutputTokens),
+	);
+	const [effortDraft, setEffortDraft] = useState<ReasoningEffort | "default">(
+		reasoningEffort ?? "default",
+	);
+	const [error, setError] = useState("");
+	const selectedModel = textModels.find((model) => model.id === draftModel);
+	const supportsReasoningEffort = selectedModel
+		? modelSupportsReasoningEffort(selectedModel.provider, draftModel)
+		: false;
 	return (
 		<Sheet
 			modal={false}
@@ -95,7 +124,10 @@ export function PromptEditor({
 								<Select
 									value={draftModel}
 									onValueChange={(value) => {
-										if (value) setDraftModel(value);
+										if (value) {
+											if (value !== draftModel) setEffortDraft("default");
+											setDraftModel(value);
+										}
 									}}
 								>
 									<SelectTrigger id={`model-select-${id}`} className="w-full">
@@ -134,6 +166,62 @@ export function PromptEditor({
 								</Select>
 							</Field>
 						)}
+						<Field>
+							<FieldLabel
+								htmlFor={`${id}-max-output`}
+								className="text-xs text-muted-foreground"
+							>
+								Maximum output tokens
+							</FieldLabel>
+							<Input
+								id={`${id}-max-output`}
+								type="text"
+								inputMode="numeric"
+								value={outputTokensDraft}
+								onChange={(event) => setOutputTokensDraft(event.target.value)}
+							/>
+						</Field>
+						{supportsReasoningEffort && (
+							<Field>
+								<FieldLabel
+									htmlFor={`${id}-reasoning`}
+									className="text-xs text-muted-foreground"
+								>
+									Reasoning effort
+								</FieldLabel>
+								<Select
+									value={effortDraft}
+									onValueChange={(value) => {
+										if (
+											value === "default" ||
+											value === "minimal" ||
+											value === "low" ||
+											value === "medium" ||
+											value === "high"
+										)
+											setEffortDraft(value);
+									}}
+								>
+									<SelectTrigger id={`${id}-reasoning`} className="w-full">
+										<SelectValue>
+											{(selected: string | null) =>
+												selected === "default" ? "Provider default" : selected
+											}
+										</SelectValue>
+									</SelectTrigger>
+									<SelectContent alignItemWithTrigger={false}>
+										<SelectItem value="default">Provider default</SelectItem>
+										{(["minimal", "low", "medium", "high"] as const).map(
+											(effort) => (
+												<SelectItem key={effort} value={effort}>
+													{effort}
+												</SelectItem>
+											),
+										)}
+									</SelectContent>
+								</Select>
+							</Field>
+						)}
 						<StartVariableBinding
 							fields={fields}
 							selected={variablesDraft}
@@ -157,15 +245,30 @@ export function PromptEditor({
 								autoFocus
 							/>
 						</Field>
+						{error && <FieldError>{error}</FieldError>}
 					</FieldGroup>
 				</ScrollArea>
 				<SheetFooter>
 					<Button
 						onClick={() => {
+							const parsed = maxOutputTokensSchema.safeParse(
+								outputTokensDraft.trim() === ""
+									? NaN
+									: Number(outputTokensDraft),
+							);
+							if (!parsed.success) {
+								setError("Maximum output tokens must be between 1 and 8192.");
+								return;
+							}
 							onSave({
 								model: draftModel,
 								prompt: draft,
 								variables: variablesDraft,
+								maxOutputTokens: parsed.data,
+								reasoningEffort:
+									supportsReasoningEffort && effortDraft !== "default"
+										? effortDraft
+										: undefined,
 							});
 							onOpenChange(false);
 						}}

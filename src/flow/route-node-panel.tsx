@@ -88,15 +88,15 @@ function JevPanel({
 	return (
 		<JevQuestionEditor
 			question={data.question}
+			confidenceThreshold={data.confidenceThreshold}
+			fallbackOutputId={data.fallbackOutputId}
 			fields={startFields}
 			variables={data.variables ?? []}
 			hasRepeat={data.hasRepeat}
 			maxRepeats={data.maxRepeats ?? 3}
 			open
 			onOpenChange={onOpenChange}
-			onSave={(question, variables, maxRepeats) =>
-				actions.onQuestionChange(id, question, variables, maxRepeats)
-			}
+			onSave={(settings) => actions.onQuestionChange(id, settings)}
 		/>
 	);
 }
@@ -118,6 +118,8 @@ function ModelPanel({
 			onOpenChange={onOpenChange}
 			onSave={(settings) => actions.onModelSettingsChange(id, settings)}
 			modelId={data.model}
+			maxOutputTokens={data.maxOutputTokens}
+			reasoningEffort={data.reasoningEffort}
 			fields={startFields}
 			variables={data.variables ?? []}
 			title={title}

@@ -20,16 +20,15 @@ describe("route stream", () => {
 		const done: RouteStreamEvent = {
 			type: "done",
 			route: {
-				mode: "jev",
 				text: "Bonjour",
 				provider: "google",
 				model: "gemini-test",
-				initialProvider: "google",
 				nodeId: "google",
-				initialNodeId: "google",
-				branch: "fast",
-				finalBranch: "fast",
-				reason: "Fast task",
+				reason: "test classifier: choice-1",
+				path: [{ nodeId: "input" }, { nodeId: "google" }],
+				traversedEdges: [],
+				jevSteps: [],
+				outputs: [],
 				latencyMs: 12,
 			},
 		};

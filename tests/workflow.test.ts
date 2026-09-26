@@ -1,14 +1,13 @@
 import { expect, test } from "bun:test";
 import { executeWorkflow, workflowRoutingState } from "../server/workflow";
 import { routesFromGraph } from "../src/flow/graph";
-import { defaultJevQuestion } from "../src/lib/jev-question";
 import {
-	defaultConfig,
 	type JevDecision,
 	type RouteTarget,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
 } from "../src/lib/routing";
+import { configuredJevQuestion } from "./jev-question-fixture";
 import { connectedWorkflowGraph } from "./workflow-graph";
 
 const example = connectedWorkflowGraph();
@@ -43,7 +42,6 @@ function run(
 		progress,
 		result: executeWorkflow({
 			routes,
-			config: defaultConfig,
 			messages: [{ role: "user", content: "Help me" }],
 			metadata: {},
 			evaluate: (nodeId, _question, state) =>
@@ -90,20 +88,25 @@ test("an unconnected Jev choice returns its label without a model call", async (
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "judge", kind: "jev", question: defaultJevQuestion() },
+			{ id: "judge", kind: "jev", question: configuredJevQuestion() },
 			{ id: "next", kind: "model", provider: "openai", model: "gpt-5-mini" },
 		],
 		edges: [
 			{ id: "entry", source: "input", target: "judge" },
-			{ id: "fast", source: "judge", sourceHandle: "fast", target: "next" },
+			{
+				id: "choice-1",
+				source: "judge",
+				sourceHandle: "choice-1",
+				target: "next",
+			},
 		],
 	};
 	expect(workflowRoutesSchema.safeParse(routes).success).toBe(true);
 	const execution = run(routes, {
 		decide: async () => ({
 			type: "choice",
-			branch: "deep",
-			value: "deep",
+			branch: "choice-2",
+			value: "choice-2",
 			confidence: 0.92,
 			model: "jev-latest",
 			latencyMs: 10,
@@ -114,10 +117,10 @@ test("an unconnected Jev choice returns its label without a model call", async (
 		},
 	});
 	const result = await execution.result;
-	expect(result.text).toBe("Deep");
+	expect(result.text).toBe("Choice 2");
 	expect(result.provider).toBe("jev");
 	expect(result.usage).toEqual({ inputTokens: 93, outputTokens: 0 });
-	expect(execution.deltas).toEqual(["Deep"]);
+	expect(execution.deltas).toEqual(["Choice 2"]);
 });
 
 test("an unconnected Jev answer fails rather than inventing a label", async () => {
@@ -125,7 +128,7 @@ test("an unconnected Jev answer fails rather than inventing a label", async () =
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "judge", kind: "jev", question: defaultJevQuestion() },
+			{ id: "judge", kind: "jev", question: configuredJevQuestion() },
 		],
 		edges: [{ id: "entry", source: "input", target: "judge" }],
 	};
@@ -133,14 +136,126 @@ test("an unconnected Jev answer fails rather than inventing a label", async () =
 		run(routes, {
 			decide: async () => ({
 				type: "choice",
-				branch: "deep",
-				value: "deep",
+				branch: "choice-2",
+				value: "choice-2",
 				confidence: 0.2,
 				model: "jev-latest",
 				latencyMs: 10,
 			}),
 		}).result,
 	).rejects.toThrow("could not choose a reliable answer");
+});
+
+test("Jev uses its configured confidence threshold and fallback output", async () => {
+	const routes: WorkflowRoutes = {
+		kind: "workflow",
+		nodes: [
+			{ id: "input", kind: "input", fields: [] },
+			{
+				id: "judge",
+				kind: "jev",
+				question: configuredJevQuestion(),
+				confidenceThreshold: 0.9,
+				fallbackOutputId: "choice-1",
+			},
+			{
+				id: "first-model",
+				kind: "model",
+				provider: "openai",
+				model: "gpt-5-mini",
+			},
+		],
+		edges: [
+			{ id: "entry", source: "input", target: "judge" },
+			{
+				id: "choice-1",
+				source: "judge",
+				sourceHandle: "choice-1",
+				target: "first-model",
+			},
+		],
+	};
+	const execution = executeWorkflow({
+		routes,
+		messages: [{ role: "user", content: "Help me" }],
+		metadata: {},
+		evaluate: async () => {
+			return {
+				type: "choice",
+				branch: "choice-2",
+				value: "choice-2",
+				confidence: 0.8,
+				model: "jev-latest",
+				latencyMs: 1,
+			};
+		},
+		runModel: async (target) => ({ text: target.nodeId, model: target.model }),
+		onDelta: () => {},
+		onRoute: () => {},
+		onProgress: () => {},
+	});
+	const result = await execution;
+	expect(result.nodeId).toBe("first-model");
+	expect(result.jevSteps[0]?.branch).toBe("choice-1");
+});
+
+test("Jev can return a configured fallback label when its provider fails", async () => {
+	const routes: WorkflowRoutes = {
+		kind: "workflow",
+		nodes: [
+			{ id: "input", kind: "input", fields: [] },
+			{
+				id: "judge",
+				kind: "jev",
+				question: configuredJevQuestion(),
+				fallbackOutputId: "choice-2",
+			},
+		],
+		edges: [{ id: "entry", source: "input", target: "judge" }],
+	};
+	const result = await run(routes, {
+		decide: async () => {
+			throw new Error("Jev unavailable");
+		},
+		model: async () => {
+			throw new Error("No model should run");
+		},
+	}).result;
+	expect(result.text).toBe("Choice 2");
+	expect(result.provider).toBe("jev");
+	expect(result.jevSteps[0]).toMatchObject({
+		branch: "choice-2",
+		error: "Jev unavailable",
+	});
+});
+
+test("Model execution receives its configured generation settings", async () => {
+	const routes: WorkflowRoutes = {
+		kind: "workflow",
+		nodes: [
+			{ id: "input", kind: "input", fields: [] },
+			{
+				id: "model",
+				kind: "model",
+				provider: "openai",
+				model: "gpt-5-mini",
+				maxOutputTokens: 640,
+				reasoningEffort: "low",
+			},
+		],
+		edges: [{ id: "entry", source: "input", target: "model" }],
+	};
+	let target: RouteTarget | undefined;
+	await run(routes, {
+		model: async (current) => {
+			target = current;
+			return "done";
+		},
+	}).result;
+	expect(target).toMatchObject({
+		maxOutputTokens: 640,
+		reasoningEffort: "low",
+	});
 });
 
 test("Start values reach only the nodes that select them", async () => {
@@ -168,7 +283,7 @@ test("Start values reach only the nodes that select them", async () => {
 			{
 				id: "judge",
 				kind: "jev",
-				question: defaultJevQuestion("noul"),
+				question: configuredJevQuestion("noul"),
 				variables: ["plan"],
 			},
 			{
@@ -195,7 +310,6 @@ test("Start values reach only the nodes that select them", async () => {
 	let modelVariables: Record<string, string | number | boolean> = {};
 	await executeWorkflow({
 		routes,
-		config: defaultConfig,
 		messages: [{ role: "user", content: "hello" }],
 		metadata: {},
 		evaluate: async (_id, _question, input) => {
@@ -227,7 +341,7 @@ test("a model can feed its output to Jev and another model", async () => {
 				model: "gpt-5-mini",
 				prompt: "Draft",
 			},
-			{ id: "gate", kind: "jev", question: defaultJevQuestion("noul") },
+			{ id: "gate", kind: "jev", question: configuredJevQuestion("noul") },
 			{
 				id: "final",
 				kind: "model",
@@ -278,7 +392,7 @@ test("parallel model results join before Jev evaluates them", async () => {
 				provider: "google",
 				model: "gemini-3.5-flash-lite",
 			},
-			{ id: "judge", kind: "jev", question: defaultJevQuestion("noul") },
+			{ id: "judge", kind: "jev", question: configuredJevQuestion("noul") },
 			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
 		],
 		edges: [
@@ -384,7 +498,7 @@ test("a Jev feedback branch repeats a model with the latest result and exits at 
 			{
 				id: "judge",
 				kind: "jev",
-				question: defaultJevQuestion("noul"),
+				question: configuredJevQuestion("noul"),
 				maxRepeats: 2,
 			},
 			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
@@ -440,7 +554,7 @@ test("a parallel join waits for a repeating branch before running the final mode
 				provider: "google",
 				model: "gemini-3.5-flash-lite",
 			},
-			{ id: "judge", kind: "jev", question: defaultJevQuestion("noul") },
+			{ id: "judge", kind: "jev", question: configuredJevQuestion("noul") },
 			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
 		],
 		edges: [

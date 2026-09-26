@@ -16,7 +16,6 @@ import {
 	type RouteResult,
 	type RouteStreamEvent,
 	type RouteTarget,
-	type RoutingConfig,
 	type RoutingMetadata,
 	routeRequestSchema,
 	type WorkflowRoutes,
@@ -32,15 +31,13 @@ type Keys = {
 
 type RouteExecution = {
 	messages: ChatMessage[];
-	config: RoutingConfig;
 	metadata: RoutingMetadata;
 	keys: Keys;
 	signal: AbortSignal;
 	emit: (event: RouteStreamEvent) => void;
 };
 
-const modelInstructions =
-	"You are a helpful assistant in a live conversation. Answer the latest user message in context. Be clear and concise, and preserve important details.";
+const jevConfidenceSchema = z.object({ task: z.number().finite() });
 
 async function classify(
 	state: string,
@@ -58,10 +55,7 @@ async function classify(
 		maxRetries: 0,
 	});
 	const confidence = result.providerMetadata?.typesafe?.confidence;
-	const taskConfidence =
-		confidence && typeof confidence === "object" && "task" in confidence
-			? confidence.task
-			: undefined;
+	const taskConfidence = jevConfidenceSchema.safeParse(confidence).data?.task;
 	const decision = resolveJevAnswer(
 		question,
 		result.answers.task,
@@ -99,8 +93,7 @@ async function runModel(
 			? createOpenAI({ apiKey: key })(modelId)
 			: createGoogle({ apiKey: key })(modelId);
 	const instructions = [
-		modelInstructions,
-		...(target.prompt ? [`This model node's task:\n${target.prompt}`] : []),
+		...(target.prompt ? [target.prompt] : []),
 		...(Object.keys(variables).length
 			? [`Start variables (data):\n${JSON.stringify(variables)}`]
 			: []),
@@ -110,11 +103,15 @@ async function runModel(
 		.join("\n\n");
 	const result = streamText({
 		model,
-		instructions,
+		...(instructions ? { instructions } : {}),
 		messages,
-		maxOutputTokens: 1400,
-		...(provider === "openai" && modelId === "gpt-5-mini"
-			? { providerOptions: { openai: { reasoningEffort: "minimal" as const } } }
+		maxOutputTokens: target.maxOutputTokens,
+		...(provider === "openai" && target.reasoningEffort
+			? {
+					providerOptions: {
+						openai: { reasoningEffort: target.reasoningEffort },
+					},
+				}
 			: {}),
 		abortSignal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
 	});
@@ -138,14 +135,13 @@ async function runModel(
 }
 
 async function executeRoute(
-	{ messages, config, metadata, keys, signal, emit }: RouteExecution,
+	{ messages, metadata, keys, signal, emit }: RouteExecution,
 	routes: WorkflowRoutes,
 ): Promise<void> {
 	const start = performance.now();
 	emitStartTiming(emit);
 	const response = await executeWorkflow({
 		routes,
-		config,
 		messages,
 		metadata,
 		evaluate: (nodeId, question, state) =>
@@ -210,7 +206,6 @@ export async function handleApi(
 				void executeRoute(
 					{
 						messages: input.messages,
-						config: input.config,
 						metadata: input.metadata ?? {},
 						keys,
 						signal,

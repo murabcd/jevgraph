@@ -28,17 +28,19 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import type { JevNodeSettings } from "@/flow/graph";
 import { jevRoleLabels } from "@/flow/node-meta";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
 import {
+	configuredJevQuestionSchema,
 	defaultJevQuestion,
 	type JevQuestion,
 	type JevQuestionType,
-	jevQuestionSchema,
 	jevQuestionTypes,
+	questionOutputs,
 	questionTypeLabels,
 } from "@/lib/jev-question";
-import type { StartField } from "@/lib/routing";
+import { confidenceThresholdSchema, type StartField } from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
 type ChoiceQuestion = Extract<JevQuestion, { type: "choice" }>;
@@ -54,6 +56,7 @@ const sectionFrameClassName =
 	"relative min-h-[132px] gap-1 rounded-lg border border-input bg-transparent px-3 py-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30";
 const sectionTextareaClassName =
 	"min-h-20 max-h-52 rounded-none border-0 bg-transparent px-0 py-0 text-sm leading-6 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent";
+const choiceValue = (id: string) => `choice:${id}`;
 
 function QuestionTypeOption({ type }: { type: JevQuestionType }) {
 	return (
@@ -188,6 +191,7 @@ function NoulFields({ question, onChange }: FieldsProps<NoulQuestion>) {
 				<Textarea
 					id="jev-yes"
 					className={editorTextareaSize}
+					placeholder="When the answer is Yes"
 					value={question.yesDescription}
 					onChange={(event) =>
 						onChange({ ...question, yesDescription: event.target.value })
@@ -202,6 +206,7 @@ function NoulFields({ question, onChange }: FieldsProps<NoulQuestion>) {
 				<Textarea
 					id="jev-no"
 					className={editorTextareaSize}
+					placeholder="When the answer is No"
 					value={question.noDescription}
 					onChange={(event) =>
 						onChange({ ...question, noDescription: event.target.value })
@@ -291,21 +296,21 @@ function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
 
 type Props = {
 	question: JevQuestion;
+	confidenceThreshold: number;
+	fallbackOutputId?: string;
 	fields: StartField[];
 	variables: string[];
 	hasRepeat?: boolean;
 	maxRepeats: number;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSave: (
-		question: JevQuestion,
-		variables: string[],
-		maxRepeats: number,
-	) => void;
+	onSave: (settings: JevNodeSettings) => void;
 };
 
 export function JevQuestionEditor({
 	question,
+	confidenceThreshold,
+	fallbackOutputId,
 	fields,
 	variables,
 	hasRepeat,
@@ -315,16 +320,51 @@ export function JevQuestionEditor({
 	onSave,
 }: Props) {
 	const [draft, setDraft] = useState<JevQuestion>(question);
+	const [confidenceDraft, setConfidenceDraft] = useState(
+		String(confidenceThreshold * 100),
+	);
+	const [fallbackDraft, setFallbackDraft] = useState(
+		fallbackOutputId ? choiceValue(fallbackOutputId) : "error",
+	);
 	const [repeatDraft, setRepeatDraft] = useState(maxRepeats);
 	const [variablesDraft, setVariablesDraft] = useState(variables);
 	const [error, setError] = useState("");
 	const save = () => {
-		const parsed = jevQuestionSchema.safeParse(draft);
+		const parsed = configuredJevQuestionSchema.safeParse(draft);
 		if (!parsed.success) {
-			setError(parsed.error.issues[0]?.message ?? "Check the question fields.");
+			const issue = parsed.error.issues[0];
+			setError(
+				issue?.code === "too_small"
+					? "Complete the instructions and criteria for every answer."
+					: (issue?.message ?? "Check the question fields."),
+			);
 			return;
 		}
-		onSave(parsed.data, variablesDraft, repeatDraft);
+		const parsedConfidence = confidenceThresholdSchema.safeParse(
+			confidenceDraft.trim() === "" ? NaN : Number(confidenceDraft) / 100,
+		);
+		if (!parsedConfidence.success) {
+			setError(
+				draft.type === "noul"
+					? "Minimum probability of the chosen answer must be between 0 and 100%."
+					: "Minimum confidence must be between 0 and 100%.",
+			);
+			return;
+		}
+		const fallbackOutputId = questionOutputs(parsed.data).find(
+			(output) => choiceValue(output.id) === fallbackDraft,
+		)?.id;
+		if (fallbackDraft !== "error" && !fallbackOutputId) {
+			setError("Select a valid fallback choice.");
+			return;
+		}
+		onSave({
+			question: parsed.data,
+			confidenceThreshold: parsedConfidence.data,
+			fallbackOutputId,
+			variables: variablesDraft,
+			maxRepeats: repeatDraft,
+		});
 		onOpenChange(false);
 	};
 	return (
@@ -358,6 +398,7 @@ export function JevQuestionEditor({
 									);
 									if (type) {
 										setDraft(defaultJevQuestion(type));
+										setFallbackDraft("error");
 										setError("");
 									}
 								}}
@@ -392,6 +433,7 @@ export function JevQuestionEditor({
 							<Textarea
 								id="jev-instructions"
 								className={editorTextareaSize}
+								placeholder="What should Jev decide?"
 								value={draft.instructions}
 								onChange={(event) =>
 									setDraft({ ...draft, instructions: event.target.value })
@@ -413,6 +455,55 @@ export function JevQuestionEditor({
 						{draft.type === "score" && (
 							<ScoreFields question={draft} onChange={setDraft} />
 						)}
+						<Field>
+							<FieldLabel
+								htmlFor="jev-confidence"
+								className="text-xs text-muted-foreground"
+							>
+								{draft.type === "noul"
+									? "Minimum probability of chosen answer (%)"
+									: "Minimum confidence (%)"}
+							</FieldLabel>
+							<Input
+								id="jev-confidence"
+								type="text"
+								inputMode="decimal"
+								value={confidenceDraft}
+								onChange={(event) => setConfidenceDraft(event.target.value)}
+							/>
+						</Field>
+						<Field>
+							<FieldLabel
+								htmlFor="jev-uncertain"
+								className="text-xs text-muted-foreground"
+							>
+								When below threshold or Jev fails
+							</FieldLabel>
+							<Select
+								value={fallbackDraft}
+								onValueChange={(value) => value && setFallbackDraft(value)}
+							>
+								<SelectTrigger id="jev-uncertain" className="w-full">
+									<SelectValue>
+										{(selected: string | null) =>
+											selected === "error"
+												? "Stop with error"
+												: (questionOutputs(draft).find(
+														(output) => choiceValue(output.id) === selected,
+													)?.label ?? "Select a choice")
+										}
+									</SelectValue>
+								</SelectTrigger>
+								<SelectContent alignItemWithTrigger={false}>
+									<SelectItem value="error">Stop with error</SelectItem>
+									{questionOutputs(draft).map((output) => (
+										<SelectItem key={output.id} value={choiceValue(output.id)}>
+											{output.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</Field>
 						{hasRepeat && (
 							<Field>
 								<FieldLabel
