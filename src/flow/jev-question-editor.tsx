@@ -15,6 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
 	Select,
 	SelectContent,
+	SelectGroup,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
@@ -414,12 +415,14 @@ export function JevQuestionEditor({
 										}
 									</SelectValue>
 								</SelectTrigger>
-								<SelectContent alignItemWithTrigger={false} className="p-1">
-									{jevQuestionTypes.map((type) => (
-										<SelectItem key={type} value={type}>
-											<QuestionTypeOption type={type} />
-										</SelectItem>
-									))}
+								<SelectContent alignItemWithTrigger={false}>
+									<SelectGroup>
+										{jevQuestionTypes.map((type) => (
+											<SelectItem key={type} value={type}>
+												<QuestionTypeOption type={type} />
+											</SelectItem>
+										))}
+									</SelectGroup>
 								</SelectContent>
 							</Select>
 						</Field>
@@ -495,12 +498,17 @@ export function JevQuestionEditor({
 									</SelectValue>
 								</SelectTrigger>
 								<SelectContent alignItemWithTrigger={false}>
-									<SelectItem value="error">Stop with error</SelectItem>
-									{questionOutputs(draft).map((output) => (
-										<SelectItem key={output.id} value={choiceValue(output.id)}>
-											{output.label}
-										</SelectItem>
-									))}
+									<SelectGroup>
+										<SelectItem value="error">Stop with error</SelectItem>
+										{questionOutputs(draft).map((output) => (
+											<SelectItem
+												key={output.id}
+												value={choiceValue(output.id)}
+											>
+												{output.label}
+											</SelectItem>
+										))}
+									</SelectGroup>
 								</SelectContent>
 							</Select>
 						</Field>
@@ -529,12 +537,14 @@ export function JevQuestionEditor({
 											}
 										</SelectValue>
 									</SelectTrigger>
-									<SelectContent alignItemWithTrigger={false} className="p-1">
-										{[1, 2, 3, 4, 5].map((limit) => (
-											<SelectItem key={limit} value={String(limit)}>
-												<RepeatOption limit={limit} />
-											</SelectItem>
-										))}
+									<SelectContent alignItemWithTrigger={false}>
+										<SelectGroup>
+											{[1, 2, 3, 4, 5].map((limit) => (
+												<SelectItem key={limit} value={String(limit)}>
+													<RepeatOption limit={limit} />
+												</SelectItem>
+											))}
+										</SelectGroup>
 									</SelectContent>
 								</Select>
 							</Field>

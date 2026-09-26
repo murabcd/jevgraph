@@ -210,14 +210,16 @@ export function PromptEditor({
 										</SelectValue>
 									</SelectTrigger>
 									<SelectContent alignItemWithTrigger={false}>
-										<SelectItem value="default">Provider default</SelectItem>
-										{(["minimal", "low", "medium", "high"] as const).map(
-											(effort) => (
-												<SelectItem key={effort} value={effort}>
-													{effort}
-												</SelectItem>
-											),
-										)}
+										<SelectGroup>
+											<SelectItem value="default">Provider default</SelectItem>
+											{(["minimal", "low", "medium", "high"] as const).map(
+												(effort) => (
+													<SelectItem key={effort} value={effort}>
+														{effort}
+													</SelectItem>
+												),
+											)}
+										</SelectGroup>
 									</SelectContent>
 								</Select>
 							</Field>
