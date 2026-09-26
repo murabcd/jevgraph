@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { textModel } from "../src/lib/models";
 import {
+	effectiveModelThinking,
 	routeRequestSchema,
 	routesUseJev,
 	workflowRoutesSchema,
@@ -38,6 +40,39 @@ const request = {
 };
 
 describe("chatflow contract", () => {
+	test("uses model-specific reasoning defaults and supported efforts", () => {
+		expect(effectiveModelThinking("openai", "gpt-5-mini")).toEqual({
+			kind: "effort",
+			effort: "medium",
+		});
+		expect(
+			effectiveModelThinking("openai", "gpt-5-mini", {
+				reasoningEffort: "low",
+			}),
+		).toEqual({ kind: "effort", effort: "low" });
+		expect(effectiveModelThinking("openai", "gpt-4.1")).toBeUndefined();
+		expect(effectiveModelThinking("google", "gemini-3.5-flash-lite")).toEqual({
+			kind: "effort",
+			effort: "minimal",
+		});
+		expect(effectiveModelThinking("google", "gemini-3.1-pro-preview")).toEqual({
+			kind: "effort",
+			effort: "high",
+		});
+		expect(effectiveModelThinking("google", "gemini-2.5-flash-lite")).toEqual({
+			kind: "budget",
+			budget: 0,
+		});
+		expect(effectiveModelThinking("google", "gemini-2.5-pro")).toEqual({
+			kind: "budget",
+			budget: -1,
+		});
+		const proThinking = textModel("google", "gemini-3.1-pro-preview")?.thinking;
+		expect(proThinking?.kind === "effort" && proThinking.efforts).not.toContain(
+			"minimal",
+		);
+	});
+
 	test("accepts a conversation and a model-level prompt", () => {
 		const parsed = routeRequestSchema.parse(request);
 		expect(parsed.messages.at(-1)?.content).toBe("What is my name?");
@@ -51,6 +86,80 @@ describe("chatflow contract", () => {
 				metadata: { accountTier: "paid", currentLoad: 2.4 },
 			}).metadata,
 		).toEqual({ accountTier: "paid", currentLoad: 2.4 });
+	});
+
+	test("validates additional prompt message roles and content", () => {
+		const withMessages = (promptMessages: unknown) => ({
+			...request,
+			routes: {
+				...direct,
+				nodes: [direct.nodes[0], { ...direct.nodes[1], promptMessages }],
+			},
+		});
+		expect(
+			routeRequestSchema.safeParse(
+				withMessages([{ role: "user", content: "Example question" }]),
+			).success,
+		).toBe(true);
+		expect(
+			routeRequestSchema.safeParse(
+				withMessages([{ role: "system", content: "Hidden override" }]),
+			).success,
+		).toBe(false);
+		expect(
+			routeRequestSchema.safeParse(
+				withMessages([{ role: "assistant", content: "" }]),
+			).success,
+		).toBe(false);
+	});
+
+	test("validates Gemini 2.5 thinking budgets", () => {
+		const withBudget = (
+			model: string,
+			thinkingBudget: number,
+			maxOutputTokens = 1400,
+		) => ({
+			...direct,
+			nodes: [
+				direct.nodes[0],
+				{
+					...direct.nodes[1],
+					provider: "google",
+					model,
+					thinkingBudget,
+					maxOutputTokens,
+				},
+			],
+		});
+		expect(
+			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-pro", 512)).success,
+		).toBe(true);
+		expect(
+			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-pro", 0)).success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-pro", 1400))
+				.success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-flash-lite", 0))
+				.success,
+		).toBe(true);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...direct,
+				nodes: [
+					direct.nodes[0],
+					{
+						...direct.nodes[1],
+						provider: "google",
+						model: "gemini-2.5-flash-lite",
+						reasoningEffort: "low",
+						thinkingBudget: 0,
+					},
+				],
+			}).success,
+		).toBe(false);
 	});
 
 	test("validates supplied Start values against declared names and types", () => {
@@ -167,7 +276,26 @@ describe("chatflow contract", () => {
 				...direct,
 				nodes: [
 					direct.nodes[0],
-					{ ...direct.nodes[1], provider: "google", reasoningEffort: "low" },
+					{
+						...direct.nodes[1],
+						provider: "google",
+						model: "gemini-3.5-flash-lite",
+						reasoningEffort: "low",
+					},
+				],
+			}).success,
+		).toBe(true);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...direct,
+				nodes: [
+					direct.nodes[0],
+					{
+						...direct.nodes[1],
+						provider: "google",
+						model: "gemini-3.1-pro-preview",
+						reasoningEffort: "minimal",
+					},
 				],
 			}).success,
 		).toBe(false);

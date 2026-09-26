@@ -131,6 +131,7 @@ describe("editable chatflow graph", () => {
 		expect(routes?.nodes[1]).toMatchObject({
 			kind: "model",
 			variables: ["plan"],
+			reasoningEffort: "medium",
 		});
 		saveGraph(nodes, edges);
 		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
@@ -145,6 +146,23 @@ describe("editable chatflow graph", () => {
 				edges,
 			),
 		).toBeNull();
+	});
+
+	test("compiles Gemini reasoning defaults for a connected Model", () => {
+		const nodes = [node("input", "input", 0), node("model", "google", 1)];
+		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
+		expect(routesFromGraph(nodes, edges)?.nodes[1]).toMatchObject({
+			kind: "model",
+			reasoningEffort: "minimal",
+		});
+		const lite = {
+			...nodes[1],
+			data: { ...nodes[1].data, model: "gemini-2.5-flash-lite" },
+		};
+		expect(routesFromGraph([nodes[0], lite], edges)?.nodes[1]).toMatchObject({
+			kind: "model",
+			thinkingBudget: 0,
+		});
 	});
 
 	test("connects models downstream to Jev or another model, including joins", () => {
@@ -227,6 +245,10 @@ describe("editable chatflow graph", () => {
 			node("final", "google", 3),
 		];
 		nodes[1].data.prompt = "Write a draft";
+		nodes[1].data.promptMessages = [
+			{ role: "user", content: "Example request" },
+			{ role: "assistant", content: "Example response" },
+		];
 		const edges: Edge[] = [
 			{ id: "entry", source: "input", target: "first" },
 			{ id: "next", source: "first", sourceHandle: "next", target: "judge" },
@@ -248,6 +270,10 @@ describe("editable chatflow graph", () => {
 		expect(routesUseJev(routes)).toBe(true);
 		expect(routes?.nodes.find((item) => item.id === "first")).toMatchObject({
 			prompt: "Write a draft",
+			promptMessages: [
+				{ role: "user", content: "Example request" },
+				{ role: "assistant", content: "Example response" },
+			],
 		});
 		expect(nodeStepLabels(nodes, edges).get("first")).toBe("02 / MODEL");
 		expect(nodeStepLabels(nodes, edges).get("final")).toBe("04 / OUTPUT");
@@ -255,6 +281,13 @@ describe("editable chatflow graph", () => {
 		expect(
 			readGraph().nodes.find((item) => item.id === "first")?.data.prompt,
 		).toBe("Write a draft");
+		expect(
+			readGraph().nodes.find((item) => item.id === "first")?.data
+				.promptMessages,
+		).toEqual([
+			{ role: "user", content: "Example request" },
+			{ role: "assistant", content: "Example response" },
+		]);
 	});
 
 	test("keeps Start as the required chatflow entry", () => {

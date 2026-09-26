@@ -7,20 +7,24 @@ import {
 	jevQuestionSchema,
 	questionOutputs,
 } from "@/lib/jev-question";
+import type { ReasoningEffort } from "@/lib/models";
 import {
 	confidenceThresholdSchema,
 	DEFAULT_GOOGLE_MODEL,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	DEFAULT_OPENAI_MODEL,
+	effectiveModelThinking,
 	MAX_PROMPT_LENGTH,
+	type ModelPromptMessage,
 	maxOutputTokensSchema,
 	modelIdSchema,
+	modelPromptMessagesSchema,
 	type NodeTiming,
-	type ReasoningEffort,
 	reasoningEffortSchema,
 	type StartField,
 	startFieldsSchema,
+	thinkingBudgetSchema,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
 } from "@/lib/routing";
@@ -65,9 +69,11 @@ type NodeData = NodeViewData &
 				kind: "google" | "openai";
 				model: string;
 				prompt?: string;
+				promptMessages?: ModelPromptMessage[];
 				variables?: string[];
 				maxOutputTokens: number;
 				reasoningEffort?: ReasoningEffort;
+				thinkingBudget?: number;
 				question?: never;
 		  }
 	);
@@ -81,6 +87,12 @@ export type JevNodeSettings = Pick<
 	| "variables"
 	| "maxRepeats"
 >;
+type ModelNodeData = Extract<FlowNode["data"], { kind: "google" | "openai" }>;
+export type ModelNodeSettings = Pick<
+	ModelNodeData,
+	"model" | "maxOutputTokens" | "reasoningEffort" | "thinkingBudget"
+> &
+	Required<Pick<ModelNodeData, "prompt" | "promptMessages" | "variables">>;
 
 export function defaultNodeData(
 	kind: CreatableNodeKind,
@@ -93,11 +105,18 @@ export function defaultNodeData(
 			question: defaultJevQuestion(),
 			confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 		};
+	const model =
+		provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL;
+	const thinking = effectiveModelThinking(provider, model);
 	return {
 		kind: provider,
 		active: false,
-		model: provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL,
+		model,
 		maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+		...(thinking?.kind === "effort"
+			? { reasoningEffort: thinking.effort }
+			: {}),
+		...(thinking?.kind === "budget" ? { thinkingBudget: thinking.budget } : {}),
 	};
 }
 const startingNodes: FlowNode[] = [
@@ -147,7 +166,9 @@ const persistedNodeSchema = z.object({
 			model: modelIdSchema,
 			maxOutputTokens: maxOutputTokensSchema,
 			reasoningEffort: reasoningEffortSchema.optional(),
+			thinkingBudget: thinkingBudgetSchema.optional(),
 			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+			promptMessages: modelPromptMessagesSchema.optional(),
 			variables: z.array(z.string()).optional(),
 		}),
 	]),
@@ -169,7 +190,9 @@ function persistedNodeData(data: FlowNode["data"]) {
 		model: data.model,
 		maxOutputTokens: data.maxOutputTokens,
 		reasoningEffort: data.reasoningEffort,
+		thinkingBudget: data.thinkingBudget,
 		prompt: data.prompt,
+		promptMessages: data.promptMessages,
 		variables: data.variables,
 	};
 }
@@ -454,19 +477,30 @@ export function routesFromGraph(
 								? { maxRepeats: node.data.maxRepeats }
 								: {}),
 						};
+					const thinking = effectiveModelThinking(
+						node.data.kind,
+						node.data.model,
+						node.data,
+					);
 					return {
 						id: node.id,
 						kind: "model" as const,
 						provider: node.data.kind,
 						model: node.data.model,
 						maxOutputTokens: node.data.maxOutputTokens,
-						...(node.data.reasoningEffort
-							? { reasoningEffort: node.data.reasoningEffort }
+						...(thinking?.kind === "effort"
+							? { reasoningEffort: thinking.effort }
+							: {}),
+						...(thinking?.kind === "budget"
+							? { thinkingBudget: thinking.budget }
 							: {}),
 						...(node.data.variables?.length
 							? { variables: node.data.variables }
 							: {}),
 						...(node.data.prompt ? { prompt: node.data.prompt } : {}),
+						...(node.data.promptMessages?.length
+							? { promptMessages: node.data.promptMessages }
+							: {}),
 					};
 				}),
 		],

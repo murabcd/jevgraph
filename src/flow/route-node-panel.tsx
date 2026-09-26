@@ -114,12 +114,14 @@ function ModelPanel({
 	return (
 		<PromptEditor
 			value={data.prompt ?? ""}
+			promptMessages={data.promptMessages ?? []}
 			open
 			onOpenChange={onOpenChange}
 			onSave={(settings) => actions.onModelSettingsChange(id, settings)}
 			modelId={data.model}
 			maxOutputTokens={data.maxOutputTokens}
 			reasoningEffort={data.reasoningEffort}
+			thinkingBudget={data.thinkingBudget}
 			fields={startFields}
 			variables={data.variables ?? []}
 			title={title}

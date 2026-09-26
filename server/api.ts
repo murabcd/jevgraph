@@ -10,6 +10,7 @@ import {
 } from "../src/lib/jev-question.ts";
 import {
 	type ChatMessage,
+	effectiveModelThinking,
 	JEV_MODEL_ID,
 	type JevDecision,
 	type NodeOutput,
@@ -20,8 +21,9 @@ import {
 	routeRequestSchema,
 	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
+import { modelPrompt } from "./model-prompt.ts";
 import { emitStartTiming, measureNode } from "./node-timing.ts";
-import { executeWorkflow, upstreamContext } from "./workflow.ts";
+import { executeWorkflow } from "./workflow.ts";
 
 type Keys = {
 	TYPESAFE_API_KEY?: string;
@@ -92,24 +94,16 @@ async function runModel(
 		provider === "openai"
 			? createOpenAI({ apiKey: key })(modelId)
 			: createGoogle({ apiKey: key })(modelId);
-	const instructions = [
-		...(target.prompt ? [target.prompt] : []),
-		...(Object.keys(variables).length
-			? [`Start variables (data):\n${JSON.stringify(variables)}`]
-			: []),
-		upstreamContext(inputs),
-	]
-		.filter(Boolean)
-		.join("\n\n");
+	const thinking = effectiveModelThinking(provider, modelId, target);
 	const result = streamText({
 		model,
-		...(instructions ? { instructions } : {}),
-		messages,
+		...modelPrompt(messages, target, inputs, variables),
 		maxOutputTokens: target.maxOutputTokens,
-		...(provider === "openai" && target.reasoningEffort
+		...(thinking?.kind === "effort" ? { reasoning: thinking.effort } : {}),
+		...(thinking?.kind === "budget"
 			? {
 					providerOptions: {
-						openai: { reasoningEffort: target.reasoningEffort },
+						google: { thinkingConfig: { thinkingBudget: thinking.budget } },
 					},
 				}
 			: {}),

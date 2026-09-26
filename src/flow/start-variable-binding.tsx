@@ -32,7 +32,7 @@ export function StartVariableBinding({
 							key={field.name}
 							type="button"
 							variant={active ? "secondary" : "outline"}
-							className="justify-between"
+							className="justify-between aria-pressed:border-border dark:aria-pressed:border-input"
 							aria-pressed={active}
 							onClick={() =>
 								onChange(

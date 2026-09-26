@@ -3,9 +3,15 @@ import {
 	configuredJevQuestionSchema,
 	questionOutputs,
 } from "./jev-question.ts";
+import {
+	type Provider,
+	providers,
+	type ReasoningEffort,
+	reasoningEfforts,
+	textModel,
+} from "./models.ts";
 
-export const providerSchema = z.enum(["openai", "google"]);
-export type Provider = z.infer<typeof providerSchema>;
+export const providerSchema = z.enum(providers);
 
 export type KeyStatus = { jev: boolean; openai: boolean; google: boolean };
 
@@ -15,21 +21,90 @@ export const DEFAULT_GOOGLE_MODEL = "gemini-3.5-flash-lite";
 export const DEFAULT_JEV_CONFIDENCE_THRESHOLD = 0.7;
 export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 1400;
 export const MAX_PROMPT_LENGTH = 12000;
+export const MAX_MODEL_PROMPT_MESSAGES = 8;
+export const modelPromptMessageSchema = z.strictObject({
+	role: z.enum(["user", "assistant"]),
+	content: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
+});
+export const modelPromptMessagesSchema = z
+	.array(modelPromptMessageSchema)
+	.max(MAX_MODEL_PROMPT_MESSAGES);
+export type ModelPromptMessage = z.infer<typeof modelPromptMessageSchema>;
 export const confidenceThresholdSchema = z.number().min(0).max(1);
 export const maxOutputTokensSchema = z.number().int().min(1).max(8192);
-export const reasoningEffortSchema = z.enum([
-	"minimal",
-	"low",
-	"medium",
-	"high",
-]);
-export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+export const thinkingBudgetSchema = z.number().int().min(-1).max(32768);
+export const reasoningEffortSchema = z.enum(reasoningEfforts);
 
-export function modelSupportsReasoningEffort(
+type ThinkingSettings = {
+	reasoningEffort?: ReasoningEffort;
+	thinkingBudget?: number;
+};
+
+export type EffectiveModelThinking =
+	| { kind: "effort"; effort: ReasoningEffort }
+	| { kind: "budget"; budget: number };
+
+export function effectiveModelThinking(
 	provider: Provider,
 	model: string,
+	settings: ThinkingSettings = {},
+): EffectiveModelThinking | undefined {
+	const thinking = textModel(provider, model)?.thinking;
+	if (thinking?.kind === "effort")
+		return {
+			kind: "effort",
+			effort: settings.reasoningEffort ?? thinking.defaultEffort,
+		};
+	if (thinking?.kind === "budget")
+		return {
+			kind: "budget",
+			budget: settings.thinkingBudget ?? thinking.defaultBudget,
+		};
+	return undefined;
+}
+
+export function validThinkingBudget(
+	provider: Provider,
+	model: string,
+	budget: number,
+	maxOutputTokens: number,
 ): boolean {
-	return provider === "openai" && model.startsWith("gpt-5");
+	const config = textModel(provider, model)?.thinking;
+	if (config?.kind !== "budget") return false;
+	if (budget === -1) return true;
+	if (budget === 0) return config.allowOff;
+	return (
+		budget >= config.minPositive &&
+		budget <= config.max &&
+		budget < maxOutputTokens
+	);
+}
+
+function validModelThinking(
+	provider: Provider,
+	model: string,
+	settings: ThinkingSettings,
+	maxOutputTokens: number,
+): boolean {
+	if (
+		settings.reasoningEffort !== undefined &&
+		settings.thinkingBudget !== undefined
+	)
+		return false;
+	const thinking = textModel(provider, model)?.thinking;
+	if (settings.reasoningEffort !== undefined)
+		return (
+			thinking?.kind === "effort" &&
+			thinking.efforts.includes(settings.reasoningEffort)
+		);
+	if (settings.thinkingBudget !== undefined)
+		return validThinkingBudget(
+			provider,
+			model,
+			settings.thinkingBudget,
+			maxOutputTokens,
+		);
+	return true;
 }
 
 const nodeIdSchema = z.string().min(1).max(100);
@@ -84,9 +159,11 @@ export const routeTargetSchema = z.strictObject({
 	provider: providerSchema,
 	model: modelIdSchema,
 	prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+	promptMessages: modelPromptMessagesSchema.optional(),
 	variables: z.array(inputNameSchema).optional(),
 	maxOutputTokens: maxOutputTokensSchema,
 	reasoningEffort: reasoningEffortSchema.optional(),
+	thinkingBudget: thinkingBudgetSchema.optional(),
 });
 export type RouteTarget = z.infer<typeof routeTargetSchema>;
 
@@ -111,9 +188,11 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 		provider: providerSchema,
 		model: modelIdSchema,
 		prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
+		promptMessages: modelPromptMessagesSchema.optional(),
 		variables: variableNamesSchema.optional(),
 		maxOutputTokens: maxOutputTokensSchema.optional(),
 		reasoningEffort: reasoningEffortSchema.optional(),
+		thinkingBudget: thinkingBudgetSchema.optional(),
 	}),
 ]);
 const workflowEdgeSchema = z.strictObject({
@@ -152,8 +231,12 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 		nodes.some(
 			(node) =>
 				node.kind === "model" &&
-				Boolean(node.reasoningEffort) &&
-				!modelSupportsReasoningEffort(node.provider, node.model),
+				!validModelThinking(
+					node.provider,
+					node.model,
+					node,
+					node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+				),
 		)
 	)
 		return false;
@@ -414,9 +497,11 @@ export function modelTarget(
 		provider: node.provider,
 		model: node.model,
 		prompt: node.prompt,
+		promptMessages: node.promptMessages,
 		variables: node.variables,
 		maxOutputTokens: node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 		reasoningEffort: node.reasoningEffort,
+		thinkingBudget: node.thinkingBudget,
 	};
 }
 

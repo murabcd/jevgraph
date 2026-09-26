@@ -27,13 +27,23 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import type { ModelNodeSettings } from "@/flow/graph";
+import {
+	type DraftPromptMessage,
+	ModelMessagesEditor,
+} from "@/flow/model-messages-editor";
+import {
+	ModelThinkingField,
+	parseThinkingDraft,
+	thinkingDraftForModel,
+} from "@/flow/model-thinking-field";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
 import { textModels } from "@/lib/models";
 import {
 	MAX_PROMPT_LENGTH,
+	type ModelPromptMessage,
 	maxOutputTokensSchema,
-	modelSupportsReasoningEffort,
-	type ReasoningEffort,
+	modelPromptMessagesSchema,
 	type StartField,
 } from "@/lib/routing";
 
@@ -52,26 +62,23 @@ function ModelOption({ model }: { model: (typeof textModels)[number] }) {
 
 type Props = {
 	value: string;
+	promptMessages: ModelPromptMessage[];
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSave: (settings: {
-		model: string;
-		prompt: string;
-		variables: string[];
-		maxOutputTokens: number;
-		reasoningEffort?: ReasoningEffort;
-	}) => void;
+	onSave: (settings: ModelNodeSettings) => void;
 	title: string;
 	id: string;
 	modelId: string;
 	maxOutputTokens: number;
-	reasoningEffort?: ReasoningEffort;
+	reasoningEffort?: ModelNodeSettings["reasoningEffort"];
+	thinkingBudget?: number;
 	fields: StartField[];
 	variables: string[];
 };
 
 export function PromptEditor({
 	value,
+	promptMessages,
 	open,
 	onOpenChange,
 	onSave,
@@ -80,23 +87,27 @@ export function PromptEditor({
 	modelId,
 	maxOutputTokens,
 	reasoningEffort,
+	thinkingBudget,
 	fields,
 	variables,
 }: Props) {
 	const [draft, setDraft] = useState(value);
+	const [messagesDraft, setMessagesDraft] = useState<DraftPromptMessage[]>(() =>
+		promptMessages.map((message) => ({ ...message, id: crypto.randomUUID() })),
+	);
 	const [draftModel, setDraftModel] = useState(modelId);
 	const [variablesDraft, setVariablesDraft] = useState(variables);
 	const [outputTokensDraft, setOutputTokensDraft] = useState(
 		String(maxOutputTokens),
 	);
-	const [effortDraft, setEffortDraft] = useState<ReasoningEffort | "default">(
-		reasoningEffort ?? "default",
-	);
+	const [thinkingDraft, setThinkingDraft] = useState(() => {
+		const model = textModels.find((item) => item.id === modelId);
+		return model
+			? thinkingDraftForModel(model, { reasoningEffort, thinkingBudget })
+			: { kind: "none" as const };
+	});
 	const [error, setError] = useState("");
 	const selectedModel = textModels.find((model) => model.id === draftModel);
-	const supportsReasoningEffort = selectedModel
-		? modelSupportsReasoningEffort(selectedModel.provider, draftModel)
-		: false;
 	return (
 		<Sheet
 			modal={false}
@@ -124,10 +135,13 @@ export function PromptEditor({
 								<Select
 									value={draftModel}
 									onValueChange={(value) => {
-										if (value) {
-											if (value !== draftModel) setEffortDraft("default");
-											setDraftModel(value);
-										}
+										if (!value) return;
+										const nextModel = textModels.find(
+											(model) => model.id === value,
+										);
+										if (!nextModel || value === draftModel) return;
+										setDraftModel(value);
+										setThinkingDraft(thinkingDraftForModel(nextModel));
 									}}
 								>
 									<SelectTrigger id={`model-select-${id}`} className="w-full">
@@ -181,48 +195,13 @@ export function PromptEditor({
 								onChange={(event) => setOutputTokensDraft(event.target.value)}
 							/>
 						</Field>
-						{supportsReasoningEffort && (
-							<Field>
-								<FieldLabel
-									htmlFor={`${id}-reasoning`}
-									className="text-xs text-muted-foreground"
-								>
-									Reasoning effort
-								</FieldLabel>
-								<Select
-									value={effortDraft}
-									onValueChange={(value) => {
-										if (
-											value === "default" ||
-											value === "minimal" ||
-											value === "low" ||
-											value === "medium" ||
-											value === "high"
-										)
-											setEffortDraft(value);
-									}}
-								>
-									<SelectTrigger id={`${id}-reasoning`} className="w-full">
-										<SelectValue>
-											{(selected: string | null) =>
-												selected === "default" ? "Provider default" : selected
-											}
-										</SelectValue>
-									</SelectTrigger>
-									<SelectContent alignItemWithTrigger={false}>
-										<SelectGroup>
-											<SelectItem value="default">Provider default</SelectItem>
-											{(["minimal", "low", "medium", "high"] as const).map(
-												(effort) => (
-													<SelectItem key={effort} value={effort}>
-														{effort}
-													</SelectItem>
-												),
-											)}
-										</SelectGroup>
-									</SelectContent>
-								</Select>
-							</Field>
+						{selectedModel && (
+							<ModelThinkingField
+								id={id}
+								model={selectedModel}
+								draft={thinkingDraft}
+								onChange={setThinkingDraft}
+							/>
 						)}
 						<StartVariableBinding
 							fields={fields}
@@ -234,12 +213,12 @@ export function PromptEditor({
 								htmlFor={id}
 								className="text-xs text-muted-foreground"
 							>
-								Instructions
+								System
 							</FieldLabel>
 							<Textarea
 								id={id}
 								className="min-h-[132px] max-h-52"
-								placeholder="Write instructions..."
+								placeholder="How should this model behave?"
 								maxLength={MAX_PROMPT_LENGTH}
 								value={draft}
 								onChange={(event) => setDraft(event.target.value)}
@@ -247,6 +226,10 @@ export function PromptEditor({
 								autoFocus
 							/>
 						</Field>
+						<ModelMessagesEditor
+							messages={messagesDraft}
+							onMessagesChange={setMessagesDraft}
+						/>
 						{error && <FieldError>{error}</FieldError>}
 					</FieldGroup>
 				</ScrollArea>
@@ -262,15 +245,37 @@ export function PromptEditor({
 								setError("Maximum output tokens must be between 1 and 8192.");
 								return;
 							}
+							if (!selectedModel) {
+								setError("Select a model.");
+								return;
+							}
+							const thinking = parseThinkingDraft(
+								selectedModel,
+								thinkingDraft,
+								parsed.data,
+							);
+							if (!thinking.success) {
+								setError(
+									"Choose a supported thinking setting below maximum output tokens.",
+								);
+								return;
+							}
+							const promptMessages = modelPromptMessagesSchema.safeParse(
+								messagesDraft.map(({ role, content }) => ({ role, content })),
+							);
+							if (!promptMessages.success) {
+								setError("Each added message needs content.");
+								return;
+							}
 							onSave({
 								model: draftModel,
 								prompt: draft,
+								promptMessages: promptMessages.data,
 								variables: variablesDraft,
 								maxOutputTokens: parsed.data,
-								reasoningEffort:
-									supportsReasoningEffort && effortDraft !== "default"
-										? effortDraft
-										: undefined,
+								reasoningEffort: undefined,
+								thinkingBudget: undefined,
+								...thinking.settings,
 							});
 							onOpenChange(false);
 						}}

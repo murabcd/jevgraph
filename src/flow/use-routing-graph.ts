@@ -16,6 +16,7 @@ import {
 	type FlowNode,
 	hasFallbackConnection,
 	type JevNodeSettings,
+	type ModelNodeSettings,
 	openPosition,
 	reachesNode,
 	readGraph,
@@ -26,7 +27,7 @@ import {
 } from "@/flow/graph";
 import { questionOutputs } from "@/lib/jev-question";
 import { providerForModel } from "@/lib/models";
-import type { ReasoningEffort, StartField } from "@/lib/routing";
+import type { StartField } from "@/lib/routing";
 
 type PendingConnection = {
 	source: string;
@@ -51,16 +52,7 @@ export function useRoutingGraph() {
 	}, [nodes, graphEdges]);
 
 	const onModelSettingsChange = useCallback(
-		(
-			nodeId: string,
-			settings: {
-				model: string;
-				prompt: string;
-				variables: string[];
-				maxOutputTokens: number;
-				reasoningEffort?: ReasoningEffort;
-			},
-		) => {
+		(nodeId: string, settings: ModelNodeSettings) => {
 			const provider = providerForModel(settings.model);
 			if (!provider) return;
 			setNodes((current) =>
@@ -160,9 +152,11 @@ export function useRoutingGraph() {
 							active: false,
 							model: original.data.model,
 							prompt: original.data.prompt,
+							promptMessages: original.data.promptMessages,
 							variables: original.data.variables,
 							maxOutputTokens: original.data.maxOutputTokens,
 							reasoningEffort: original.data.reasoningEffort,
+							thinkingBudget: original.data.thinkingBudget,
 						},
 					},
 				];
