@@ -63,7 +63,7 @@ export function upstreamContext(inputs: NodeOutput[]): string {
 		: "";
 }
 
-type ModelResponse = {
+type WorkflowResponse = {
 	text: string;
 	model: string;
 	usage?: RouteResult["usage"];
@@ -84,14 +84,17 @@ type Execution = {
 		inputs: NodeOutput[],
 		onDelta: (text: string) => void,
 		variables: RoutingMetadata,
-	) => Promise<ModelResponse>;
+	) => Promise<WorkflowResponse>;
 	onDelta: (text: string) => void;
 	onRoute: (route: RouteSelectionResult) => void;
 	onProgress: (trace: RouteTrace) => void;
 	signal?: AbortSignal;
 };
 
-type Terminal = { target: RouteTarget; response: ModelResponse };
+type Terminal = {
+	target: Pick<RouteResult, "nodeId" | "provider" | "model">;
+	response: WorkflowResponse;
+};
 type NodeExecution = {
 	lineage: NodeOutput[];
 	edges: WorkflowEdge[];
@@ -215,7 +218,7 @@ export async function executeWorkflow({
 	let fallbackReason: string | undefined;
 	let streamed = false;
 
-	const selection = (target: RouteTarget): RouteSelectionResult => ({
+	const selection = (target: Terminal["target"]): RouteSelectionResult => ({
 		provider: target.provider,
 		model: target.model,
 		nodeId: target.nodeId,
@@ -298,19 +301,23 @@ export async function executeWorkflow({
 							caught instanceof Error ? caught.message : "Unknown Jev error";
 					}
 					signal?.throwIfAborted();
-					const preferredBranch =
+					const acceptedBranch =
 						decision &&
 						decision.confidence >= config.confidenceThreshold &&
 						options.some((option) => option.id === decision.branch)
 							? decision.branch
-							: (options.find((option) =>
-									outgoingEdges.some(
-										(edge) =>
-											edge.source === id &&
-											edge.sourceHandle === option.id &&
-											!edge.repeat,
-									),
-								)?.id ?? options[0].id);
+							: undefined;
+					const preferredBranch =
+						acceptedBranch ??
+						options.find((option) =>
+							outgoingEdges.some(
+								(edge) =>
+									edge.source === id &&
+									edge.sourceHandle === option.id &&
+									!edge.repeat,
+							),
+						)?.id ??
+						options[0].id;
 					let chosenEdge = outgoingEdges.find(
 						(edge) =>
 							edge.source === id && edge.sourceHandle === preferredBranch,
@@ -325,8 +332,7 @@ export async function executeWorkflow({
 							limitReached = true;
 						} else repeatCounts.set(chosenEdge.id, count + 1);
 					}
-					if (!chosenEdge) throw new Error(`Jev ${id} has no exit branch`);
-					const branch = chosenEdge.sourceHandle ?? preferredBranch;
+					const branch = chosenEdge?.sourceHandle ?? preferredBranch;
 					const workflowDecision = {
 						nodeId: id,
 						branch,
@@ -339,8 +345,26 @@ export async function executeWorkflow({
 					const output: NodeOutput = {
 						nodeId: id,
 						kind: "jev",
-						text: `Decision: ${label}`,
+						text: chosenEdge ? `Decision: ${label}` : label,
 					};
+					if (!chosenEdge) {
+						if (!acceptedBranch || !decision)
+							throw new Error(`Jev ${id} could not choose a reliable answer`);
+						return {
+							lineage: [...inputs, output],
+							decision: workflowDecision,
+							output,
+							edges: [],
+							terminal: {
+								target: { nodeId: id, provider: "jev", model: decision.model },
+								response: {
+									text: label,
+									model: decision.model,
+									usage: decision.usage,
+								},
+							},
+						};
+					}
 					return {
 						lineage: [...inputs, output],
 						decision: workflowDecision,
@@ -454,8 +478,8 @@ export async function executeWorkflow({
 	if (terminals.length !== 1)
 		throw new Error(
 			terminals.length === 0
-				? "The chatflow did not reach a response model"
-				: "Parallel paths need to join before the response model",
+				? "The chatflow did not reach a response"
+				: "Parallel paths need to join before the response",
 		);
 	const terminal = terminals[0];
 	const route = selection(terminal.target);

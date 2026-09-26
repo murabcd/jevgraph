@@ -171,13 +171,15 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 		} else if (node.kind === "jev") {
 			const outputs = questionOutputs(node.question);
 			if (
-				outgoing.length !== outputs.length ||
 				(outgoing.some((edge) => edge.repeat) &&
 					outgoing.every((edge) => edge.repeat)) ||
 				outputs.some(
 					(output) =>
-						outgoing.filter((edge) => edge.sourceHandle === output.id)
-							.length !== 1,
+						outgoing.filter((edge) => edge.sourceHandle === output.id).length >
+						1,
+				) ||
+				outgoing.some(
+					(edge) => !outputs.some((output) => output.id === edge.sourceHandle),
 				)
 			)
 				return false;
@@ -239,7 +241,7 @@ export const workflowRoutesSchema = z
 		edges: z.array(workflowEdgeSchema).min(1).max(200),
 	})
 	.refine((routes) => validWorkflow(routes.nodes, routes.edges), {
-		message: "Connect every Jev output and keep the chatflow acyclic",
+		message: "Keep Jev branches valid and the chatflow acyclic",
 	});
 export type WorkflowRoutes = z.infer<typeof workflowRoutesSchema>;
 
@@ -325,6 +327,7 @@ export type JevDecision = {
 	probabilities?: Record<string, number>;
 	model: string;
 	latencyMs: number;
+	usage?: RouteResult["usage"];
 };
 
 export type RoutePathStep = { nodeId: string; via?: string };
@@ -356,7 +359,7 @@ export type RouteTrace = {
 
 export type RouteResult = RouteTrace & {
 	text: string;
-	provider: Provider;
+	provider: Provider | "jev";
 	model: string;
 	nodeId: string;
 	reason: string;

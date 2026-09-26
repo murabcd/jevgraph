@@ -68,7 +68,7 @@ describe("editable chatflow graph", () => {
 				graph.nodes,
 				graph.edges.filter((edge) => edge.id !== "second-no"),
 			),
-		).toBeNull();
+		).not.toBeNull();
 	});
 
 	test("persists configured Start fields and only declared node bindings", () => {
@@ -308,7 +308,7 @@ describe("editable chatflow graph", () => {
 		);
 	});
 
-	test("requires every configured Jev output before chat can send", () => {
+	test("allows a Jev choice to answer directly on an unconnected output", () => {
 		const nodes = [
 			node("input", "input", 0),
 			node("judge", "jev", 1),
@@ -318,13 +318,22 @@ describe("editable chatflow graph", () => {
 			{ id: "entry", source: "input", target: "judge" },
 			{ id: "fast", source: "judge", sourceHandle: "fast", target: "model" },
 		];
-		expect(routesFromGraph(nodes, edges)).toBeNull();
+		expect(routesFromGraph(nodes, edges)).not.toBeNull();
+		expect(
+			routesFromGraph(nodes.slice(0, 2), edges.slice(0, 1)),
+		).not.toBeNull();
+		expect(nodeStepLabels(nodes, edges).get("judge")).toBe("02 / CLASSIFIER");
 		expect(
 			routesFromGraph(nodes, [
 				...edges,
-				{ id: "deep", source: "judge", sourceHandle: "deep", target: "model" },
+				{
+					id: "invalid",
+					source: "judge",
+					sourceHandle: "unknown",
+					target: "model",
+				},
 			]),
-		).not.toBeNull();
+		).toBeNull();
 	});
 
 	test("preserves stable Choice edges when labels change", () => {

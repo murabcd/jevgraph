@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { FlowNode, NodeKind } from "@/flow/graph";
 import { formatNodeDuration } from "@/flow/node-duration";
-import { nodeFooterValue, nodeMeta } from "@/flow/node-meta";
+import { nodeFooterValue, nodeMeta, nodeTitle } from "@/flow/node-meta";
 import { questionOutputs } from "@/lib/jev-question";
 import type { NodeTiming } from "@/lib/routing";
 import { cn } from "@/lib/utils";
@@ -213,6 +213,7 @@ function JevOutputRows({
 						type="source"
 						id={output.id}
 						position={Position.Right}
+						title="Connect to continue; leave unconnected to return this answer in chat"
 					/>
 				</div>
 			))}
@@ -315,7 +316,8 @@ function RouteNodeStatus({
 }
 
 function RouteCardHeader({ data }: { data: FlowNode["data"] }) {
-	const { title, subtitle } = nodeMeta[data.kind];
+	const { subtitle } = nodeMeta[data.kind];
+	const title = nodeTitle(data);
 	return (
 		<CardHeader className="grid grid-cols-[36px_1fr] items-center gap-x-3">
 			<RouteNodeAvatar kind={data.kind} />
@@ -418,7 +420,7 @@ export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 					id={id}
 					data={data}
 					selected={selected}
-					title={nodeMeta[data.kind].title}
+					title={nodeTitle(data)}
 				/>
 			)}
 			<RouteNodeStatus step={data.step} timing={data.timing} />

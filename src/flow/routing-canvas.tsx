@@ -40,7 +40,7 @@ import {
 	NODE_PICKER_NODE_ID,
 	NodeConnectionPicker,
 } from "@/flow/node-connection-picker";
-import { nodeMeta } from "@/flow/node-meta";
+import { nodeTitle } from "@/flow/node-meta";
 import { RouteNode } from "@/flow/route-node";
 import { RouteNodePanel } from "@/flow/route-node-panel";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
@@ -241,7 +241,7 @@ export function RoutingCanvas({
 					key={panelNode.id}
 					id={panelNode.id}
 					data={panelNode.data}
-					title={nodeMeta[panelNode.data.kind].title}
+					title={nodeTitle(panelNode.data)}
 					view={activePanel.view}
 					startFields={
 						startNode?.data.kind === "input" ? startNode.data.fields : []

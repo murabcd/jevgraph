@@ -1,5 +1,6 @@
 import type { Edge, Node } from "@xyflow/react";
 import { z } from "zod";
+import { jevRoleLabels } from "@/flow/node-meta";
 import {
 	defaultJevQuestion,
 	type JevQuestion,
@@ -394,19 +395,17 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 
 	return new Map(
 		ordered.map((node, index) => {
-			const type =
-				node.data.kind === "input"
-					? "START"
-					: node.data.kind === "jev"
-						? "ROUTER"
-						: backupTargets.has(node.id)
-							? "BACKUP"
-							: edges.some(
-										(edge) =>
-											edge.source === node.id && edge.sourceHandle === "next",
-									)
-								? "MODEL"
-								: "OUTPUT";
+			let type = "OUTPUT";
+			if (node.data.kind === "input") type = "START";
+			else if (node.data.kind === "jev")
+				type = jevRoleLabels[node.data.question.type].toUpperCase();
+			else if (backupTargets.has(node.id)) type = "BACKUP";
+			else if (
+				edges.some(
+					(edge) => edge.source === node.id && edge.sourceHandle === "next",
+				)
+			)
+				type = "MODEL";
 			return [node.id, `${String(index + 1).padStart(2, "0")} / ${type}`];
 		}),
 	);

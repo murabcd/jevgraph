@@ -121,7 +121,7 @@ describe("chatflow contract", () => {
 		).toBe(false);
 	});
 
-	test("validates model continuation, joins, and connected Jev outputs", () => {
+	test("validates model continuation, joins, and optional Jev outputs", () => {
 		const flow = {
 			kind: "workflow",
 			nodes: [
@@ -151,6 +151,20 @@ describe("chatflow contract", () => {
 			workflowRoutesSchema.safeParse({
 				...flow,
 				edges: flow.edges.slice(0, -1),
+			}).success,
+		).toBe(true);
+		expect(
+			workflowRoutesSchema.safeParse({
+				...flow,
+				edges: [
+					...flow.edges,
+					{
+						id: "invalid",
+						source: "judge",
+						sourceHandle: "unknown",
+						target: "final",
+					},
+				],
 			}).success,
 		).toBe(false);
 		expect(

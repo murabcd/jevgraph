@@ -9,9 +9,10 @@ import {
 	CommandList,
 } from "@/components/ui/command";
 import type { CreatableNodeKind } from "@/flow/graph";
+import { jevRoleLabels } from "@/flow/node-meta";
 
 const nodeTypes = {
-	jev: { label: "Router", icon: GitFork },
+	jev: { label: jevRoleLabels.choice, icon: GitFork },
 	model: { label: "Model", icon: Bot },
 } as const;
 

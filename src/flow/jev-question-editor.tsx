@@ -28,6 +28,7 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { jevRoleLabels } from "@/flow/node-meta";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
 import {
 	defaultJevQuestion,
@@ -89,9 +90,28 @@ function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 		});
 	return (
 		<FieldGroup className="gap-2">
-			<FieldTitle className="text-xs text-muted-foreground">
-				Sections
-			</FieldTitle>
+			<div className="flex items-center justify-between">
+				<FieldTitle className="text-xs text-muted-foreground">
+					Sections
+				</FieldTitle>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={question.options.length >= 255}
+					onClick={() =>
+						onChange({
+							...question,
+							options: [
+								...question.options,
+								{ id: crypto.randomUUID(), label: "", description: "" },
+							],
+						})
+					}
+				>
+					<Plus /> Add choice
+				</Button>
+			</div>
 			{question.options.map((option, index) => (
 				<FieldSet key={option.id} className={sectionFrameClassName}>
 					<FieldLegend className="sr-only">Choice {index + 1}</FieldLegend>
@@ -154,24 +174,6 @@ function ChoiceFields({ question, onChange }: FieldsProps<ChoiceQuestion>) {
 					)}
 				</FieldSet>
 			))}
-			<Button
-				type="button"
-				variant="outline"
-				size="sm"
-				className="w-full"
-				disabled={question.options.length >= 255}
-				onClick={() =>
-					onChange({
-						...question,
-						options: [
-							...question.options,
-							{ id: crypto.randomUUID(), label: "", description: "" },
-						],
-					})
-				}
-			>
-				<Plus /> Add choice
-			</Button>
 		</FieldGroup>
 	);
 }
@@ -229,9 +231,20 @@ function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
 	};
 	return (
 		<FieldGroup className="gap-2">
-			<FieldTitle className="text-xs text-muted-foreground">
-				Score levels (0 to {question.levels.length - 1})
-			</FieldTitle>
+			<div className="flex items-center justify-between">
+				<FieldTitle className="text-xs text-muted-foreground">
+					Score levels (0 to {question.levels.length - 1})
+				</FieldTitle>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={question.levels.length >= 10}
+					onClick={addLevel}
+				>
+					<Plus /> Add level
+				</Button>
+			</div>
 			{question.levels.map((level, index) => (
 				<FieldSet key={level.id} className={sectionFrameClassName}>
 					<FieldLegend className="sr-only">Level {index}</FieldLegend>
@@ -272,16 +285,6 @@ function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
 					)}
 				</FieldSet>
 			))}
-			<Button
-				type="button"
-				variant="outline"
-				size="sm"
-				className="w-full"
-				disabled={question.levels.length >= 10}
-				onClick={addLevel}
-			>
-				<Plus /> Add level
-			</Button>
 		</FieldGroup>
 	);
 }
@@ -333,7 +336,7 @@ export function JevQuestionEditor({
 		>
 			<SheetContent variant="floating">
 				<SheetHeader>
-					<SheetTitle>Router</SheetTitle>
+					<SheetTitle>{jevRoleLabels[draft.type]}</SheetTitle>
 				</SheetHeader>
 				<ScrollArea
 					className="min-h-0 flex-1"

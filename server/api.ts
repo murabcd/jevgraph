@@ -72,6 +72,7 @@ async function classify(
 		...decision,
 		model: result.response?.modelId ?? JEV_MODEL_ID,
 		latencyMs: Math.round(performance.now() - start),
+		usage: result.usage,
 	};
 }
 

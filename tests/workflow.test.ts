@@ -85,6 +85,64 @@ test("Jev evaluates only the selected path and keeps a connected backup", async 
 	expect(execution.deltas).toEqual(["answer from primary-model"]);
 });
 
+test("an unconnected Jev choice returns its label without a model call", async () => {
+	const routes: WorkflowRoutes = {
+		kind: "workflow",
+		nodes: [
+			{ id: "input", kind: "input", fields: [] },
+			{ id: "judge", kind: "jev", question: defaultJevQuestion() },
+			{ id: "next", kind: "model", provider: "openai", model: "gpt-5-mini" },
+		],
+		edges: [
+			{ id: "entry", source: "input", target: "judge" },
+			{ id: "fast", source: "judge", sourceHandle: "fast", target: "next" },
+		],
+	};
+	expect(workflowRoutesSchema.safeParse(routes).success).toBe(true);
+	const execution = run(routes, {
+		decide: async () => ({
+			type: "choice",
+			branch: "deep",
+			value: "deep",
+			confidence: 0.92,
+			model: "jev-latest",
+			latencyMs: 10,
+			usage: { inputTokens: 93, outputTokens: 0 },
+		}),
+		model: async () => {
+			throw new Error("Model must not run for a terminal Jev answer");
+		},
+	});
+	const result = await execution.result;
+	expect(result.text).toBe("Deep");
+	expect(result.provider).toBe("jev");
+	expect(result.usage).toEqual({ inputTokens: 93, outputTokens: 0 });
+	expect(execution.deltas).toEqual(["Deep"]);
+});
+
+test("an unconnected Jev answer fails rather than inventing a label", async () => {
+	const routes: WorkflowRoutes = {
+		kind: "workflow",
+		nodes: [
+			{ id: "input", kind: "input", fields: [] },
+			{ id: "judge", kind: "jev", question: defaultJevQuestion() },
+		],
+		edges: [{ id: "entry", source: "input", target: "judge" }],
+	};
+	await expect(
+		run(routes, {
+			decide: async () => ({
+				type: "choice",
+				branch: "deep",
+				value: "deep",
+				confidence: 0.2,
+				model: "jev-latest",
+				latencyMs: 10,
+			}),
+		}).result,
+	).rejects.toThrow("could not choose a reliable answer");
+});
+
 test("Start values reach only the nodes that select them", async () => {
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
