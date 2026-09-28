@@ -98,6 +98,7 @@ export function useCanvasPresentation({
 				contexts: trace?.contexts.filter(
 					(context) => context.nodeId === node.id,
 				),
+				modelPlans: trace?.modelPlans.filter((plan) => plan.nodeId === node.id),
 				calls: trace?.calls.filter((call) => call.nodeId === node.id),
 				output: trace?.outputs.findLast((output) => output.nodeId === node.id)
 					?.text,

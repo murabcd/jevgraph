@@ -65,10 +65,12 @@ test.each([true, false])(
 			routes,
 			messages: [{ role: "user", content: "Write a draft" }],
 			metadata: {},
-			filterContext: async ({ chunks }) => ({
-				probabilities: Object.fromEntries(chunks.map(({ id }) => [id, 1])),
-				usage: { inputTokens: 10, outputTokens: 0 },
-			}),
+			contextProviders: {
+				filter: async ({ chunks }) => ({
+					probabilities: Object.fromEntries(chunks.map(({ id }) => [id, 1])),
+					usage: { inputTokens: 10, outputTokens: 0 },
+				}),
+			},
 			evaluate: async () => ({
 				type: "noul",
 				branch: drafts > 1 ? "yes" : "no",

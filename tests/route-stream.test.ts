@@ -31,6 +31,7 @@ describe("route stream", () => {
 				outputs: [],
 				calls: [],
 				contexts: [],
+				modelPlans: [],
 				usage: { complete: false, costComplete: false },
 				outcome: "completed",
 				latencyMs: 12,
@@ -65,7 +66,7 @@ describe("route stream", () => {
 		await expect(
 			readRouteStream(
 				responseFromChunks([
-					'{"type":"progress","trace":{"path":[],"traversedEdges":[],"jevSteps":[],"outputs":[],"contexts":[],"calls":[{"id":"1","nodeId":"model","purpose":"model","provider":"openai","model":"test","status":"completed","durationMs":1,"usage":{"inputTokens":-1}}]}}\n',
+					'{"type":"progress","trace":{"path":[],"traversedEdges":[],"jevSteps":[],"outputs":[],"contexts":[],"modelPlans":[],"calls":[{"id":"1","nodeId":"model","purpose":"model","provider":"openai","model":"test","status":"completed","durationMs":1,"usage":{"inputTokens":-1}}]}}\n',
 				]),
 				() => {},
 			),

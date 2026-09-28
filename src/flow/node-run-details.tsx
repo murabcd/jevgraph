@@ -1,18 +1,27 @@
+import { ModelPlanDetails } from "@/flow/model-plan-details";
 import type { NodeContextTrace } from "@/lib/context";
+import type { ModelPlan } from "@/lib/model-routing";
 import type { WorkflowDecision } from "@/lib/routing";
 import { formatCostUsd, type ProviderCall } from "@/lib/usage";
 
+const EMPTY_CONTEXTS: NodeContextTrace[] = [];
+const EMPTY_CALLS: ProviderCall[] = [];
+const EMPTY_PLANS: ModelPlan[] = [];
+
 export function NodeRunDetails({
-	contexts = [],
-	calls = [],
+	contexts = EMPTY_CONTEXTS,
+	calls = EMPTY_CALLS,
 	decision,
+	modelPlans = EMPTY_PLANS,
 }: {
 	contexts?: NodeContextTrace[];
 	calls?: ProviderCall[];
 	decision?: WorkflowDecision;
+	modelPlans?: ModelPlan[];
 }) {
 	return (
 		<div className="grid gap-4">
+			<ModelPlanDetails plans={modelPlans} />
 			{decision && (
 				<details className="rounded-lg border p-3 text-xs">
 					<summary className="cursor-pointer font-medium">
@@ -78,6 +87,7 @@ export function NodeRunDetails({
 									{chunk.kind} · {chunk.representation} ·{" "}
 									{chunk.characters.toLocaleString()} characters ·{" "}
 									{chunk.reason}
+									{chunk.summaryCache ? ` · summary ${chunk.summaryCache}` : ""}
 									{chunk.probability === undefined
 										? ""
 										: ` · relevance ${Math.round(chunk.probability * 100)}%`}

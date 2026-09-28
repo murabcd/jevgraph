@@ -7,3 +7,4 @@ This graph describes the app's runtime boundaries and the contracts shared by ro
 - [[canvas]] — graph connections, model selection, and saved layout
 - [[chat]] — conversation state, stream consumption, and composer behavior
 - [[context]] — node-specific context selection, document representations, and relevance
+- [[optimization]] — automatic model choice, provider cache projections, and temporary session storage

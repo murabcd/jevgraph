@@ -67,6 +67,7 @@ function LastTurnPanel({
 						)}
 						<NodeRunDetails
 							contexts={data.contexts}
+							modelPlans={data.modelPlans}
 							calls={data.calls}
 							decision={data.decisionDetails}
 						/>
@@ -135,6 +136,7 @@ function ModelPanel({
 			onOpenChange={onOpenChange}
 			onSave={(settings) => actions.onModelSettingsChange(id, settings)}
 			modelId={data.model}
+			routing={data.routing}
 			maxOutputTokens={data.maxOutputTokens}
 			reasoningEffort={data.reasoningEffort}
 			fields={startFields}

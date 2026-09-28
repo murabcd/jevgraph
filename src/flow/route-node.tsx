@@ -13,6 +13,7 @@ import {
 	MessageSquareText,
 	MoreHorizontal,
 	Play,
+	Shuffle,
 	Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -123,7 +124,13 @@ function RouteNodeToolbar({
 	);
 }
 
-function RouteNodeAvatar({ kind }: { kind: NodeKind }) {
+function RouteNodeAvatar({
+	kind,
+	automatic = false,
+}: {
+	kind: NodeKind;
+	automatic?: boolean;
+}) {
 	return (
 		<Avatar
 			className={cn(
@@ -154,13 +161,16 @@ function RouteNodeAvatar({ kind }: { kind: NodeKind }) {
 							: "bg-muted",
 					)}
 				>
-					{kind === "google" ? (
-						<GoogleIcon className="size-6" />
-					) : kind === "openai" ? (
-						<OpenAIIcon className="size-6" />
-					) : kind === "jev" ? (
-						<GitFork className="size-5" strokeWidth={1.8} />
-					) : null}
+					{automatic ? (
+						<Shuffle className="size-6" />
+					) : (
+						{
+							google: <GoogleIcon className="size-6" />,
+							openai: <OpenAIIcon className="size-6" />,
+							jev: <GitFork className="size-5" strokeWidth={1.8} />,
+							input: null,
+						}[kind]
+					)}
 				</AvatarFallback>
 			)}
 		</Avatar>
@@ -307,7 +317,13 @@ function RouteCardHeader({ data }: { data: FlowNode["data"] }) {
 	const title = nodeTitle(data);
 	return (
 		<CardHeader className="grid grid-cols-[36px_1fr] items-center gap-x-3">
-			<RouteNodeAvatar kind={data.kind} />
+			<RouteNodeAvatar
+				kind={data.kind}
+				automatic={
+					(data.kind === "openai" || data.kind === "google") &&
+					Boolean(data.routing)
+				}
+			/>
 			<div className="min-w-0">
 				<CardTitle className="truncate text-base">{title}</CardTitle>
 				<CardDescription className="truncate text-xs">

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { GoogleIcon, OpenAIIcon } from "@/components/icons/provider-icons";
 import { Button } from "@/components/ui/button";
 import {
 	Field,
@@ -36,6 +35,8 @@ import {
 	type DraftPromptMessage,
 	ModelMessagesEditor,
 } from "@/flow/model-messages-editor";
+import { ModelOption } from "@/flow/model-option";
+import { ModelRoutingFields } from "@/flow/model-routing-fields";
 import { ModelThinkingField } from "@/flow/model-thinking-field";
 import { PricingFields } from "@/flow/pricing-fields";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
@@ -46,6 +47,11 @@ import {
 	DEFAULT_CONTEXT_POLICY,
 } from "@/lib/context";
 import { publishedPricing } from "@/lib/model-pricing";
+import {
+	type ModelRouting,
+	modelRoutingSchema,
+	routingReasoningEfforts,
+} from "@/lib/model-routing";
 import { textModels } from "@/lib/models";
 import {
 	MAX_PROMPT_LENGTH,
@@ -56,19 +62,6 @@ import {
 	type StartField,
 } from "@/lib/routing";
 import { type Pricing, pricingSchema } from "@/lib/usage";
-
-function ModelOption({ model }: { model: (typeof textModels)[number] }) {
-	return (
-		<span className="flex items-center gap-2">
-			{model.provider === "openai" ? (
-				<OpenAIIcon className="size-4" />
-			) : (
-				<GoogleIcon className="size-4" />
-			)}
-			{model.label}
-		</span>
-	);
-}
 
 type Props = {
 	value: string;
@@ -85,6 +78,7 @@ type Props = {
 	variables: string[];
 	context?: ContextPolicy;
 	pricing?: Pricing;
+	routing?: ModelRouting;
 	contextSources: ContextSourceOption[];
 	documents: ContextDocument[];
 };
@@ -104,6 +98,7 @@ export function PromptEditor({
 	variables,
 	context,
 	pricing,
+	routing,
 	contextSources,
 	documents,
 }: Props) {
@@ -118,6 +113,7 @@ export function PromptEditor({
 	);
 	const [reasoningDraft, setReasoningDraft] = useState(() => {
 		const model = textModels.find((item) => item.id === modelId);
+		if (routing) return reasoningEffort ?? "medium";
 		return model
 			? modelReasoningEffort(model.provider, model.id, reasoningEffort)
 			: undefined;
@@ -127,6 +123,10 @@ export function PromptEditor({
 		context ?? DEFAULT_CONTEXT_POLICY,
 	);
 	const [pricingDraft, setPricingDraft] = useState(pricing);
+	const [routingDraft, setRoutingDraft] = useState(routing);
+	const allowedEfforts = routingDraft
+		? routingReasoningEfforts(routingDraft.models)
+		: undefined;
 	const selectedModel = textModels.find((model) => model.id === draftModel);
 	return (
 		<Sheet
@@ -201,6 +201,19 @@ export function PromptEditor({
 								</Select>
 							</Field>
 						)}
+						<ModelRoutingFields
+							id={id}
+							value={routingDraft}
+							maxOutputTokens={Number(outputTokensDraft)}
+							onChange={(routing) => {
+								setRoutingDraft(routing);
+								const efforts = routing
+									? routingReasoningEfforts(routing.models)
+									: selectedModel?.reasoning.efforts;
+								if (reasoningDraft && !efforts?.includes(reasoningDraft))
+									setReasoningDraft("medium");
+							}}
+						/>
 						<Field>
 							<FieldLabel
 								htmlFor={`${id}-max-output`}
@@ -220,6 +233,7 @@ export function PromptEditor({
 							<ModelThinkingField
 								id={id}
 								model={selectedModel}
+								efforts={allowedEfforts}
 								value={reasoningDraft ?? selectedModel.reasoning.defaultEffort}
 								onChange={setReasoningDraft}
 							/>
@@ -288,7 +302,9 @@ export function PromptEditor({
 							}
 							if (
 								reasoningDraft === undefined ||
-								!selectedModel.reasoning.efforts.includes(reasoningDraft)
+								!(allowedEfforts ?? selectedModel.reasoning.efforts).includes(
+									reasoningDraft,
+								)
 							) {
 								setError("Choose a supported reasoning effort.");
 								return;
@@ -310,8 +326,22 @@ export function PromptEditor({
 								);
 								return;
 							}
+							const parsedRouting = modelRoutingSchema
+								.optional()
+								.safeParse(routingDraft);
+							if (
+								!parsedRouting.success ||
+								(parsedRouting.data &&
+									parsedRouting.data.expectedOutputTokens > parsed.data)
+							) {
+								setError(
+									"Choose at least one model, expected output within the output limit, and 1–20 requests.",
+								);
+								return;
+							}
 							onSave({
 								model: draftModel,
+								routing: parsedRouting.data,
 								prompt: draft,
 								promptMessages: promptMessages.data,
 								variables: variablesDraft,

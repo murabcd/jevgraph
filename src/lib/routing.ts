@@ -10,6 +10,11 @@ import {
 	questionOutputs,
 } from "./jev-question.ts";
 import {
+	modelPlanSchema,
+	modelRoutingSchema,
+	routingReasoningEfforts,
+} from "./model-routing.ts";
+import {
 	type Provider,
 	providers,
 	type ReasoningEffort,
@@ -126,6 +131,7 @@ export const routeTargetSchema = z.strictObject({
 	variables: z.array(inputNameSchema).optional(),
 	context: contextPolicySchema.optional(),
 	pricing: pricingSchema.optional(),
+	routing: modelRoutingSchema.optional(),
 	maxOutputTokens: maxOutputTokensSchema,
 	reasoningEffort: reasoningEffortSchema.optional(),
 });
@@ -152,6 +158,7 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 	z.strictObject({
 		id: nodeIdSchema,
 		kind: z.literal("model"),
+		routing: modelRoutingSchema.optional(),
 		provider: providerSchema,
 		model: modelIdSchema,
 		prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
@@ -172,6 +179,22 @@ const workflowEdgeSchema = z.strictObject({
 });
 export type WorkflowNode = z.infer<typeof workflowNodeSchema>;
 export type WorkflowEdge = z.infer<typeof workflowEdgeSchema>;
+
+function validModelNode(
+	node: Extract<WorkflowNode, { kind: "model" }>,
+): boolean {
+	if (!textModel(node.provider, node.model)) return false;
+	if (!node.routing)
+		return validModelReasoning(node.provider, node.model, node.reasoningEffort);
+	return (
+		node.routing.expectedOutputTokens <=
+			(node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS) &&
+		(node.reasoningEffort === undefined ||
+			routingReasoningEfforts(node.routing.models).includes(
+				node.reasoningEffort,
+			))
+	);
+}
 
 function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -208,13 +231,7 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 		)
 	)
 		return false;
-	if (
-		nodes.some(
-			(node) =>
-				node.kind === "model" &&
-				!validModelReasoning(node.provider, node.model, node.reasoningEffort),
-		)
-	)
+	if (nodes.some((node) => node.kind === "model" && !validModelNode(node)))
 		return false;
 	const outgoingEdges = edges.filter(
 		(edge) => edge.sourceHandle !== "fallback",
@@ -382,6 +399,7 @@ export function selectedVariables(
 
 export const routeRequestSchema = z
 	.strictObject({
+		sessionId: z.string().uuid().optional(),
 		metadata: routingMetadataSchema.optional(),
 		documents: contextDocumentsSchema.optional(),
 		messages: z
@@ -404,6 +422,7 @@ export const routeRequestSchema = z
 				if (node.kind === "input") continue;
 				for (const binding of node.context?.documents ?? []) {
 					if (
+						!node.context?.automatic &&
 						binding.representation === "summary" &&
 						!documents.find(({ id }) => id === binding.id)?.summary
 					)
@@ -468,6 +487,7 @@ export const routeTraceSchema = z.strictObject({
 	outputs: z.array(nodeOutputSchema),
 	calls: z.array(providerCallSchema),
 	contexts: z.array(nodeContextTraceSchema),
+	modelPlans: z.array(modelPlanSchema),
 });
 export type RouteTrace = z.infer<typeof routeTraceSchema>;
 export const routeSelectionSchema = routeTraceSchema.extend({
@@ -508,6 +528,7 @@ export function modelTarget(
 		variables: node.variables,
 		context: node.context,
 		pricing: node.pricing,
+		routing: node.routing,
 		maxOutputTokens: node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 		reasoningEffort: node.reasoningEffort,
 	};
@@ -523,6 +544,8 @@ export function routesUseJev(routes: WorkflowRoutes): boolean {
 	return routes.nodes.some(
 		(node) =>
 			node.kind === "jev" ||
-			(node.kind === "model" && node.context?.relevance !== undefined),
+			(node.kind === "model" &&
+				(node.context?.relevance !== undefined ||
+					node.context?.automatic !== undefined)),
 	);
 }

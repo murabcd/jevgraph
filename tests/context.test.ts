@@ -63,7 +63,10 @@ describe("node-specific context", () => {
 		);
 		expect(context.messages).toEqual([messages.at(-1)]);
 		expect(context.inputs).toEqual([output]);
-		expect(prompt.messages.at(-1)?.content).toContain("Use short sentences.");
+		expect(prompt.messages[0]?.content).toContain("Use short sentences.");
+		expect(prompt.messages.at(-1)?.content).not.toContain(
+			"Use short sentences.",
+		);
 		expect(prompt.messages.at(-1)?.content).toContain("Latest draft");
 		expect(JSON.stringify(prompt)).not.toContain("LONG SOURCE");
 		expect(JSON.stringify(prompt)).not.toContain("Unrelated old topic");

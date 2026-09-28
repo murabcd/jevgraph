@@ -8,6 +8,7 @@ import {
 } from "../src/lib/context.ts";
 import type { ChatMessage, NodeOutput } from "../src/lib/routing.ts";
 import type { TokenUsage } from "../src/lib/usage.ts";
+import type { ContextOptimizer } from "./automatic-context.ts";
 import { formattedOutput } from "./upstream-context.ts";
 
 export type RelevanceResult = {
@@ -22,12 +23,40 @@ export type ContextFilter = (request: {
 	instructions: string;
 	chunks: ContextChunk[];
 }) => Promise<RelevanceResult>;
-export type PreparedContext = {
+export type ContextContent = {
 	messages: ChatMessage[];
 	inputs: NodeOutput[];
 	documents: ContextChunk[];
-	trace: NodeContextTrace;
 };
+export type PreparedContext = ContextContent & { trace: NodeContextTrace };
+
+function materializeContext(
+	chunks: ContextChunk[],
+	messages: ChatMessage[],
+	inputs: NodeOutput[],
+): ContextContent {
+	const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+	return {
+		messages: [
+			...messages.slice(0, -1).flatMap((message, index) => {
+				const chunk = byId.get(`message:${index}`);
+				return chunk ? [{ ...message, content: chunk.content }] : [];
+			}),
+			...messages.slice(-1),
+		],
+		inputs: inputs.flatMap((output) => {
+			const chunk = byId.get(`output:${output.nodeId}:${output.revision}`);
+			return !chunk
+				? []
+				: [
+						chunk.representation === "full"
+							? output
+							: { ...output, text: chunk.content },
+					];
+		}),
+		documents: chunks.filter((chunk) => chunk.kind === "document"),
+	};
+}
 
 export async function prepareContext({
 	nodeId,
@@ -38,6 +67,8 @@ export async function prepareContext({
 	documents,
 	policy = DEFAULT_CONTEXT_POLICY,
 	filter,
+	optimize,
+	price,
 	signal,
 }: {
 	nodeId: string;
@@ -48,6 +79,8 @@ export async function prepareContext({
 	documents: ContextDocument[];
 	policy?: ContextPolicy;
 	filter?: ContextFilter;
+	optimize?: ContextOptimizer;
+	price?: (context: ContextContent) => number;
 	signal?: AbortSignal;
 }): Promise<PreparedContext> {
 	const current = messages.at(-1);
@@ -77,7 +110,9 @@ export async function prepareContext({
 		policy.documents.map((binding) => [binding.id, binding]),
 	);
 	const documentChunks = documents.map((document): ContextChunk => {
-		const binding = documentBindings.get(document.id);
+		const binding = policy.automatic
+			? undefined
+			: documentBindings.get(document.id);
 		if (binding?.representation === "summary" && !document.summary)
 			throw new Error(`Document ${document.name} needs a summary`);
 		return {
@@ -117,6 +152,7 @@ export async function prepareContext({
 	) => {
 		const { content, ...source } = chunk;
 		selections.set(chunk.id, {
+			...selections.get(chunk.id),
 			...source,
 			characters: content.length,
 			included,
@@ -134,12 +170,43 @@ export async function prepareContext({
 	}
 	// Prefer explicit workflow/documents, then newest history. Never cut a chunk in half.
 	const priority = [...upstream, ...documentChunks, ...history.toReversed()];
-	let characters = 0;
-	for (const chunk of priority) {
-		if (!selections.get(chunk.id)?.included) continue;
-		if (characters + chunk.content.length > policy.maxCharacters)
-			select(chunk, false, "budget");
-		else characters += chunk.content.length;
+	const enforceBudget = (limit: number) => {
+		let characters = 0;
+		for (const chunk of priority) {
+			if (!selections.get(chunk.id)?.included) continue;
+			if (characters + chunk.content.length > limit)
+				select(chunk, false, "budget");
+			else characters += chunk.content.length;
+		}
+	};
+	// Bound the source bodies sent for automatic assessment, before compression.
+	enforceBudget(policy.automatic ? 120000 : policy.maxCharacters);
+	if (policy.automatic) {
+		const candidates = chunks.filter(
+			(chunk) => selections.get(chunk.id)?.included,
+		);
+		if (candidates.length && optimize) {
+			const choices = await optimize({
+				nodeId,
+				task,
+				query: current.content,
+				chunks: candidates,
+				minimumConfidence: policy.automatic.minimumConfidence,
+				price: price
+					? (selected) => price(materializeContext(selected, messages, inputs))
+					: undefined,
+			});
+			const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+			for (const choice of choices) {
+				const chunk = byId.get(choice.chunk.id);
+				if (!chunk) continue;
+				Object.assign(chunk, choice.chunk);
+				select(chunk, choice.included, choice.reason, choice.probability);
+				const selection = selections.get(chunk.id);
+				if (selection) selection.summaryCache = choice.summaryCache;
+			}
+		} else for (const chunk of candidates) select(chunk, true, "unavailable");
+		enforceBudget(policy.maxCharacters);
 	}
 	const candidates = chunks.filter(
 		(chunk) => selections.get(chunk.id)?.included,
@@ -192,16 +259,11 @@ export async function prepareContext({
 		selection.previewTruncated = preview.length < chunk.content.length;
 	}
 	return {
-		messages: [
-			...messages
-				.slice(0, -1)
-				.filter((_, index) => included(`message:${index}`)),
-			current,
-		],
-		inputs: inputs.filter((output) =>
-			included(`output:${output.nodeId}:${output.revision}`),
+		...materializeContext(
+			chunks.filter((chunk) => included(chunk.id)),
+			messages,
+			inputs,
 		),
-		documents: documentChunks.filter((chunk) => included(chunk.id)),
 		trace: {
 			nodeId,
 			callId,

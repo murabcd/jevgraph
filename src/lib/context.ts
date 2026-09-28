@@ -25,34 +25,44 @@ export const contextDocumentsSchema = z
 	);
 export type ContextDocument = z.infer<typeof contextDocumentSchema>;
 
-export const contextPolicySchema = z.strictObject({
-	historyMessages: z.number().int().min(0).max(29),
-	maxCharacters: z.number().int().min(1000).max(120000),
-	upstream: z.enum(["all", "selected", "none"]),
-	outputNodeIds: z
-		.array(sourceIdSchema)
-		.max(100)
-		.refine((ids) => new Set(ids).size === ids.length),
-	documents: z
-		.array(
-			z.strictObject({
-				id: sourceIdSchema,
-				representation: z.enum(["full", "summary"]),
-			}),
-		)
-		.max(20)
-		.refine(
-			(documents) =>
-				new Set(documents.map(({ id }) => id)).size === documents.length,
-		),
-	relevance: z
-		.strictObject({
-			instructions: z.string().trim().min(1).max(500),
-			minimumConfidence: z.number().min(0.5).max(1),
-			pricing: pricingSchema.optional(),
-		})
-		.optional(),
-});
+export const contextPolicySchema = z
+	.strictObject({
+		historyMessages: z.number().int().min(0).max(29),
+		maxCharacters: z.number().int().min(1000).max(120000),
+		upstream: z.enum(["all", "selected", "none"]),
+		outputNodeIds: z
+			.array(sourceIdSchema)
+			.max(100)
+			.refine((ids) => new Set(ids).size === ids.length),
+		documents: z
+			.array(
+				z.strictObject({
+					id: sourceIdSchema,
+					representation: z.enum(["full", "summary"]),
+				}),
+			)
+			.max(20)
+			.refine(
+				(documents) =>
+					new Set(documents.map(({ id }) => id)).size === documents.length,
+			),
+		automatic: z
+			.strictObject({
+				minimumConfidence: z.number().min(0.5).max(1),
+			})
+			.optional(),
+		relevance: z
+			.strictObject({
+				instructions: z.string().trim().min(1).max(500),
+				minimumConfidence: z.number().min(0.5).max(1),
+				pricing: pricingSchema.optional(),
+			})
+			.optional(),
+	})
+	.refine(
+		(policy) => !policy.automatic || !policy.relevance,
+		"Automatic selection includes relevance filtering",
+	);
 export type ContextPolicy = z.infer<typeof contextPolicySchema>;
 export const DEFAULT_CONTEXT_POLICY: ContextPolicy = {
 	historyMessages: 6,
@@ -67,7 +77,7 @@ export const contextSelectionSchema = z.strictObject({
 	sourceId: z.string(),
 	kind: z.enum(["message", "output", "document"]),
 	label: z.string(),
-	representation: z.enum(["full", "summary"]),
+	representation: z.enum(["full", "summary", "short", "detailed"]),
 	characters: z.number().int().min(0),
 	included: z.boolean(),
 	reason: z.enum([
@@ -78,7 +88,9 @@ export const contextSelectionSchema = z.strictObject({
 		"irrelevant",
 		"uncertain",
 		"unavailable",
+		"automatic",
 	]),
+	summaryCache: z.enum(["created", "reused", "unavailable"]).optional(),
 	probability: z.number().min(0).max(1).optional(),
 	preview: z.string().max(600).optional(),
 	previewTruncated: z.boolean().optional(),
@@ -95,6 +107,12 @@ export const nodeContextTraceSchema = z.strictObject({
 	chunks: z.array(contextSelectionSchema),
 });
 export type NodeContextTrace = z.infer<typeof nodeContextTraceSchema>;
+
+export const contextSummariesSchema = z.strictObject({
+	short: z.string().trim().min(1).max(600),
+	detailed: z.string().trim().min(1).max(2400),
+});
+export type ContextSummaries = z.infer<typeof contextSummariesSchema>;
 
 export function resolveContextDocuments(
 	defaults: ContextDocument[],

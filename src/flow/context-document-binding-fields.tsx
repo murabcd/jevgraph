@@ -8,6 +8,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { SelectionRow } from "@/flow/selection-row";
 import type { ContextDocument, ContextPolicy } from "@/lib/context";
 
 export function ContextDocumentBindingFields({
@@ -15,14 +16,35 @@ export function ContextDocumentBindingFields({
 	value,
 	onChange,
 	documents,
+	automatic = false,
 }: {
 	id: string;
 	value: ContextPolicy["documents"];
 	onChange: (bindings: ContextPolicy["documents"]) => void;
 	documents: ContextDocument[];
+	automatic?: boolean;
 }) {
 	const bindings = new Map(value.map((binding) => [binding.id, binding]));
 	return documents.map((document) => {
+		if (automatic)
+			return (
+				<SelectionRow
+					key={document.id}
+					selected={bindings.has(document.id)}
+					onSelectedChange={(selected) =>
+						onChange(
+							selected
+								? [...value, { id: document.id, representation: "full" }]
+								: value.filter(({ id }) => id !== document.id),
+						)
+					}
+				>
+					<span className="flex min-w-0 items-center gap-2">
+						<FileText className="size-4 shrink-0" />
+						<span className="truncate">{document.name}</span>
+					</span>
+				</SelectionRow>
+			);
 		const representation = bindings.get(document.id)?.representation ?? "omit";
 		return (
 			<Field key={document.id}>

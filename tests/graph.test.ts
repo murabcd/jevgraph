@@ -76,6 +76,57 @@ function node(
 }
 
 describe("editable chatflow graph", () => {
+	test("automatic policies survive persistence and compilation without normalizing reasoning against the manual model", () => {
+		const nodes: FlowNode[] = [
+			node("input", "input", 0),
+			{
+				id: "model",
+				type: "route",
+				position: { x: 1, y: 0 },
+				data: {
+					kind: "google",
+					model: "gemini-3.8-flash",
+					active: false,
+					maxOutputTokens: 100,
+					reasoningEffort: "none",
+					routing: {
+						models: ["gpt-6-luna"],
+						expectedOutputTokens: 50,
+						expectedRequests: 2,
+					},
+					context: {
+						...DEFAULT_CONTEXT_POLICY,
+						automatic: { minimumConfidence: 0.9 },
+					},
+					modelPlans: [
+						{
+							nodeId: "model",
+							callId: "1",
+							selectedModel: "gpt-6-luna",
+							expectedRequests: 2,
+							estimation: "utf8-estimate",
+							candidates: [],
+						},
+					],
+				},
+			},
+		];
+		const edges = [{ id: "entry", source: "input", target: "model" }];
+		saveGraph(nodes, edges);
+		const restored = readGraph();
+		expect(restored.nodes[1].data.modelPlans).toBeUndefined();
+		expect(
+			routesFromGraph(restored.nodes, restored.edges)?.nodes[1],
+		).toMatchObject({
+			reasoningEffort: "none",
+			routing: { models: ["gpt-6-luna"] },
+			context: { automatic: { minimumConfidence: 0.9 } },
+		});
+		expect(
+			duplicateModelNode(nodes, "model", "copy").at(-1)?.data.modelPlans,
+		).toBeUndefined();
+	});
+
 	test("duplicates model configuration without copying execution state or losing context and prices", () => {
 		const original: FlowNode = {
 			id: "original",

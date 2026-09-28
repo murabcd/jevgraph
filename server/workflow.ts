@@ -4,7 +4,8 @@ import {
 	resolveContextDocuments,
 } from "../src/lib/context.ts";
 import { type JevQuestion, questionOutputs } from "../src/lib/jev-question.ts";
-import { publishedRates } from "../src/lib/model-pricing.ts";
+import type { CacheMode, ModelPlan } from "../src/lib/model-routing.ts";
+import { textModels } from "../src/lib/models.ts";
 import {
 	type ChatMessage,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
@@ -14,7 +15,6 @@ import {
 	type NodeOutput,
 	type RouteResult,
 	type RouteSelectionResult,
-	type RouteTarget,
 	type RouteTrace,
 	type RoutingMetadata,
 	resolveStartVariables,
@@ -23,20 +23,18 @@ import {
 	type WorkflowEdge,
 	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
-import {
-	estimateCost,
-	type Pricing,
-	type ProviderCall,
-	type TokenUsage,
-	totalUsage,
-} from "../src/lib/usage.ts";
-import {
-	type ContextFilter,
-	type PreparedContext,
-	prepareContext,
-} from "./context.ts";
+import { type TokenUsage, totalUsage } from "../src/lib/usage.ts";
+import { mapConcurrent } from "./concurrency.ts";
+import type { PreparedContext } from "./context.ts";
 import { runWithOneFallback } from "./model-failover.ts";
-import { ProviderUsageError } from "./provider-usage.ts";
+import {
+	type ModelPlanningRequest,
+	observeModelCache,
+	planModel,
+} from "./model-planner.ts";
+import { type ContextProviders, prepareNodeContext } from "./node-context.ts";
+import { ProviderLedger } from "./provider-ledger.ts";
+import { SessionMemory } from "./session-memory.ts";
 import { formattedUpstreamOutputs } from "./upstream-context.ts";
 
 const MAX_TRACE_OUTPUT = 4000;
@@ -73,11 +71,10 @@ type WorkflowResponse = {
 	usage?: TokenUsage;
 };
 
-export type WorkflowModelRequest = {
-	target: RouteTarget;
-	variables: RoutingMetadata;
+export type WorkflowModelRequest = ModelPlanningRequest & {
 	context: PreparedContext;
 	onDelta: (text: string) => void;
+	cache?: CacheMode;
 };
 
 type Execution = {
@@ -85,7 +82,9 @@ type Execution = {
 	messages: ChatMessage[];
 	metadata: RoutingMetadata;
 	documents?: ContextDocument[];
-	filterContext?: ContextFilter;
+	contextProviders?: ContextProviders;
+	memory?: SessionMemory;
+	availableModels?: ReadonlySet<string>;
 	evaluate: (
 		nodeId: string,
 		question: JevQuestion,
@@ -110,36 +109,6 @@ type NodeExecution = {
 	terminal?: Terminal;
 	fallback?: { edge: WorkflowEdge; reason: string };
 };
-
-async function runLayer<TInput, TResult>(
-	items: TInput[],
-	run: (item: TInput) => Promise<TResult>,
-): Promise<TResult[]> {
-	const values = new Array<TResult>(items.length);
-	let nextIndex = 0;
-	let failed = false;
-	let failure: unknown;
-	const worker = async (): Promise<void> => {
-		if (nextIndex >= items.length || failed) return;
-		const index = nextIndex++;
-		try {
-			values[index] = await run(items[index]);
-		} catch (error) {
-			failed = true;
-			failure = error;
-			return;
-		}
-		return worker();
-	};
-	await Promise.all(
-		Array.from(
-			{ length: Math.min(MAX_CONCURRENT_NODES, items.length) },
-			worker,
-		),
-	);
-	if (failed) throw failure;
-	return values;
-}
 
 function workflowTopology(routes: WorkflowRoutes): {
 	layers: string[][];
@@ -200,7 +169,9 @@ export async function executeWorkflow({
 	messages,
 	metadata,
 	documents: suppliedDocuments,
-	filterContext,
+	contextProviders,
+	memory = new SessionMemory(),
+	availableModels = new Set(textModels.map((model) => model.id)),
 	evaluate,
 	runModel,
 	onDelta,
@@ -225,11 +196,11 @@ export async function executeWorkflow({
 	const traversedEdges: WorkflowEdge[] = [];
 	const decisions: WorkflowDecision[] = [];
 	const outputs: NodeOutput[] = [];
-	const calls: ProviderCall[] = [];
+	const ledger = new ProviderLedger(() => onProgress(trace()));
+	const calls = ledger.calls;
 	const contexts: NodeContextTrace[] = [];
+	const modelPlans: ModelPlan[] = [];
 	const revisions = new Map<string, number>();
-	let nextCallId = 0;
-	let providerCallsStarted = 0;
 	let exhausted: Terminal | undefined;
 	const terminals: Terminal[] = [];
 	const repeatCounts = new Map<string, number>();
@@ -250,6 +221,7 @@ export async function executeWorkflow({
 		outputs: outputs.map(outputPreview),
 		calls: [...calls],
 		contexts: [...contexts],
+		modelPlans: [...modelPlans],
 		fallbackReason,
 	});
 	const trace = (): RouteTrace => ({
@@ -259,78 +231,17 @@ export async function executeWorkflow({
 		outputs: outputs.map(outputPreview),
 		calls: [...calls],
 		contexts: [...contexts],
+		modelPlans: [...modelPlans],
 	});
-	const callProvider = async <T extends { usage?: TokenUsage; model?: string }>(
-		identity: Pick<ProviderCall, "nodeId" | "purpose" | "provider" | "model">,
-		pricing: Pricing | undefined,
-		callId: string,
-		run: () => Promise<T>,
-	): Promise<T> => {
-		if (providerCallsStarted >= 200)
-			throw new Error("Chatflow exceeded its provider call budget");
-		providerCallsStarted++;
-		const began = performance.now();
-		let usage: TokenUsage | undefined;
-		let model = identity.model;
-		let error: string | undefined;
-		let status: ProviderCall["status"] = "completed";
-		try {
-			const result = await run();
-			usage = result.usage;
-			model = result.model ?? model;
-			return result;
-		} catch (caught) {
-			status = "failed";
-			usage = caught instanceof ProviderUsageError ? caught.usage : undefined;
-			error = caught instanceof Error ? caught.message : "Provider call failed";
-			throw caught;
-		} finally {
-			calls.push({
-				...identity,
-				model,
-				id: callId,
-				status,
-				durationMs: Math.round(performance.now() - began),
-				usage,
-				estimatedCostUsd: estimateCost(
-					usage,
-					pricing ??
-						publishedRates(identity.provider, model, usage?.inputTokens),
-				),
-				error,
-			});
-			onProgress(trace());
-		}
-	};
 	const contextFor = async (
 		node: Exclude<WorkflowRoutes["nodes"][number], { kind: "input" }>,
 		inputs: NodeOutput[],
 		callId: string,
 	) => {
-		const prepared = await prepareContext({
-			nodeId: node.id,
-			task: node.kind === "jev" ? node.question.instructions : node.prompt,
-			callId,
-			messages,
-			inputs,
-			documents,
-			policy: node.context,
-			signal,
-			filter: filterContext
-				? (request) =>
-						callProvider(
-							{
-								nodeId: node.id,
-								purpose: "context",
-								provider: "jev",
-								model: JEV_MODEL_ID,
-							},
-							node.context?.relevance?.pricing,
-							`call:${++nextCallId}`,
-							() => filterContext(request),
-						)
-				: undefined,
-		});
+		const prepared = await prepareNodeContext(
+			{ node, callId, messages, inputs, documents, variables: startVariables },
+			{ memory, availableModels, ledger, providers: contextProviders, signal },
+		);
 		contexts.push(prepared.trace);
 		onProgress(trace());
 		return prepared;
@@ -373,8 +284,9 @@ export async function executeWorkflow({
 			return { id, inputs: [...latest.values()] };
 		});
 		const solePendingNode = batch.length === 1 && incoming.size === 0;
-		const results = await runLayer(
+		const results = await mapConcurrent(
 			batch,
+			MAX_CONCURRENT_NODES,
 			async ({ id, inputs }): Promise<NodeExecution> => {
 				const node = byId.get(id);
 				if (!node) throw new Error(`Workflow node ${id} is missing`);
@@ -385,13 +297,13 @@ export async function executeWorkflow({
 					};
 				}
 				if (node.kind === "jev") {
-					const callId = `call:${++nextCallId}`;
+					const callId = ledger.nextId();
 					const context = await contextFor(node, inputs, callId);
 					const options = questionOutputs(node.question);
 					let decision: JevDecision | undefined;
 					let error: string | undefined;
 					try {
-						decision = await callProvider(
+						decision = await ledger.run(
 							{
 								nodeId: id,
 								purpose: "decision",
@@ -511,18 +423,55 @@ export async function executeWorkflow({
 				const backup =
 					backupNode?.kind === "model" ? modelTarget(backupNode) : undefined;
 				const canStream = next.length === 0 && solePendingNode;
-				if (canStream) onRoute(selection(target));
+				let usedTarget = target;
 				let usedFallback: { edge: WorkflowEdge; reason: string } | undefined;
 				const attempt = await runWithOneFallback(
 					target,
 					backup,
 					async (model, delta) => {
-						const callId = `call:${++nextCallId}`;
+						const callId = ledger.nextId();
 						const actual = byId.get(model.nodeId);
 						if (actual?.kind !== "model")
 							throw new Error("Model node is missing");
 						const context = await contextFor(actual, inputs, callId);
-						return callProvider(
+						const variables = selectedVariables(
+							startVariables,
+							model.variables,
+						);
+						let quote: ModelPlan["candidates"][number] | undefined;
+						if (model.routing) {
+							const planned = planModel(
+								{ target: model, context, variables },
+								memory,
+								availableModels,
+								callId,
+							);
+							planned.plan.preparationCostUsd = ledger.preparationCost(
+								model.nodeId,
+							);
+							modelPlans.push(planned.plan);
+							quote = planned.quote;
+							model = planned.target;
+							onProgress(trace());
+						}
+						usedTarget = model;
+						if (canStream) {
+							const route = selection(model);
+							onRoute(
+								usedFallback && fallbackEdge
+									? {
+											...route,
+											path: [
+												...route.path,
+												{ nodeId: model.nodeId, via: "fallback" },
+											],
+											traversedEdges: [...route.traversedEdges, fallbackEdge],
+											fallbackReason: usedFallback.reason,
+										}
+									: route,
+							);
+						}
+						const response = await ledger.run(
 							{
 								nodeId: model.nodeId,
 								purpose: "model",
@@ -536,9 +485,13 @@ export async function executeWorkflow({
 									target: model,
 									context,
 									onDelta: delta,
-									variables: selectedVariables(startVariables, model.variables),
+									variables,
+									cache: quote?.cache,
 								}),
 						);
+						if (quote)
+							observeModelCache(model, context, memory, quote, response.usage);
+						return response;
 					},
 					(text) => {
 						if (canStream) {
@@ -548,28 +501,14 @@ export async function executeWorkflow({
 					},
 					(reason) => {
 						if (fallbackEdge) usedFallback = { edge: fallbackEdge, reason };
-						if (canStream && backup) {
-							const route = selection(backup);
-							onRoute({
-								...route,
-								path: [
-									...route.path,
-									{ nodeId: backup.nodeId, via: "fallback" },
-								],
-								traversedEdges: fallbackEdge
-									? [...route.traversedEdges, fallbackEdge]
-									: route.traversedEdges,
-								fallbackReason: reason,
-							});
-						}
 					},
 					() => !signal?.aborted,
 				);
 				const output: NodeOutput = {
-					nodeId: attempt.target.nodeId,
+					nodeId: usedTarget.nodeId,
 					sourceNodeId: id,
 					kind: "model",
-					revision: revisionFor(attempt.target.nodeId),
+					revision: revisionFor(usedTarget.nodeId),
 					text: attempt.response.text,
 				};
 				return {
@@ -579,7 +518,7 @@ export async function executeWorkflow({
 					...(next.length === 0
 						? {
 								terminal: {
-									target: attempt.target,
+									target: usedTarget,
 									response: attempt.response,
 								},
 							}

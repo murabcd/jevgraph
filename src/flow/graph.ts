@@ -14,6 +14,11 @@ import {
 	jevQuestionSchema,
 	questionOutputs,
 } from "@/lib/jev-question";
+import {
+	type ModelPlan,
+	type ModelRouting,
+	modelRoutingSchema,
+} from "@/lib/model-routing";
 import type { ReasoningEffort } from "@/lib/models";
 import type { NodeTimer } from "@/lib/node-timer";
 import {
@@ -48,6 +53,7 @@ type NodeViewData = {
 	decisionDetails?: WorkflowDecision;
 	contexts?: NodeContextTrace[];
 	calls?: ProviderCall[];
+	modelPlans?: ModelPlan[];
 	output?: string;
 	usedBranches?: ReadonlySet<string>;
 	step?: string;
@@ -81,6 +87,7 @@ type NodeData = NodeViewData &
 		  }
 		| {
 				kind: "google" | "openai";
+				routing?: ModelRouting;
 				model: string;
 				prompt?: string;
 				promptMessages?: ModelPromptMessage[];
@@ -107,7 +114,12 @@ export type JevNodeSettings = Pick<
 type ModelNodeData = Extract<FlowNode["data"], { kind: "google" | "openai" }>;
 export type ModelNodeSettings = Pick<
 	ModelNodeData,
-	"model" | "maxOutputTokens" | "reasoningEffort" | "context" | "pricing"
+	| "model"
+	| "maxOutputTokens"
+	| "reasoningEffort"
+	| "context"
+	| "pricing"
+	| "routing"
 > &
 	Required<Pick<ModelNodeData, "prompt" | "promptMessages" | "variables">>;
 
@@ -180,6 +192,7 @@ const persistedNodeSchema = z.object({
 		}),
 		z.object({
 			kind: z.enum(["google", "openai"]),
+			routing: modelRoutingSchema.optional(),
 			model: modelIdSchema,
 			maxOutputTokens: maxOutputTokensSchema,
 			reasoningEffort: reasoningEffortSchema.optional(),
@@ -209,6 +222,7 @@ function persistedNodeData(data: FlowNode["data"]) {
 	return {
 		kind: data.kind,
 		model: data.model,
+		routing: data.routing,
 		maxOutputTokens: data.maxOutputTokens,
 		reasoningEffort: data.reasoningEffort,
 		prompt: data.prompt,
@@ -542,16 +556,19 @@ export function routesFromGraph(
 								? { maxRepeats: node.data.maxRepeats }
 								: {}),
 						};
-					const reasoningEffort = modelReasoningEffort(
-						node.data.kind,
-						node.data.model,
-						node.data.reasoningEffort,
-					);
+					const reasoningEffort = node.data.routing
+						? node.data.reasoningEffort
+						: modelReasoningEffort(
+								node.data.kind,
+								node.data.model,
+								node.data.reasoningEffort,
+							);
 					return {
 						id: node.id,
 						kind: "model" as const,
 						provider: node.data.kind,
 						model: node.data.model,
+						routing: node.data.routing,
 						context: node.data.context,
 						pricing: node.data.pricing,
 						maxOutputTokens: node.data.maxOutputTokens,

@@ -18,6 +18,7 @@ export function useRouteChat(
 	routes: WorkflowRoutes | null,
 	onRequestStarted: () => void,
 ) {
+	const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
 	const [draft, setDraft] = useState("");
 	const [messages, setMessages] = useState<ChatTurn[]>([]);
 	const [result, setResult] = useState<RouteResult | null>(null);
@@ -69,6 +70,7 @@ export function useRouteChat(
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
+					sessionId,
 					messages: history,
 					routes,
 				}),
@@ -146,9 +148,10 @@ export function useRouteChat(
 			setNodeTimings((current) => interruptNodeTimers(current, stoppedAt));
 			setRunning(false);
 		}
-	}, [draft, messages, routes, routeKey, running, onRequestStarted]);
+	}, [sessionId, draft, messages, routes, routeKey, running, onRequestStarted]);
 
 	const clearChat = () => {
+		setSessionId(crypto.randomUUID());
 		setMessages([]);
 		setResult(null);
 		setTrace(null);

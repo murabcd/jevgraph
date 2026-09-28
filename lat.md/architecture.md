@@ -1,6 +1,6 @@
 # Architecture
 
-Route Studio is a local Vite and React chatflow editor. Every chat turn runs the current graph on the local API; the canvas observes execution and edits the graph for later turns. See [[routing]], [[canvas]], and [[chat]].
+Route Studio is a local Vite and React chatflow editor. Every chat turn runs the current graph on the local API; the canvas observes execution and edits the graph for later turns. See [[routing]], [[canvas]], [[chat]], and [[optimization]].
 
 ## Module ownership
 
@@ -9,6 +9,7 @@ The browser owns graph editing and conversation display; the server owns executi
 - [src/lib/routing.ts](../src/lib/routing.ts) owns the single workflow request schema, node and edge contracts, and stream types.
 - [src/flow/graph.ts](../src/flow/graph.ts) compiles canvas nodes and edges and persists the editable graph. [src/flow/use-routing-graph.ts](../src/flow/use-routing-graph.ts) owns graph edits.
 - [server/workflow.ts](../server/workflow.ts) schedules stages, joins parallel results, bounds repeats, and emits progress. [server/model-failover.ts](../server/model-failover.ts) limits an explicit backup model to one attempt.
+- [[server/provider-ledger.ts]] owns provider call identities, the shared call budget, completed and failed usage, and preparation cost. [[server/node-context.ts]] binds node context policies to accounted providers and model cost projections outside the graph scheduler.
 - [server/api.ts](../server/api.ts) owns the local API and direct provider calls.
 - [src/lib/context.ts](../src/lib/context.ts) and [server/context.ts](../server/context.ts) own node context policies, representations, and selection traces. See [[context]].
 - [src/lib/usage.ts](../src/lib/usage.ts) owns provider call records, workflow totals, and pricing calculations; [src/lib/model-pricing.ts](../src/lib/model-pricing.ts) owns dated published prices. [src/lib/node-timer.ts](../src/lib/node-timer.ts) owns in-memory running and settled timer transitions.
@@ -19,7 +20,7 @@ The browser owns graph editing and conversation display; the server owns executi
 
 Browser storage, in-memory chat, and server-only secrets have separate owners.
 
-Graph configuration, node positions, theme, viewport, and chat panel visibility live in browser local storage. Messages and the latest execution trace live in memory and reset on reload. API keys stay in the server's .env.local; the browser receives key availability, not key values.
+Graph configuration, node positions, theme, viewport, and chat panel visibility live in browser local storage. Messages and the latest execution trace live in browser memory and reset on reload. The server keeps bounded, expiring per-session summary and cache-prefix records in memory through [[optimization]]; it stores no durable conversation or database state. API keys stay in the server's .env.local; the browser receives key availability, not key values.
 
 Graph configuration includes context policies, reference documents, and optional rates. Per-call usage, context excerpts, revisions, and structured decisions remain in memory with the chat turn. API request bodies have a shared two-MiB limit enforced by both the Vite adapter and API handler.
 

@@ -1,4 +1,4 @@
-import { Ban, Layers, ListChecks, MessageSquare } from "lucide-react";
+import { Ban, Layers, ListChecks, MessageSquare, Sparkles } from "lucide-react";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,6 +33,50 @@ export function ContextPolicyFields({
 	return (
 		<FieldGroup className="gap-4">
 			<span className="text-sm font-medium">Context</span>
+			<SelectionRow
+				selected={Boolean(value.automatic)}
+				onSelectedChange={(selected) =>
+					onChange({
+						...value,
+						automatic: selected ? { minimumConfidence: 0.9 } : undefined,
+						relevance: undefined,
+					})
+				}
+			>
+				<span className="flex items-center gap-2">
+					<Sparkles className="size-4 shrink-0" />
+					Automatic context
+				</span>
+			</SelectionRow>
+			{value.automatic && (
+				<Field>
+					<FieldLabel
+						htmlFor={`${id}-adequacy`}
+						className="text-xs text-muted-foreground"
+					>
+						Minimum adequacy probability (%)
+					</FieldLabel>
+					<Input
+						id={`${id}-adequacy`}
+						inputMode="decimal"
+						value={
+							Number.isFinite(value.automatic.minimumConfidence)
+								? String(value.automatic.minimumConfidence * 100)
+								: ""
+						}
+						onChange={(event) =>
+							onChange({
+								...value,
+								automatic: {
+									minimumConfidence: event.target.value.trim()
+										? Number(event.target.value) / 100
+										: NaN,
+								},
+							})
+						}
+					/>
+				</Field>
+			)}
 			<Field>
 				<FieldLabel
 					htmlFor={`${id}-history`}
@@ -172,13 +216,16 @@ export function ContextPolicyFields({
 				id={id}
 				documents={documents}
 				value={value.documents}
+				automatic={Boolean(value.automatic)}
 				onChange={(documents) => onChange({ ...value, documents })}
 			/>
-			<ContextRelevanceFields
-				id={id}
-				value={value.relevance}
-				onChange={(relevance) => onChange({ ...value, relevance })}
-			/>
+			{!value.automatic && (
+				<ContextRelevanceFields
+					id={id}
+					value={value.relevance}
+					onChange={(relevance) => onChange({ ...value, relevance })}
+				/>
+			)}
 		</FieldGroup>
 	);
 }
