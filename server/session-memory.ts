@@ -11,6 +11,11 @@ export function contentFingerprint(value: string): string {
 	return createHash("sha256").update(value).digest("hex");
 }
 
+export type SummaryStore = {
+	get: (key: string) => Promise<ContextSummaries | null>;
+	put: (key: string, value: ContextSummaries) => Promise<void>;
+};
+
 type CachedSummary = { value: ContextSummaries; expiresAt: number };
 type PrefixObservation = { tokens: number; expiresAt: number };
 
@@ -29,6 +34,7 @@ export class SessionMemory {
 	async summarize(
 		key: string,
 		create: () => Promise<ContextSummaries>,
+		store?: SummaryStore,
 	): Promise<{
 		value: ContextSummaries;
 		cache: "created" | "reused";
@@ -43,7 +49,17 @@ export class SessionMemory {
 		if (pending) return { value: await pending, cache: "reused" };
 		if (this.pending.size >= 16)
 			throw new Error("Summary concurrency limit reached");
-		const task = create();
+		let cache: "created" | "reused" = "created";
+		const task = (async () => {
+			const saved = store ? await store.get(key) : null;
+			if (saved) {
+				cache = "reused";
+				return saved;
+			}
+			const value = await create();
+			await store?.put(key, value);
+			return value;
+		})();
 		this.pending.set(key, task);
 		try {
 			const value = await task;
@@ -58,7 +74,7 @@ export class SessionMemory {
 				if (!oldest) break;
 				this.removeSummary(...oldest);
 			}
-			return { value, cache: "created" };
+			return { value, cache };
 		} finally {
 			this.pending.delete(key);
 		}

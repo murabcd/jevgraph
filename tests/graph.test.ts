@@ -4,12 +4,12 @@ import {
 	canConnectNodes,
 	duplicateModelNode,
 	type FlowNode,
+	graphSnapshot,
 	nodeStepLabels,
 	readGraph,
 	removeGraphNode,
 	retainQuestionEdges,
 	routesFromGraph,
-	saveGraph,
 } from "../src/flow/graph";
 import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import { defaultJevQuestion, questionOutputs } from "../src/lib/jev-question";
@@ -39,6 +39,11 @@ afterAll(() => {
 		Object.defineProperty(globalThis, "localStorage", previousStorage);
 	else Reflect.deleteProperty(globalThis, "localStorage");
 });
+
+// Exercises the one-time browser import using the current persisted projection.
+function importGraphFixture(nodes: FlowNode[], edges: Edge[]) {
+	stored.set("router:graph:v3", JSON.stringify(graphSnapshot(nodes, edges)));
+}
 
 function node(
 	id: string,
@@ -112,7 +117,7 @@ describe("editable chatflow graph", () => {
 			},
 		];
 		const edges = [{ id: "entry", source: "input", target: "model" }];
-		saveGraph(nodes, edges);
+		importGraphFixture(nodes, edges);
 		const restored = readGraph();
 		expect(restored.nodes[1].data.modelPlans).toBeUndefined();
 		expect(
@@ -216,7 +221,7 @@ describe("editable chatflow graph", () => {
 							: item.data,
 			}),
 		);
-		saveGraph(graph.nodes, graph.edges);
+		importGraphFixture(graph.nodes, graph.edges);
 		const restored = readGraph();
 		const routes = routesFromGraph(restored.nodes, restored.edges);
 		expect(routes).not.toBeNull();
@@ -241,7 +246,7 @@ describe("editable chatflow graph", () => {
 		const routes = routesFromGraph(graph.nodes, graph.edges);
 		expect(routes?.kind).toBe("workflow");
 		expect(routes?.nodes.filter((item) => item.kind === "jev")).toHaveLength(2);
-		saveGraph(graph.nodes, graph.edges);
+		importGraphFixture(graph.nodes, graph.edges);
 		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
 			routes,
 		);
@@ -295,7 +300,7 @@ describe("editable chatflow graph", () => {
 			variables: ["plan"],
 			reasoningEffort: "medium",
 		});
-		saveGraph(nodes, edges);
+		importGraphFixture(nodes, edges);
 		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
 			routes,
 		);
@@ -432,7 +437,7 @@ describe("editable chatflow graph", () => {
 		});
 		expect(nodeStepLabels(nodes, edges).get("first")).toBe("02 / MODEL");
 		expect(nodeStepLabels(nodes, edges).get("final")).toBe("04 / OUTPUT");
-		saveGraph(nodes, edges);
+		importGraphFixture(nodes, edges);
 		expect(
 			readGraph().nodes.find((item) => item.id === "first")?.data.prompt,
 		).toBe("Write a draft");
@@ -526,7 +531,7 @@ describe("editable chatflow graph", () => {
 		expect(routes?.nodes.find((item) => item.id === "judge")).toMatchObject({
 			maxRepeats: 2,
 		});
-		saveGraph(nodes, edges);
+		importGraphFixture(nodes, edges);
 		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
 			routes,
 		);
@@ -610,12 +615,12 @@ describe("editable chatflow graph", () => {
 	});
 
 	test("restores the initial graph when Start is missing and rejects malformed nodes", () => {
-		saveGraph([], []);
+		stored.set("router:graph:v3", JSON.stringify({ nodes: [], edges: [] }));
 		const initial = readGraph();
 		expect(initial.nodes.map((item) => item.id)).toEqual(["input", "jev"]);
 		expect(initial.edges).toHaveLength(1);
 		expect(routesFromGraph(initial.nodes, initial.edges)).toBeNull();
-		saveGraph(initial.nodes, initial.edges);
+		importGraphFixture(initial.nodes, initial.edges);
 		expect(readGraph().nodes[1]?.data.question).toEqual(
 			defaultJevQuestion("choice"),
 		);
@@ -650,8 +655,8 @@ describe("editable chatflow graph", () => {
 			}),
 		);
 		const graph = readGraph();
-		expect(graph.nodes.map((item) => item.id)).toEqual(["input", "model"]);
-		expect(graph.edges.map((item) => item.id)).toEqual(["valid"]);
-		expect(routesFromGraph(graph.nodes, graph.edges)?.kind).toBe("workflow");
+		expect(graph.nodes.map((item) => item.id)).toEqual(["input", "jev"]);
+		expect(graph.edges).toHaveLength(1);
+		expect(routesFromGraph(graph.nodes, graph.edges)).toBeNull();
 	});
 });

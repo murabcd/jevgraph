@@ -124,3 +124,38 @@ describe("chatflow API", () => {
 		expect(response.status).toBe(400);
 	});
 });
+
+test("configured persistence rejects missing authentication before touching providers", async () => {
+	let calls = 0;
+	const response = await handleApi(
+		new Request("http://localhost/api/route", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				messages: [{ role: "user", content: "Здравствуйте" }],
+				routes: {
+					kind: "workflow",
+					nodes: [
+						{ id: "input", kind: "input", fields: [] },
+						{
+							id: "model",
+							kind: "model",
+							provider: "google",
+							model: "gemini-3.8-flash",
+							maxOutputTokens: 100,
+						},
+					],
+					edges: [{ id: "entry", source: "input", target: "model" }],
+				},
+			}),
+		}),
+		{ GOOGLE_GENERATIVE_AI_API_KEY: "test" },
+		async () => {
+			calls++;
+			throw new Error("Should not call");
+		},
+		"https://example.convex.cloud",
+	);
+	expect(response.status).toBe(401);
+	expect(calls).toBe(0);
+});

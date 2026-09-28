@@ -2,7 +2,7 @@
 
 Model routing compares approved models by projected cost and observed cache evidence. [[context]] prepares sources, [[routing]] executes, and [[chat]] scopes session reuse.
 
-No database or AI Gateway is used.
+Convex stores reusable summaries through [[persistence]]. Provider calls use direct AI SDK packages.
 
 ## Model planning
 
@@ -24,16 +24,18 @@ For OpenAI, automatic routing explicitly controls prompt cache behavior using th
 
 Gemini uses its implicit cache; no explicit cache object or paid storage is created. A cold prefix receives no assumed discount. A prefix above the estimated 4,096-token threshold can receive a projected discount only after reported cache reads for the same model/settings/content. Five-minute evidence is a conservative local heuristic, not a provider TTL guarantee. Actual provider hits or misses are always recorded independently of the forecast. See the official [OpenAI cache guide](https://developers.openai.com/api/docs/guides/prompt-caching) and [Gemini cache guide](https://ai.google.dev/gemini-api/docs/generate-content/caching).
 
-## Temporary session storage
+## Optimization storage
 
-The server retains bounded optimization records per session and account, without persistent conversations.
+The server retains bounded optimization records per conversation and account; Convex additionally stores reusable summaries.
 
-[[server/session-memory.ts]] owns the bounded in-process pool; [[src/chat/use-route-chat.ts]] sends an in-memory session UUID and rotates it when chat is cleared. Session scope also includes a hash of server credentials, so different server accounts cannot share summaries or prefix evidence. API callers omitting a session ID get isolated per-request storage. The pool retains at most sixteen sessions with a 30-minute inactivity TTL. Each retains at most 256 summaries and 500,000 summary characters, sixteen pending generations, and 128 prefix observations. Reload, clearing chat, eviction, TTL, or server restart can lose reuse. Cache entries are temporary optimization data, not a persistent transcript or customer profile.
+[[server/session-memory.ts]] owns the bounded in-process pool, scoped by the persisted conversation ID plus a SHA-256 hash of server credentials. Each of sixteen sessions retains at most 256 summaries and 500,000 summary characters, sixteen pending generations, and 128 prefix observations, with a 30-minute inactivity TTL. Standalone engine tests can omit persistence and use an isolated request/session ID; the configured application API requires an authenticated Convex conversation.
 
-The implementation has no database dependency. A future persistent store must preserve content identity, session/account isolation, invalidation, bounded work, and expiry; realtime synchronization alone does not establish provider-cache validity.
+An optional typed SummaryStore capability retrieves or stores completed summaries in [[convex/summaries.ts]] through [[server/convex-persistence.ts]]. Workspace ownership, credential hash, and content/version identity prevent cross-owner or stale reuse. Persistent summaries expire after 30 days and are capped at 256 per workspace; hourly cleanup drains expired entries in batches. Failed retrieval/generation/persistence retains full source rather than using an unconfirmed summary. Simultaneous calls within one server session share a pending promise; separate server processes can independently generate the same summary.
+
+Reload and server restart retain durable summary reuse, but provider-cache evidence remains bounded server memory. Realtime database synchronization never establishes provider-cache validity. Persistent summaries are compression artifacts, not semantic retrieval or long-term customer memory.
 
 ## Settings and observation
 
 Node settings opt into automation; inspection explains the chosen provider and context.
 
-[[src/flow/model-routing-fields.tsx]] exposes the cost-routing toggle, bordered checked allowed-model rows, expected output, and expected reuse count. [[src/flow/context-policy-fields.tsx]] exposes automatic context and adequacy probability; automatic document bindings use the same checked rows as Start variables. [[src/flow/model-plan-details.tsx]] shows candidate exclusions, estimated costs, cache mode, and preparation costs in run inspection. Settings save or cancel together with the node and persist with graph configuration; plans and measurements remain turn-local.
+[[src/flow/model-routing-fields.tsx]] exposes the cost-routing toggle, bordered checked allowed-model rows, expected output, and expected reuse count. [[src/flow/context-policy-fields.tsx]] exposes automatic context and adequacy probability; automatic document bindings use the same checked rows as Start variables. [[src/flow/model-plan-details.tsx]] shows candidate exclusions, estimated costs, cache mode, and preparation costs in run inspection. Settings save or cancel together with the node and persist with graph configuration; plans and measurements are retained with completed turns.

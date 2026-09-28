@@ -34,7 +34,7 @@ import {
 } from "./model-planner.ts";
 import { type ContextProviders, prepareNodeContext } from "./node-context.ts";
 import { ProviderLedger } from "./provider-ledger.ts";
-import { SessionMemory } from "./session-memory.ts";
+import { SessionMemory, type SummaryStore } from "./session-memory.ts";
 import { formattedUpstreamOutputs } from "./upstream-context.ts";
 
 const MAX_TRACE_OUTPUT = 4000;
@@ -84,6 +84,7 @@ type Execution = {
 	documents?: ContextDocument[];
 	contextProviders?: ContextProviders;
 	memory?: SessionMemory;
+	summaryStore?: SummaryStore;
 	availableModels?: ReadonlySet<string>;
 	evaluate: (
 		nodeId: string,
@@ -171,6 +172,7 @@ export async function executeWorkflow({
 	documents: suppliedDocuments,
 	contextProviders,
 	memory = new SessionMemory(),
+	summaryStore,
 	availableModels = new Set(textModels.map((model) => model.id)),
 	evaluate,
 	runModel,
@@ -240,7 +242,14 @@ export async function executeWorkflow({
 	) => {
 		const prepared = await prepareNodeContext(
 			{ node, callId, messages, inputs, documents, variables: startVariables },
-			{ memory, availableModels, ledger, providers: contextProviders, signal },
+			{
+				memory,
+				summaryStore,
+				availableModels,
+				ledger,
+				providers: contextProviders,
+				signal,
+			},
 		);
 		contexts.push(prepared.trace);
 		onProgress(trace());

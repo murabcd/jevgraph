@@ -8,3 +8,5 @@ This graph describes the app's runtime boundaries and the contracts shared by ro
 - [[chat]] — conversation state, stream consumption, and composer behavior
 - [[context]] — node-specific context selection, document representations, and relevance
 - [[optimization]] — automatic model choice, provider cache projections, and temporary session storage
+
+- [[persistence]] — owner-scoped Convex storage, realtime saves, durable chats, and summary reuse

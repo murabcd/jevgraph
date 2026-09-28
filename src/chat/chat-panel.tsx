@@ -1,5 +1,7 @@
-import { ArrowUp, CircleAlert, Minus, Trash2, Zap } from "lucide-react";
+import { ArrowUp, CircleAlert, Minus, Plus, Zap } from "lucide-react";
+import type { ComponentProps } from "react";
 import { type KeyboardEvent, useRef } from "react";
+import { ChatHistoryMenu } from "@/chat/chat-history-menu";
 import { ChatMessageItem } from "@/chat/chat-message-item";
 import type { ChatTurn } from "@/chat/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -55,6 +57,9 @@ export type ChatPanelProps = {
 	statusUnavailable: boolean;
 	onSend: () => void;
 	onClear: () => void;
+	history: ComponentProps<typeof ChatHistoryMenu>["history"];
+	currentConversationId: ComponentProps<typeof ChatHistoryMenu>["currentId"];
+	onOpenConversation: ComponentProps<typeof ChatHistoryMenu>["onOpen"];
 };
 
 function KeyStatusNotice({
@@ -115,6 +120,9 @@ export function ChatPanel({
 	statusUnavailable,
 	onSend,
 	onClear,
+	history,
+	currentConversationId,
+	onOpenConversation,
 }: ChatPanelProps) {
 	const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -144,19 +152,25 @@ export function ChatPanel({
 			<PopoverHeader className="flex-row items-center justify-between p-3">
 				<PopoverTitle>Chat</PopoverTitle>
 				<div className="flex items-center gap-1">
+					<ChatHistoryMenu
+						history={history}
+						currentId={currentConversationId}
+						disabled={running}
+						onOpen={onOpenConversation}
+					/>
 					<Tooltip>
 						<TooltipTrigger render={<span className="inline-flex" />}>
 							<Button
 								variant="ghost"
 								size="icon-sm"
-								aria-label="Clear conversation"
+								aria-label="New conversation"
 								disabled={messages.length === 0 || running}
 								onClick={onClear}
 							>
-								<Trash2 />
+								<Plus />
 							</Button>
 						</TooltipTrigger>
-						<TooltipContent>Clear conversation</TooltipContent>
+						<TooltipContent>New conversation</TooltipContent>
 					</Tooltip>
 					<Tooltip>
 						<TooltipTrigger

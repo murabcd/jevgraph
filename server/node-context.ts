@@ -22,7 +22,7 @@ import {
 } from "./context.ts";
 import { projectModelCost } from "./model-planner.ts";
 import type { ProviderLedger } from "./provider-ledger.ts";
-import type { SessionMemory } from "./session-memory.ts";
+import type { SessionMemory, SummaryStore } from "./session-memory.ts";
 
 export type ContextProviders = {
 	filter?: ContextFilter;
@@ -51,12 +51,14 @@ export function prepareNodeContext(
 	},
 	{
 		memory,
+		summaryStore,
 		availableModels,
 		ledger,
 		providers = {},
 		signal,
 	}: {
 		memory: SessionMemory;
+		summaryStore?: SummaryStore;
 		availableModels: ReadonlySet<string>;
 		ledger: ProviderLedger;
 		providers?: ContextProviders;
@@ -90,6 +92,7 @@ export function prepareNodeContext(
 			? (request) =>
 					chooseContextRepresentations(request, {
 						memory,
+						summaryStore,
 						signal,
 						summarize: (summary) =>
 							ledger.run(

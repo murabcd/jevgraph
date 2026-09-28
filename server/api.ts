@@ -26,6 +26,7 @@ import {
 	filterContext,
 	summarizeContext,
 } from "./context-providers.ts";
+import { ConvexPersistence } from "./convex-persistence.ts";
 import { modelPrompt } from "./model-prompt.ts";
 import { emitStartTiming, measureNode } from "./node-timing.ts";
 import {
@@ -43,6 +44,7 @@ import {
 	contentFingerprint,
 	type SessionMemory,
 	SessionMemoryPool,
+	type SummaryStore,
 } from "./session-memory.ts";
 import { executeWorkflow, type WorkflowModelRequest } from "./workflow.ts";
 
@@ -55,6 +57,7 @@ type RouteExecution = {
 	providerFetch?: ProviderFetch;
 	keys: ProviderKeys;
 	memory: SessionMemory;
+	summaryStore?: SummaryStore;
 	signal: AbortSignal;
 	emit: (event: RouteStreamEvent) => void;
 };
@@ -176,11 +179,12 @@ async function executeRoute(
 		providerFetch,
 		keys,
 		memory,
+		summaryStore,
 		signal,
 		emit,
 	}: RouteExecution,
 	routes: WorkflowRoutes,
-): Promise<void> {
+) {
 	const start = performance.now();
 	emitStartTiming(emit);
 	const response = await executeWorkflow({
@@ -189,6 +193,7 @@ async function executeRoute(
 		metadata,
 		documents,
 		memory,
+		summaryStore,
 		availableModels: new Set(
 			textModels
 				.filter((model) =>
@@ -247,16 +252,14 @@ async function executeRoute(
 		onProgress: (trace) => emit({ type: "progress", trace }),
 		signal,
 	});
-	emit({
-		type: "done",
-		route: { ...response, latencyMs: Math.round(performance.now() - start) },
-	});
+	return { ...response, latencyMs: Math.round(performance.now() - start) };
 }
 
 export async function handleApi(
 	request: Request,
 	keys: ProviderKeys,
 	providerFetch?: ProviderFetch,
+	convexUrl?: string,
 ): Promise<Response> {
 	const path = new URL(request.url).pathname;
 	if (request.method === "GET" && path === "/api/status") {
@@ -273,7 +276,36 @@ export async function handleApi(
 		const bodyText = await request.text();
 		if (new TextEncoder().encode(bodyText).byteLength > MAX_REQUEST_BYTES)
 			return Response.json({ error: "Request is too large" }, { status: 413 });
-		const input = routeRequestSchema.parse(JSON.parse(bodyText));
+		const input = routeRequestSchema
+			.safeExtend({
+				conversationId: z.string().max(100).optional(),
+				requestId: z.string().uuid().optional(),
+			})
+			.parse(JSON.parse(bodyText));
+		const token = request.headers.get("Authorization")?.replace(/^Bearer /, "");
+		if (convexUrl && (!token || !input.conversationId || !input.requestId))
+			return Response.json(
+				{ error: "Authenticated conversation required" },
+				{ status: 401 },
+			);
+		const persistence =
+			convexUrl && token ? new ConvexPersistence(convexUrl, token) : undefined;
+		const saved =
+			persistence && input.conversationId && input.requestId
+				? await persistence.begin({
+						conversationId: input.conversationId,
+						requestId: input.requestId,
+						question: input.messages[input.messages.length - 1].content,
+						routes: input.routes,
+					})
+				: undefined;
+		const credentialScope = contentFingerprint(
+			JSON.stringify([
+				keys.TYPESAFE_API_KEY,
+				keys.OPENAI_API_KEY,
+				keys.GOOGLE_GENERATIVE_AI_API_KEY,
+			]),
+		);
 		const encoder = new TextEncoder();
 		const cancellation = new AbortController();
 		const signal = AbortSignal.any([
@@ -282,15 +314,21 @@ export async function handleApi(
 			AbortSignal.timeout(120000),
 		]);
 		let closed = false;
+		let partialText = "";
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const emit = (event: RouteStreamEvent) => {
+					if (event.type === "delta") partialText += event.text;
 					if (!closed)
 						controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 				};
 				void executeRoute(
 					{
 						messages: input.messages,
+						summaryStore:
+							persistence && saved
+								? persistence.summaryStore(saved.workspaceId, credentialScope)
+								: undefined,
 						metadata: input.metadata ?? {},
 						documents: input.documents,
 						providerFetch,
@@ -298,8 +336,9 @@ export async function handleApi(
 						memory: sessionMemories.get(
 							contentFingerprint(
 								JSON.stringify({
-									session: input.sessionId ?? randomUUID(),
-									keys,
+									session:
+										saved?.conversationId ?? input.sessionId ?? randomUUID(),
+									credentialScope,
 								}),
 							),
 						),
@@ -308,12 +347,22 @@ export async function handleApi(
 					},
 					input.routes,
 				)
-					.catch((error) =>
-						emit({
-							type: "error",
-							error: error instanceof Error ? error.message : "Chatflow failed",
-						}),
-					)
+
+					.then(async (result) => {
+						if (persistence && saved)
+							await persistence.finish(saved.runId, result);
+						emit({ type: "done", route: result });
+					})
+					.catch(async (error) => {
+						const message =
+							error instanceof Error ? error.message : "Chatflow failed";
+						if (persistence && saved)
+							await persistence
+								.fail(saved.runId, partialText, message, signal.aborted)
+								// Lease expiry will release the run if the database is unavailable.
+								.catch(() => {});
+						emit({ type: "error", error: message });
+					})
 					.finally(() => {
 						if (!closed) {
 							closed = true;

@@ -14,21 +14,28 @@ import {
 	defaultNodeData,
 	duplicateModelNode,
 	type FlowNode,
+	graphSnapshot,
 	hasFallbackConnection,
 	type JevNodeSettings,
 	type ModelNodeSettings,
 	openPosition,
 	reachesNode,
-	readGraph,
 	removeGraphNode,
+	restoreGraph,
 	retainQuestionEdges,
 	routesFromGraph,
-	saveGraph,
 } from "@/flow/graph";
 import type { ContextDocument } from "@/lib/context";
+import {
+	MAX_GRAPH_EDGES,
+	MAX_GRAPH_NODES,
+	parseGraphJson,
+} from "@/lib/graph-snapshot";
 import { questionOutputs } from "@/lib/jev-question";
 import { providerForModel } from "@/lib/models";
 import type { StartField } from "@/lib/routing";
+import { useSavedGraph } from "@/storage/use-saved-graph";
+import type { Workspace } from "@/storage/workspace-gate";
 
 type PendingConnection = {
 	source: string;
@@ -37,9 +44,14 @@ type PendingConnection = {
 	measured?: { width: number; height: number };
 };
 
-export function useRoutingGraph() {
+export function useRoutingGraph(workspace: Workspace) {
+	const storage = useSavedGraph(workspace);
+	const source = storage.remote;
 	const { screenToFlowPosition } = useReactFlow();
-	const [initialGraph] = useState(readGraph);
+	const [initialGraph] = useState(() =>
+		restoreGraph(parseGraphJson(source.graph)),
+	);
+	const [sourceRevision, setSourceRevision] = useState(source.revision);
 	const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(
 		initialGraph.nodes,
 	);
@@ -49,8 +61,16 @@ export function useRoutingGraph() {
 	const [pendingConnection, setPendingConnection] =
 		useState<PendingConnection | null>(null);
 	useEffect(() => {
-		saveGraph(nodes, graphEdges);
-	}, [nodes, graphEdges]);
+		if (source.revision === sourceRevision)
+			storage.save(JSON.stringify(graphSnapshot(nodes, graphEdges)));
+	}, [nodes, graphEdges, storage.save, source.revision, sourceRevision]);
+
+	if (source.revision !== sourceRevision) {
+		const next = restoreGraph(parseGraphJson(source.graph));
+		setNodes(next.nodes);
+		setGraphEdges(next.edges);
+		setSourceRevision(source.revision);
+	}
 
 	const onModelSettingsChange = useCallback(
 		(nodeId: string, settings: ModelNodeSettings) => {
@@ -167,6 +187,7 @@ export function useRoutingGraph() {
 	const createNode = useCallback(
 		(kind: CreatableNodeKind, position: { x: number; y: number }) => {
 			setNodes((current) => {
+				if (current.length >= MAX_GRAPH_NODES) return current;
 				const id =
 					kind === "jev" && !current.some((node) => node.id === "jev")
 						? "jev"
@@ -316,7 +337,12 @@ export function useRoutingGraph() {
 
 	const createPendingNode = useCallback(
 		(kind: CreatableNodeKind) => {
-			if (!pendingConnection) return;
+			if (
+				!pendingConnection ||
+				nodes.length >= MAX_GRAPH_NODES ||
+				graphEdges.length >= MAX_GRAPH_EDGES
+			)
+				return;
 			const { source, branch, position } = pendingConnection;
 			if (source === "input") {
 				if (kind !== "jev" && kind !== "model") return;
@@ -383,6 +409,7 @@ export function useRoutingGraph() {
 	);
 
 	return {
+		storage,
 		nodes,
 		graphEdges,
 		onNodesChange,

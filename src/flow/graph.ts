@@ -1,46 +1,38 @@
 import type { Edge, Node } from "@xyflow/react";
-import { z } from "zod";
 import { jevRoleLabels } from "@/flow/node-meta";
-import {
-	type ContextDocument,
-	type ContextPolicy,
-	contextDocumentsSchema,
-	contextPolicySchema,
-	type NodeContextTrace,
+import type {
+	ContextDocument,
+	ContextPolicy,
+	NodeContextTrace,
 } from "@/lib/context";
+import {
+	type GraphSnapshot,
+	graphSnapshotSchema,
+	MAX_GRAPH_EDGES,
+	MAX_GRAPH_NODES,
+	parseGraphJson,
+} from "@/lib/graph-snapshot";
 import {
 	defaultJevQuestion,
 	type JevQuestion,
-	jevQuestionSchema,
 	questionOutputs,
 } from "@/lib/jev-question";
-import {
-	type ModelPlan,
-	type ModelRouting,
-	modelRoutingSchema,
-} from "@/lib/model-routing";
+import type { ModelPlan, ModelRouting } from "@/lib/model-routing";
 import type { ReasoningEffort } from "@/lib/models";
 import type { NodeTimer } from "@/lib/node-timer";
 import {
-	confidenceThresholdSchema,
 	DEFAULT_GOOGLE_MODEL,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	DEFAULT_OPENAI_MODEL,
-	MAX_PROMPT_LENGTH,
 	type ModelPromptMessage,
-	maxOutputTokensSchema,
-	modelIdSchema,
-	modelPromptMessagesSchema,
 	modelReasoningEffort,
-	reasoningEffortSchema,
 	type StartField,
-	startFieldsSchema,
 	type WorkflowDecision,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
 } from "@/lib/routing";
-import { type Pricing, type ProviderCall, pricingSchema } from "@/lib/usage";
+import type { Pricing, ProviderCall } from "@/lib/usage";
 
 export type NodeKind = "input" | "jev" | "google" | "openai";
 export type CreatableNodeKind = "jev" | "model";
@@ -145,7 +137,7 @@ export function defaultNodeData(
 		reasoningEffort,
 	};
 }
-const startingNodes: FlowNode[] = [
+export const startingNodes: FlowNode[] = [
 	{
 		id: "input",
 		type: "route",
@@ -160,7 +152,7 @@ const startingNodes: FlowNode[] = [
 	},
 ];
 
-const startingEdges: Edge[] = [
+export const startingEdges: Edge[] = [
 	{
 		id: "input-jev",
 		source: "input",
@@ -170,40 +162,6 @@ const startingEdges: Edge[] = [
 ];
 
 const graphStorageKey = "router:graph:v3";
-
-const persistedNodeSchema = z.object({
-	id: z.string(),
-	position: z.object({ x: z.number().finite(), y: z.number().finite() }),
-	data: z.discriminatedUnion("kind", [
-		z.object({
-			kind: z.literal("input"),
-			fields: startFieldsSchema,
-			documents: contextDocumentsSchema.optional(),
-		}),
-		z.object({
-			kind: z.literal("jev"),
-			question: jevQuestionSchema,
-			confidenceThreshold: confidenceThresholdSchema,
-			fallbackOutputId: z.string().optional(),
-			maxRepeats: z.number().int().min(1).max(5).optional(),
-			variables: z.array(z.string()).optional(),
-			context: contextPolicySchema.optional(),
-			pricing: pricingSchema.optional(),
-		}),
-		z.object({
-			kind: z.enum(["google", "openai"]),
-			routing: modelRoutingSchema.optional(),
-			model: modelIdSchema,
-			maxOutputTokens: maxOutputTokensSchema,
-			reasoningEffort: reasoningEffortSchema.optional(),
-			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
-			promptMessages: modelPromptMessagesSchema.optional(),
-			variables: z.array(z.string()).optional(),
-			context: contextPolicySchema.optional(),
-			pricing: pricingSchema.optional(),
-		}),
-	]),
-});
 
 function persistedNodeData(data: FlowNode["data"]) {
 	if (data.kind === "input")
@@ -238,6 +196,7 @@ export function duplicateModelNode(
 	nodeId: string,
 	id: string,
 ): FlowNode[] {
+	if (nodes.length >= MAX_GRAPH_NODES) return nodes;
 	const original = nodes.find((node) => node.id === nodeId);
 	if (
 		!original ||
@@ -255,19 +214,6 @@ export function duplicateModelNode(
 		},
 	];
 }
-
-const persistedEdgeSchema = z.object({
-	id: z.string(),
-	source: z.string(),
-	sourceHandle: z.string().nullish(),
-	target: z.string(),
-	data: z.object({ repeat: z.boolean() }).optional(),
-});
-
-const persistedGraphSchema = z.object({
-	nodes: z.array(z.unknown()),
-	edges: z.array(z.unknown()),
-});
 
 export function reachesNode(
 	start: string,
@@ -295,6 +241,7 @@ export function canConnectNodes(
 	nodes: FlowNode[],
 	edges: Edge[] = [],
 ) {
+	if (edges.length >= MAX_GRAPH_EDGES) return false;
 	const source = nodes.find((node) => node.id === connection.source);
 	const target = nodes.find((node) => node.id === connection.target);
 	if (!source || !target || source.id === target.id) return false;
@@ -372,63 +319,49 @@ export function hasFallbackConnection(
 	);
 }
 
-export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
-	try {
-		const savedGraph = persistedGraphSchema.safeParse(
-			JSON.parse(localStorage.getItem(graphStorageKey) ?? "null"),
-		);
-		if (savedGraph.success) {
-			const nodes: FlowNode[] = savedGraph.data.nodes.flatMap((value) => {
-				const parsed = persistedNodeSchema.safeParse(value);
-				return parsed.success
-					? [
-							{
-								...parsed.data,
-								type: "route" as const,
-								data: { ...parsed.data.data, active: false },
-							},
-						]
-					: [];
-			});
-			const ids = new Set(nodes.map((node) => node.id));
-			const edges: Edge[] = savedGraph.data.edges.flatMap((value) => {
-				const parsed = persistedEdgeSchema.safeParse(value);
-				return parsed.success &&
-					ids.has(parsed.data.source) &&
-					ids.has(parsed.data.target)
-					? [{ ...parsed.data, type: "default" as const }]
-					: [];
-			});
-			return nodes.some(
-				(node) => node.id === "input" && node.data.kind === "input",
-			)
-				? { nodes, edges }
-				: { nodes: startingNodes, edges: startingEdges };
-		}
-		return { nodes: startingNodes, edges: startingEdges };
-	} catch {
-		return { nodes: startingNodes, edges: startingEdges };
-	}
+export function graphSnapshot(nodes: FlowNode[], edges: Edge[]): GraphSnapshot {
+	return graphSnapshotSchema.parse({
+		nodes: nodes.map((node) => ({
+			id: node.id,
+			position: node.position,
+			data: persistedNodeData(node.data),
+		})),
+		edges: edges.map((edge) => ({
+			id: edge.id,
+			source: edge.source,
+			sourceHandle: edge.sourceHandle,
+			target: edge.target,
+			data: edge.data?.repeat ? { repeat: true } : undefined,
+		})),
+	});
 }
 
-export function saveGraph(nodes: FlowNode[], edges: Edge[]) {
-	localStorage.setItem(
-		graphStorageKey,
-		JSON.stringify({
-			nodes: nodes.map((node) => ({
-				id: node.id,
-				position: node.position,
-				data: persistedNodeData(node.data),
-			})),
-			edges: edges.map((edge) => ({
-				id: edge.id,
-				source: edge.source,
-				sourceHandle: edge.sourceHandle,
-				target: edge.target,
-				data: edge.data?.repeat ? { repeat: true } : undefined,
-			})),
-		}),
-	);
+export function restoreGraph(snapshot: GraphSnapshot): {
+	nodes: FlowNode[];
+	edges: Edge[];
+} {
+	return {
+		nodes: snapshot.nodes.map((node) => ({
+			...node,
+			type: "route",
+			data: { ...node.data, active: false },
+		})),
+		edges: snapshot.edges.map((edge) => ({ ...edge, type: "default" })),
+	};
+}
+
+/** One-time import of the existing local canvas into the user's empty workspace. */
+export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
+	try {
+		const json = localStorage.getItem(graphStorageKey);
+		if (json) return restoreGraph(parseGraphJson(json));
+	} catch {
+		/* An invalid local draft is never written to the database. */
+	}
+	return { nodes: startingNodes, edges: startingEdges };
+}
+export function removeImportedGraph() {
+	localStorage.removeItem(graphStorageKey);
 }
 
 export function removeGraphNode(

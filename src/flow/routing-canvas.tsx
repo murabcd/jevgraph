@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MAX_GRAPH_NODES } from "@/lib/graph-snapshot";
 import type { NodeTimer } from "@/lib/node-timer";
 import "@xyflow/react/dist/style.css";
 import { useTheme } from "@/components/theme-provider";
@@ -235,7 +236,7 @@ export function RoutingCanvas({
 				<CanvasControls
 					available={availableNodeTypes}
 					onAddNode={addNodeAtCenter}
-					addingDisabled={running}
+					addingDisabled={running || nodes.length >= MAX_GRAPH_NODES}
 				/>
 			</ReactFlow>
 			{panelNode?.type === "route" && activePanel && (

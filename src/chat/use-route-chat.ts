@@ -1,5 +1,7 @@
+import { useAuthToken } from "@convex-dev/auth/react";
 import { useCallback, useMemo, useState } from "react";
 import type { ChatTurn } from "@/chat/types";
+import { useSavedConversation } from "@/chat/use-saved-conversation";
 import {
 	applyNodeTimerEvent,
 	interruptNodeTimers,
@@ -13,14 +15,20 @@ import type {
 	RouteTrace,
 	WorkflowRoutes,
 } from "@/lib/routing";
+import type { Workspace } from "@/storage/workspace-gate";
+import type { Id } from "../../convex/_generated/dataModel";
+
+const EMPTY_TURNS: ChatTurn[] = [];
 
 export function useRouteChat(
 	routes: WorkflowRoutes | null,
 	onRequestStarted: () => void,
+	workspace: Workspace,
+	flushGraph: () => Promise<void>,
 ) {
-	const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+	const token = useAuthToken();
 	const [draft, setDraft] = useState("");
-	const [messages, setMessages] = useState<ChatTurn[]>([]);
+	const [liveMessages, setMessages] = useState<ChatTurn[]>([]);
 	const [result, setResult] = useState<RouteResult | null>(null);
 	const [trace, setTrace] = useState<RouteTrace | null>(null);
 	const [resultRouteKey, setResultRouteKey] = useState<string | null>(null);
@@ -31,10 +39,21 @@ export function useRouteChat(
 		() => (routes ? JSON.stringify(routes) : null),
 		[routes],
 	);
+	const saved = useSavedConversation(workspace, routeKey);
+	const remoteRunning = saved.running;
+	const [liveConversationId, setLiveConversationId] = useState(
+		workspace.conversationId,
+	);
+	const messages: ChatTurn[] = running
+		? liveMessages
+		: (saved.messages ??
+			(liveConversationId === workspace.conversationId
+				? liveMessages
+				: EMPTY_TURNS));
 
 	const run = useCallback(async () => {
 		const question = draft.trim();
-		if (!question || running) return;
+		if (!question || running || remoteRunning) return;
 		if (!routes) {
 			setError("Finish configuring the chatflow before sending a message.");
 			return;
@@ -46,10 +65,11 @@ export function useRouteChat(
 				.map(({ role, content }) => ({ role, content })),
 			{ role: "user", content: question },
 		];
-		const assistantId = crypto.randomUUID();
-		setMessages((previous) => [
-			...previous,
-			{ id: crypto.randomUUID(), role: "user", content: question },
+		const requestId = crypto.randomUUID();
+		const assistantId = `${requestId}:assistant`;
+		setMessages([
+			...messages,
+			{ id: `${requestId}:user`, role: "user", content: question },
 			{
 				id: assistantId,
 				role: "assistant",
@@ -64,13 +84,20 @@ export function useRouteChat(
 		setTrace(null);
 		setNodeTimings({});
 		setResultRouteKey(routeKey);
+		setLiveConversationId(workspace.conversationId);
 		onRequestStarted();
 		try {
+			await flushGraph();
+			if (!token) throw new Error("Your session is not connected");
 			const response = await fetch("/api/route", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
 				body: JSON.stringify({
-					sessionId,
+					conversationId: workspace.conversationId,
+					requestId,
 					messages: history,
 					routes,
 				}),
@@ -148,10 +175,20 @@ export function useRouteChat(
 			setNodeTimings((current) => interruptNodeTimers(current, stoppedAt));
 			setRunning(false);
 		}
-	}, [sessionId, draft, messages, routes, routeKey, running, onRequestStarted]);
+	}, [
+		draft,
+		messages,
+		routes,
+		routeKey,
+		running,
+		remoteRunning,
+		onRequestStarted,
+		token,
+		workspace.conversationId,
+		flushGraph,
+	]);
 
-	const clearChat = () => {
-		setSessionId(crypto.randomUUID());
+	const resetChat = () => {
 		setMessages([]);
 		setResult(null);
 		setTrace(null);
@@ -159,6 +196,20 @@ export function useRouteChat(
 		setResultRouteKey(null);
 		setError("");
 		setDraft("");
+	};
+	const changeConversation = async (conversationId?: Id<"conversations">) => {
+		if (running || remoteRunning) return;
+		try {
+			if (conversationId) await saved.open(conversationId);
+			else await saved.start();
+			resetChat();
+		} catch (caught) {
+			setError(
+				caught instanceof Error
+					? caught.message
+					: "Could not open the conversation",
+			);
+		}
 	};
 
 	const clearResultForNode = (nodeId: string) => {
@@ -175,17 +226,24 @@ export function useRouteChat(
 		);
 	};
 
+	const hasLiveResult =
+		routeKey === resultRouteKey &&
+		liveConversationId === workspace.conversationId;
 	return {
 		draft,
 		setDraft,
 		messages,
-		result: routeKey === resultRouteKey ? result : null,
-		trace: routeKey === resultRouteKey ? trace : null,
-		nodeTimings: routeKey === resultRouteKey ? nodeTimings : {},
-		error,
-		running,
+		result: hasLiveResult ? result : saved.result,
+		trace: hasLiveResult ? trace : saved.result,
+		nodeTimings: hasLiveResult ? nodeTimings : {},
+		error:
+			(liveConversationId === workspace.conversationId ? error : "") ||
+			saved.error,
+		running: running || remoteRunning,
 		run,
-		clearChat,
+		clearChat: () => changeConversation(),
+		openConversation: (id: Id<"conversations">) => changeConversation(id),
+		history: saved.history,
 		clearResultForNode,
 	};
 }

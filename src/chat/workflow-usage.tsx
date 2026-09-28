@@ -1,9 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { MessageFooter } from "@/components/ui/message";
-import type { RouteResult } from "@/lib/routing";
+import type { RunFooter } from "@/lib/run-footer";
 import { formatCostUsd } from "@/lib/usage";
 
-export function WorkflowUsage({ route }: { route: RouteResult }) {
+export function WorkflowUsage({ route }: { route: RunFooter }) {
 	return (
 		<MessageFooter className="flex-wrap gap-2 text-xs text-muted-foreground">
 			{route.outcome === "repeat-exhausted" && (

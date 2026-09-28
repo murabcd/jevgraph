@@ -21,6 +21,7 @@ export function PricingFields({
 			{published && (
 				<Button
 					variant="link"
+					nativeButton={false}
 					size="sm"
 					className="h-auto justify-start px-0"
 					render={

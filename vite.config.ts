@@ -34,12 +34,24 @@ async function serveApi(
 					headers.append(key, item);
 				});
 		}
+		const cancellation = new AbortController();
+		res.once("close", () => {
+			if (!res.writableEnded) cancellation.abort();
+		});
 		const request = new Request(`http://localhost${req.url}`, {
 			method: req.method,
+			signal: cancellation.signal,
 			headers,
 			body: req.method === "GET" ? undefined : Buffer.concat(chunks),
 		});
-		const response = await handleApi(request, env);
+		if (!env.VITE_CONVEX_URL)
+			throw new Error("Convex deployment is not configured");
+		const response = await handleApi(
+			request,
+			env,
+			undefined,
+			env.VITE_CONVEX_URL,
+		);
 		res.statusCode = response.status;
 		response.headers.forEach((value, key) => {
 			res.setHeader(key, value);

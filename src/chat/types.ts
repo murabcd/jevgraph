@@ -1,8 +1,9 @@
-import type { ChatMessage, RouteResult } from "@/lib/routing";
+import type { ChatMessage } from "@/lib/routing";
+import type { RunFooter } from "@/lib/run-footer";
 
 export type ChatTurn = ChatMessage & {
 	id: string;
-	route?: RouteResult;
+	route?: RunFooter;
 	streaming?: boolean;
 	failed?: boolean;
 };

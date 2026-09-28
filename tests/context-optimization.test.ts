@@ -222,3 +222,28 @@ test("parallel requests generate a summary once and rejected generations do not 
 		"created",
 	);
 });
+
+test("a fresh process reuses durable summaries without generating or charging again", async () => {
+	const values = new Map<string, typeof summaries>();
+	const store = {
+		get: async (key: string) => values.get(key) ?? null,
+		put: async (key: string, value: typeof summaries) => {
+			values.set(key, value);
+		},
+	};
+	let calls = 0;
+	const create = async () => {
+		calls++;
+		return summaries;
+	};
+	expect(
+		(await new SessionMemory().summarize("content", create, store)).cache,
+	).toBe("created");
+	expect(
+		(await new SessionMemory().summarize("content", create, store)).cache,
+	).toBe("reused");
+	expect(calls).toBe(1);
+	expect(
+		(await new SessionMemory().summarize("changed", create, store)).cache,
+	).toBe("created");
+});

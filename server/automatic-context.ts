@@ -7,7 +7,11 @@ import { DEFAULT_OPENAI_MODEL } from "../src/lib/routing.ts";
 import type { TokenUsage } from "../src/lib/usage.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import type { RelevanceResult } from "./context.ts";
-import { contentFingerprint, type SessionMemory } from "./session-memory.ts";
+import {
+	contentFingerprint,
+	type SessionMemory,
+	type SummaryStore,
+} from "./session-memory.ts";
 
 export type SummaryRequest = { nodeId: string; chunk: ContextChunk };
 export type SummaryResult = {
@@ -44,8 +48,10 @@ export async function chooseContextRepresentations(
 		summarize,
 		assess,
 		signal,
+		summaryStore,
 	}: {
 		memory: SessionMemory;
+		summaryStore?: SummaryStore;
 		summarize: (request: SummaryRequest) => Promise<SummaryResult>;
 		assess: (request: ContextAssessmentRequest) => Promise<RelevanceResult>;
 		signal?: AbortSignal;
@@ -65,6 +71,7 @@ export async function chooseContextRepresentations(
 					signal?.throwIfAborted();
 					return result.summaries;
 				},
+				summaryStore,
 			);
 			return { chunk, summaries: cached.value, cache: cached.cache };
 		} catch {
