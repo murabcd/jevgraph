@@ -6,3 +6,4 @@ This graph describes the app's runtime boundaries and the contracts shared by ro
 - [[routing]] — Jev decisions, AI SDK calls, streaming, and provider failures
 - [[canvas]] — graph connections, model selection, and saved layout
 - [[chat]] — conversation state, stream consumption, and composer behavior
+- [[context]] — node-specific context selection, document representations, and relevance

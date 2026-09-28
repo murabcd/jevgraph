@@ -1,13 +1,14 @@
 import type { NodeOutput } from "../src/lib/routing.ts";
 
-const MAX_UPSTREAM_CONTEXT = 24000;
+export function formattedOutput(output: NodeOutput): string {
+	return `[${output.nodeId} · revision ${output.revision}] ${output.decision ? JSON.stringify(output.decision) : output.text}`;
+}
 
 export function formattedUpstreamOutputs(inputs: NodeOutput[]): string {
 	return inputs
 		.filter((input) => input.text)
-		.map((input) => `[${input.nodeId}] ${input.text}`)
-		.join("\n\n")
-		.slice(0, MAX_UPSTREAM_CONTEXT);
+		.map(formattedOutput)
+		.join("\n\n");
 }
 
 export function upstreamContext(inputs: NodeOutput[]): string {

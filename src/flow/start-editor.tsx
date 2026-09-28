@@ -10,7 +10,9 @@ import {
 	SheetHeader,
 	SheetTitle,
 } from "@/components/ui/sheet";
+import { type ContextDocument, contextDocumentsSchema } from "@/lib/context";
 import { type StartField, startFieldsSchema } from "@/lib/routing";
+import { ContextDocumentsEditor } from "./context-documents-editor";
 import { StartFieldDialog } from "./start-field-dialog";
 import { startFieldTypes } from "./start-field-types";
 
@@ -19,11 +21,13 @@ type FieldRow = { id: string; field: StartField };
 
 export function StartEditor({
 	fields,
+	documents,
 	onSave,
 	onOpenChange,
 }: {
 	fields: StartField[];
-	onSave: (fields: StartField[]) => void;
+	documents: ContextDocument[];
+	onSave: (fields: StartField[], documents: ContextDocument[]) => void;
 	onOpenChange: (open: boolean) => void;
 }) {
 	const [rows, setRows] = useState<FieldRow[]>(() =>
@@ -31,6 +35,7 @@ export function StartEditor({
 	);
 	const [editor, setEditor] = useState<FieldEditor | null>(null);
 	const [error, setError] = useState("");
+	const [documentsDraft, setDocumentsDraft] = useState(documents);
 
 	const save = () => {
 		const parsed = startFieldsSchema.safeParse(rows.map((row) => row.field));
@@ -38,7 +43,14 @@ export function StartEditor({
 			setError(parsed.error.issues[0]?.message ?? "Check the input fields.");
 			return;
 		}
-		onSave(parsed.data);
+		const parsedDocuments = contextDocumentsSchema.safeParse(documentsDraft);
+		if (!parsedDocuments.success) {
+			setError(
+				"Each document needs a name and full text. Keep reference material within 240,000 characters.",
+			);
+			return;
+		}
+		onSave(parsed.data, parsedDocuments.data);
 		onOpenChange(false);
 	};
 
@@ -84,7 +96,7 @@ export function StartEditor({
 									>
 										<button
 											type="button"
-											className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+											className="flex min-w-0 flex-1 items-baseline gap-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 											onClick={() => setEditor({ kind: "edit", index })}
 											aria-label={`Edit field ${field.name}`}
 										>
@@ -126,6 +138,10 @@ export function StartEditor({
 								);
 							})}
 						</div>
+						<ContextDocumentsEditor
+							documents={documentsDraft}
+							onChange={setDocumentsDraft}
+						/>
 						{error && (
 							<p className="text-xs text-destructive" role="alert">
 								{error}

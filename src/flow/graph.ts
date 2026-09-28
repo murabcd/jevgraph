@@ -2,32 +2,40 @@ import type { Edge, Node } from "@xyflow/react";
 import { z } from "zod";
 import { jevRoleLabels } from "@/flow/node-meta";
 import {
+	type ContextDocument,
+	type ContextPolicy,
+	contextDocumentsSchema,
+	contextPolicySchema,
+	type NodeContextTrace,
+} from "@/lib/context";
+import {
 	defaultJevQuestion,
 	type JevQuestion,
 	jevQuestionSchema,
 	questionOutputs,
 } from "@/lib/jev-question";
 import type { ReasoningEffort } from "@/lib/models";
+import type { NodeTimer } from "@/lib/node-timer";
 import {
 	confidenceThresholdSchema,
 	DEFAULT_GOOGLE_MODEL,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	DEFAULT_OPENAI_MODEL,
-	effectiveModelThinking,
 	MAX_PROMPT_LENGTH,
 	type ModelPromptMessage,
 	maxOutputTokensSchema,
 	modelIdSchema,
 	modelPromptMessagesSchema,
-	type NodeTiming,
+	modelReasoningEffort,
 	reasoningEffortSchema,
 	type StartField,
 	startFieldsSchema,
-	thinkingBudgetSchema,
+	type WorkflowDecision,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
 } from "@/lib/routing";
+import { type Pricing, type ProviderCall, pricingSchema } from "@/lib/usage";
 
 export type NodeKind = "input" | "jev" | "google" | "openai";
 export type CreatableNodeKind = "jev" | "model";
@@ -37,10 +45,13 @@ type NodeViewData = {
 	fallbackConnected?: boolean;
 	isBackup?: boolean;
 	decision?: string;
+	decisionDetails?: WorkflowDecision;
+	contexts?: NodeContextTrace[];
+	calls?: ProviderCall[];
 	output?: string;
 	usedBranches?: ReadonlySet<string>;
 	step?: string;
-	timing?: NodeTiming;
+	timing?: NodeTimer;
 	onDuplicateNode?: (nodeId: string) => void;
 	onRemoveNode?: (nodeId: string) => void;
 	editingDisabled?: boolean;
@@ -53,6 +64,7 @@ type NodeData = NodeViewData &
 				kind: "input";
 				prompt?: never;
 				fields: StartField[];
+				documents?: ContextDocument[];
 				question?: never;
 				model?: never;
 		  }
@@ -63,6 +75,8 @@ type NodeData = NodeViewData &
 				fallbackOutputId?: string;
 				maxRepeats?: number;
 				variables?: string[];
+				context?: ContextPolicy;
+				pricing?: Pricing;
 				prompt?: never;
 		  }
 		| {
@@ -71,9 +85,10 @@ type NodeData = NodeViewData &
 				prompt?: string;
 				promptMessages?: ModelPromptMessage[];
 				variables?: string[];
+				context?: ContextPolicy;
+				pricing?: Pricing;
 				maxOutputTokens: number;
 				reasoningEffort?: ReasoningEffort;
-				thinkingBudget?: number;
 				question?: never;
 		  }
 	);
@@ -86,11 +101,13 @@ export type JevNodeSettings = Pick<
 	| "fallbackOutputId"
 	| "variables"
 	| "maxRepeats"
+	| "context"
+	| "pricing"
 >;
 type ModelNodeData = Extract<FlowNode["data"], { kind: "google" | "openai" }>;
 export type ModelNodeSettings = Pick<
 	ModelNodeData,
-	"model" | "maxOutputTokens" | "reasoningEffort" | "thinkingBudget"
+	"model" | "maxOutputTokens" | "reasoningEffort" | "context" | "pricing"
 > &
 	Required<Pick<ModelNodeData, "prompt" | "promptMessages" | "variables">>;
 
@@ -107,16 +124,13 @@ export function defaultNodeData(
 		};
 	const model =
 		provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL;
-	const thinking = effectiveModelThinking(provider, model);
+	const reasoningEffort = modelReasoningEffort(provider, model);
 	return {
 		kind: provider,
 		active: false,
 		model,
 		maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
-		...(thinking?.kind === "effort"
-			? { reasoningEffort: thinking.effort }
-			: {}),
-		...(thinking?.kind === "budget" ? { thinkingBudget: thinking.budget } : {}),
+		reasoningEffort,
 	};
 }
 const startingNodes: FlowNode[] = [
@@ -152,6 +166,7 @@ const persistedNodeSchema = z.object({
 		z.object({
 			kind: z.literal("input"),
 			fields: startFieldsSchema,
+			documents: contextDocumentsSchema.optional(),
 		}),
 		z.object({
 			kind: z.literal("jev"),
@@ -160,22 +175,26 @@ const persistedNodeSchema = z.object({
 			fallbackOutputId: z.string().optional(),
 			maxRepeats: z.number().int().min(1).max(5).optional(),
 			variables: z.array(z.string()).optional(),
+			context: contextPolicySchema.optional(),
+			pricing: pricingSchema.optional(),
 		}),
 		z.object({
 			kind: z.enum(["google", "openai"]),
 			model: modelIdSchema,
 			maxOutputTokens: maxOutputTokensSchema,
 			reasoningEffort: reasoningEffortSchema.optional(),
-			thinkingBudget: thinkingBudgetSchema.optional(),
 			prompt: z.string().max(MAX_PROMPT_LENGTH).optional(),
 			promptMessages: modelPromptMessagesSchema.optional(),
 			variables: z.array(z.string()).optional(),
+			context: contextPolicySchema.optional(),
+			pricing: pricingSchema.optional(),
 		}),
 	]),
 });
 
 function persistedNodeData(data: FlowNode["data"]) {
-	if (data.kind === "input") return { kind: data.kind, fields: data.fields };
+	if (data.kind === "input")
+		return { kind: data.kind, fields: data.fields, documents: data.documents };
 	if (data.kind === "jev")
 		return {
 			kind: data.kind,
@@ -184,17 +203,43 @@ function persistedNodeData(data: FlowNode["data"]) {
 			fallbackOutputId: data.fallbackOutputId,
 			maxRepeats: data.maxRepeats,
 			variables: data.variables,
+			context: data.context,
+			pricing: data.pricing,
 		};
 	return {
 		kind: data.kind,
 		model: data.model,
 		maxOutputTokens: data.maxOutputTokens,
 		reasoningEffort: data.reasoningEffort,
-		thinkingBudget: data.thinkingBudget,
 		prompt: data.prompt,
 		promptMessages: data.promptMessages,
 		variables: data.variables,
+		context: data.context,
+		pricing: data.pricing,
 	};
+}
+
+export function duplicateModelNode(
+	nodes: FlowNode[],
+	nodeId: string,
+	id: string,
+): FlowNode[] {
+	const original = nodes.find((node) => node.id === nodeId);
+	if (
+		!original ||
+		(original.data.kind !== "google" && original.data.kind !== "openai")
+	)
+		return nodes;
+	return [
+		...nodes.map((node) => ({ ...node, selected: false })),
+		{
+			id,
+			type: "route",
+			position: duplicatePosition(original, nodes),
+			selected: true,
+			data: { ...persistedNodeData(original.data), active: false },
+		},
+	];
 }
 
 const persistedEdgeSchema = z.object({
@@ -379,7 +424,24 @@ export function removeGraphNode(
 ) {
 	if (nodeId === "input") return { nodes, edges };
 	return {
-		nodes: nodes.filter((node) => node.id !== nodeId),
+		nodes: nodes
+			.filter((node) => node.id !== nodeId)
+			.map((node) =>
+				node.data.kind !== "input" && node.data.context
+					? {
+							...node,
+							data: {
+								...node.data,
+								context: {
+									...node.data.context,
+									outputNodeIds: node.data.context.outputNodeIds.filter(
+										(id) => id !== nodeId,
+									),
+								},
+							},
+						}
+					: node,
+			),
 		edges: edges.filter(
 			(edge) => edge.source !== nodeId && edge.target !== nodeId,
 		),
@@ -460,12 +522,15 @@ export function routesFromGraph(
 							id: "input" as const,
 							kind: "input" as const,
 							fields: node.data.fields,
+							documents: node.data.documents,
 						};
 					if (node.data.kind === "jev")
 						return {
 							id: node.id,
 							kind: "jev" as const,
 							question: node.data.question,
+							context: node.data.context,
+							pricing: node.data.pricing,
 							confidenceThreshold: node.data.confidenceThreshold,
 							...(node.data.fallbackOutputId
 								? { fallbackOutputId: node.data.fallbackOutputId }
@@ -477,23 +542,20 @@ export function routesFromGraph(
 								? { maxRepeats: node.data.maxRepeats }
 								: {}),
 						};
-					const thinking = effectiveModelThinking(
+					const reasoningEffort = modelReasoningEffort(
 						node.data.kind,
 						node.data.model,
-						node.data,
+						node.data.reasoningEffort,
 					);
 					return {
 						id: node.id,
 						kind: "model" as const,
 						provider: node.data.kind,
 						model: node.data.model,
+						context: node.data.context,
+						pricing: node.data.pricing,
 						maxOutputTokens: node.data.maxOutputTokens,
-						...(thinking?.kind === "effort"
-							? { reasoningEffort: thinking.effort }
-							: {}),
-						...(thinking?.kind === "budget"
-							? { thinkingBudget: thinking.budget }
-							: {}),
+						reasoningEffort,
 						...(node.data.variables?.length
 							? { variables: node.data.variables }
 							: {}),

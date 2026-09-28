@@ -44,7 +44,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				data: {
 					kind: "openai",
 					active: false,
-					model: "gpt-5-mini",
+					model: "gpt-6-luna",
 					maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 				},
 			},
@@ -55,7 +55,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				data: {
 					kind: "google",
 					active: false,
-					model: "gemini-3.5-flash-lite",
+					model: "gemini-3.8-flash",
 					maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 				},
 			},
@@ -66,7 +66,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				data: {
 					kind: "google",
 					active: false,
-					model: "gemini-3.5-flash-lite",
+					model: "gemini-3.8-flash",
 					maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 				},
 			},
@@ -77,7 +77,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				data: {
 					kind: "openai",
 					active: false,
-					model: "gpt-5-nano",
+					model: "gpt-6-luna",
 					maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 				},
 			},

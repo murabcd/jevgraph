@@ -16,17 +16,22 @@ test("reports completed and failed node attempts without replacing their errors"
 			emit,
 		),
 	).rejects.toThrow("model unavailable");
-	expect(events.map((event) => event.type)).toEqual(["timing", "timing"]);
-	if (events[0]?.type !== "timing" || events[1]?.type !== "timing")
-		throw new Error("Expected timing events");
-	expect(events[0].timing).toMatchObject({
+	expect(events.map((event) => event.type)).toEqual([
+		"node-start",
+		"timing",
+		"node-start",
+		"timing",
+	]);
+	const settled = events.filter((event) => event.type === "timing");
+	expect(settled[0].timing).toMatchObject({
 		nodeId: "primary",
 		status: "completed",
 	});
-	expect(events[1].timing).toMatchObject({
+	expect(settled[1].timing).toMatchObject({
 		nodeId: "backup",
 		status: "failed",
 	});
+
 	expect(
 		events.every(
 			(event) => event.type !== "timing" || event.timing.durationMs >= 0,
@@ -38,4 +43,21 @@ test("shows milliseconds, then seconds", () => {
 	expect(formatNodeDuration(45)).toBe("45 ms");
 	expect(formatNodeDuration(999)).toBe("999 ms");
 	expect(formatNodeDuration(1234)).toBe("1.23 s");
+});
+
+test("announces a running node before its pending operation finishes", async () => {
+	const events: RouteStreamEvent[] = [];
+	const operation = Promise.withResolvers<string>();
+	const run = measureNode(
+		"slow",
+		() => operation.promise,
+		(event) => events.push(event),
+	);
+	expect(events).toEqual([{ type: "node-start", nodeId: "slow" }]);
+	operation.resolve("finished");
+	expect(await run).toBe("finished");
+	expect(events[1]).toMatchObject({
+		type: "timing",
+		timing: { nodeId: "slow", status: "completed" },
+	});
 });

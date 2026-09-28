@@ -1,6 +1,5 @@
-import { Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
+import { SelectionRow } from "@/flow/selection-row";
 import type { StartField } from "@/lib/routing";
 import { startFieldTypes } from "./start-field-types";
 
@@ -28,17 +27,14 @@ export function StartVariableBinding({
 						(option) => option.value === field.type,
 					)?.label;
 					return (
-						<Button
+						<SelectionRow
 							key={field.name}
-							type="button"
-							variant={active ? "secondary" : "outline"}
-							className="justify-between aria-pressed:border-border dark:aria-pressed:border-input"
-							aria-pressed={active}
-							onClick={() =>
+							selected={active}
+							onSelectedChange={(selectedValue) =>
 								onChange(
-									active
-										? selected.filter((name) => name !== field.name)
-										: [...selected, field.name],
+									selectedValue
+										? [...selected, field.name]
+										: selected.filter((name) => name !== field.name),
 								)
 							}
 						>
@@ -46,8 +42,7 @@ export function StartVariableBinding({
 								{field.name}{" "}
 								<span className="text-muted-foreground">· {typeLabel}</span>
 							</span>
-							{active && <Check className="size-4" />}
-						</Button>
+						</SelectionRow>
 					);
 				})}
 			</div>

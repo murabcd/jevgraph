@@ -25,7 +25,11 @@ Keep actual keys only in .env.local. A turn needs keys for the providers it reac
 1. Start is the required entry. Add custom text, number, or boolean fields there. The latest chat message is the built-in query. Defaults let you test fields locally; an API caller may supply declared values under `metadata`.
 2. Connect Jev and Model nodes. In each node's settings, select only the Start fields it needs. Jev outputs can connect onward or end the path with the selected label; a Model's Continue output can feed another Jev or Model. Several paths can run in parallel but must join before one final answer.
 3. Edit Model prompts for each model's specific task. A terminal Model generates the chat answer.
-4. To repeat work, connect one Jev output back to an earlier Model. Set the Jev repeat limit in its settings panel. Another output must exit the loop.
+4. To repeat work, connect one Jev output back to an earlier Model. Set the Jev repeat limit in its settings panel. Another output must exit the loop. If Jev still selects the repeat branch when its limit is reached, the turn stops with “Review incomplete” rather than taking the other branch.
+
+Start can also declare reference documents with full text and optional supplied summaries. Each Jev or Model chooses its own previous messages, earlier node results, and document representations, with a character budget for optional context. Optional Jev relevance filtering screens these chunks in one additional call; uncertain evaluations or provider failures retain the context. See [context](lat.md/context.md) for selection rules and bounds.
+
+The node inspector shows selected context, structured Jev decisions, and each provider attempt. Chat totals include intermediate models, decisions, relevance calls, repeats, and backups. Missing provider usage is marked incomplete. USD cost is estimated automatically from published GPT-6 Luna, Gemini 3.8 Flash, and Jev prices; each node can override its rates, including separate relevance rates when enabled; these estimates are not provider bills.
 
 Send a chat message to run the graph; there is no separate Run button. The canvas highlights reached nodes and edges, displays each node's elapsed time, and offers a last-turn output inspector. Chat history stays in memory. The graph, layout, viewport, theme, and chat visibility persist in browser local storage.
 

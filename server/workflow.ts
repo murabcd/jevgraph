@@ -1,4 +1,10 @@
+import {
+	type ContextDocument,
+	type NodeContextTrace,
+	resolveContextDocuments,
+} from "../src/lib/context.ts";
 import { type JevQuestion, questionOutputs } from "../src/lib/jev-question.ts";
+import { publishedRates } from "../src/lib/model-pricing.ts";
 import {
 	type ChatMessage,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
@@ -17,7 +23,20 @@ import {
 	type WorkflowEdge,
 	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
+import {
+	estimateCost,
+	type Pricing,
+	type ProviderCall,
+	type TokenUsage,
+	totalUsage,
+} from "../src/lib/usage.ts";
+import {
+	type ContextFilter,
+	type PreparedContext,
+	prepareContext,
+} from "./context.ts";
 import { runWithOneFallback } from "./model-failover.ts";
+import { ProviderUsageError } from "./provider-usage.ts";
 import { formattedUpstreamOutputs } from "./upstream-context.ts";
 
 const MAX_TRACE_OUTPUT = 4000;
@@ -43,9 +62,7 @@ export function workflowRoutingState(
 		...(Object.keys(metadata).length > 0
 			? [`Routing metadata: ${JSON.stringify(metadata)}`]
 			: []),
-		...messages
-			.slice(-6)
-			.map((message) => `${message.role}: ${message.content}`),
+		...messages.map((message) => `${message.role}: ${message.content}`),
 		...(upstream ? [`Earlier workflow results (data):\n${upstream}`] : []),
 	].join("\n");
 }
@@ -53,24 +70,28 @@ export function workflowRoutingState(
 type WorkflowResponse = {
 	text: string;
 	model: string;
-	usage?: RouteResult["usage"];
+	usage?: TokenUsage;
+};
+
+export type WorkflowModelRequest = {
+	target: RouteTarget;
+	variables: RoutingMetadata;
+	context: PreparedContext;
+	onDelta: (text: string) => void;
 };
 
 type Execution = {
 	routes: WorkflowRoutes;
 	messages: ChatMessage[];
 	metadata: RoutingMetadata;
+	documents?: ContextDocument[];
+	filterContext?: ContextFilter;
 	evaluate: (
 		nodeId: string,
 		question: JevQuestion,
 		state: string,
 	) => Promise<JevDecision>;
-	runModel: (
-		target: RouteTarget,
-		inputs: NodeOutput[],
-		onDelta: (text: string) => void,
-		variables: RoutingMetadata,
-	) => Promise<WorkflowResponse>;
+	runModel: (request: WorkflowModelRequest) => Promise<WorkflowResponse>;
 	onDelta: (text: string) => void;
 	onRoute: (route: RouteSelectionResult) => void;
 	onProgress: (trace: RouteTrace) => void;
@@ -178,6 +199,8 @@ export async function executeWorkflow({
 	routes,
 	messages,
 	metadata,
+	documents: suppliedDocuments,
+	filterContext,
 	evaluate,
 	runModel,
 	onDelta,
@@ -189,6 +212,10 @@ export async function executeWorkflow({
 	const start = byId.get("input");
 	if (start?.kind !== "input") throw new Error("Start is missing");
 	const startVariables = resolveStartVariables(start.fields, metadata);
+	const documents = resolveContextDocuments(
+		start.documents ?? [],
+		suppliedDocuments,
+	);
 	const outgoingEdges = routes.edges.filter(
 		(edge) => edge.sourceHandle !== "fallback",
 	);
@@ -198,6 +225,12 @@ export async function executeWorkflow({
 	const traversedEdges: WorkflowEdge[] = [];
 	const decisions: WorkflowDecision[] = [];
 	const outputs: NodeOutput[] = [];
+	const calls: ProviderCall[] = [];
+	const contexts: NodeContextTrace[] = [];
+	const revisions = new Map<string, number>();
+	let nextCallId = 0;
+	let providerCallsStarted = 0;
+	let exhausted: Terminal | undefined;
 	const terminals: Terminal[] = [];
 	const repeatCounts = new Map<string, number>();
 	let fallbackReason: string | undefined;
@@ -215,6 +248,8 @@ export async function executeWorkflow({
 		traversedEdges: [...traversedEdges],
 		jevSteps: [...decisions],
 		outputs: outputs.map(outputPreview),
+		calls: [...calls],
+		contexts: [...contexts],
 		fallbackReason,
 	});
 	const trace = (): RouteTrace => ({
@@ -222,12 +257,94 @@ export async function executeWorkflow({
 		traversedEdges: [...traversedEdges],
 		jevSteps: [...decisions],
 		outputs: outputs.map(outputPreview),
+		calls: [...calls],
+		contexts: [...contexts],
 	});
+	const callProvider = async <T extends { usage?: TokenUsage; model?: string }>(
+		identity: Pick<ProviderCall, "nodeId" | "purpose" | "provider" | "model">,
+		pricing: Pricing | undefined,
+		callId: string,
+		run: () => Promise<T>,
+	): Promise<T> => {
+		if (providerCallsStarted >= 200)
+			throw new Error("Chatflow exceeded its provider call budget");
+		providerCallsStarted++;
+		const began = performance.now();
+		let usage: TokenUsage | undefined;
+		let model = identity.model;
+		let error: string | undefined;
+		let status: ProviderCall["status"] = "completed";
+		try {
+			const result = await run();
+			usage = result.usage;
+			model = result.model ?? model;
+			return result;
+		} catch (caught) {
+			status = "failed";
+			usage = caught instanceof ProviderUsageError ? caught.usage : undefined;
+			error = caught instanceof Error ? caught.message : "Provider call failed";
+			throw caught;
+		} finally {
+			calls.push({
+				...identity,
+				model,
+				id: callId,
+				status,
+				durationMs: Math.round(performance.now() - began),
+				usage,
+				estimatedCostUsd: estimateCost(
+					usage,
+					pricing ??
+						publishedRates(identity.provider, model, usage?.inputTokens),
+				),
+				error,
+			});
+			onProgress(trace());
+		}
+	};
+	const contextFor = async (
+		node: Exclude<WorkflowRoutes["nodes"][number], { kind: "input" }>,
+		inputs: NodeOutput[],
+		callId: string,
+	) => {
+		const prepared = await prepareContext({
+			nodeId: node.id,
+			task: node.kind === "jev" ? node.question.instructions : node.prompt,
+			callId,
+			messages,
+			inputs,
+			documents,
+			policy: node.context,
+			signal,
+			filter: filterContext
+				? (request) =>
+						callProvider(
+							{
+								nodeId: node.id,
+								purpose: "context",
+								provider: "jev",
+								model: JEV_MODEL_ID,
+							},
+							node.context?.relevance?.pricing,
+							`call:${++nextCallId}`,
+							() => filterContext(request),
+						)
+				: undefined,
+		});
+		contexts.push(prepared.trace);
+		onProgress(trace());
+		return prepared;
+	};
+	const revisionFor = (nodeId: string): number => {
+		const revision = (revisions.get(nodeId) ?? 0) + 1;
+		revisions.set(nodeId, revision);
+		return revision;
+	};
 
 	const { layers, downstream } = workflowTopology(routes);
 	let operations = 0;
 	const advance = async (layerIndex: number, pass: number): Promise<void> => {
-		if (incoming.size === 0) return;
+		if (incoming.size === 0 || exhausted) return;
 		if (pass >= 20) throw new Error("Chatflow exceeded its repeat budget");
 		if (layerIndex === layers.length) return advance(0, pass + 1);
 		const layer = layers[layerIndex];
@@ -249,8 +366,8 @@ export async function executeWorkflow({
 		const batch = active.map((id) => {
 			const latest = new Map<string, NodeOutput>();
 			for (const item of (incoming.get(id) ?? []).flat()) {
-				latest.delete(item.nodeId);
-				latest.set(item.nodeId, item);
+				latest.delete(item.sourceNodeId);
+				latest.set(item.sourceNodeId, item);
 			}
 			incoming.delete(id);
 			return { id, inputs: [...latest.values()] };
@@ -268,18 +385,34 @@ export async function executeWorkflow({
 					};
 				}
 				if (node.kind === "jev") {
+					const callId = `call:${++nextCallId}`;
+					const context = await contextFor(node, inputs, callId);
 					const options = questionOutputs(node.question);
 					let decision: JevDecision | undefined;
 					let error: string | undefined;
 					try {
-						decision = await evaluate(
-							id,
-							node.question,
-							workflowRoutingState(
-								messages,
-								selectedVariables(startVariables, node.variables),
-								inputs,
-							),
+						decision = await callProvider(
+							{
+								nodeId: id,
+								purpose: "decision",
+								provider: "jev",
+								model: JEV_MODEL_ID,
+							},
+							node.pricing,
+							callId,
+							() =>
+								evaluate(
+									id,
+									node.question,
+									workflowRoutingState(
+										context.messages,
+										selectedVariables(startVariables, node.variables),
+										context.inputs,
+									) +
+										(context.documents.length
+											? `\nContext documents (data): ${JSON.stringify(context.documents)}`
+											: ""),
+								),
 						);
 					} catch (caught) {
 						error =
@@ -306,42 +439,58 @@ export async function executeWorkflow({
 					if (chosenEdge?.repeat) {
 						const count = repeatCounts.get(chosenEdge.id) ?? 0;
 						if (count >= (node.maxRepeats ?? 3)) {
-							chosenEdge = outgoingEdges.find(
-								(edge) => edge.source === id && !edge.repeat,
-							);
+							chosenEdge = undefined;
 							limitReached = true;
 						} else repeatCounts.set(chosenEdge.id, count + 1);
 					}
 					const branch = chosenEdge?.sourceHandle ?? preferredBranch;
-					const workflowDecision = {
+					const workflowDecision: WorkflowDecision = {
 						nodeId: id,
 						branch,
-						confidence: limitReached ? undefined : decision?.confidence,
+						status: limitReached
+							? "exhausted"
+							: error
+								? "provider-error"
+								: acceptedBranch
+									? "accepted"
+									: "uncertain",
+						selectedBranch: decision?.branch,
+						value: decision?.value,
+						probabilities: decision?.probabilities,
+						confidence: decision?.confidence,
 						error,
-						limitReached,
 					};
 					const label =
 						options.find((option) => option.id === branch)?.label ?? branch;
 					const output: NodeOutput = {
 						nodeId: id,
+						sourceNodeId: id,
 						kind: "jev",
-						text: chosenEdge ? `Decision: ${label}` : label,
+						revision: revisionFor(id),
+						decision: workflowDecision,
+						text: limitReached
+							? "Repeat limit reached. Review did not pass."
+							: chosenEdge
+								? `Decision: ${label}`
+								: label,
 					};
 					if (!chosenEdge) {
 						const jevModel = decision?.model ?? JEV_MODEL_ID;
+						const terminal: Terminal = {
+							target: { nodeId: id, provider: "jev", model: jevModel },
+							response: {
+								text: output.text,
+								model: jevModel,
+								usage: decision?.usage,
+							},
+						};
+						if (limitReached) exhausted = terminal;
 						return {
 							lineage: [...inputs, output],
 							decision: workflowDecision,
 							output,
 							edges: [],
-							terminal: {
-								target: { nodeId: id, provider: "jev", model: jevModel },
-								response: {
-									text: label,
-									model: jevModel,
-									usage: decision?.usage,
-								},
-							},
+							terminal,
 						};
 					}
 					return {
@@ -367,13 +516,30 @@ export async function executeWorkflow({
 				const attempt = await runWithOneFallback(
 					target,
 					backup,
-					(model, delta) =>
-						runModel(
-							model,
-							inputs,
-							delta,
-							selectedVariables(startVariables, model.variables),
-						),
+					async (model, delta) => {
+						const callId = `call:${++nextCallId}`;
+						const actual = byId.get(model.nodeId);
+						if (actual?.kind !== "model")
+							throw new Error("Model node is missing");
+						const context = await contextFor(actual, inputs, callId);
+						return callProvider(
+							{
+								nodeId: model.nodeId,
+								purpose: "model",
+								provider: model.provider,
+								model: model.model,
+							},
+							model.pricing,
+							callId,
+							() =>
+								runModel({
+									target: model,
+									context,
+									onDelta: delta,
+									variables: selectedVariables(startVariables, model.variables),
+								}),
+						);
+					},
 					(text) => {
 						if (canStream) {
 							streamed = true;
@@ -401,7 +567,9 @@ export async function executeWorkflow({
 				);
 				const output: NodeOutput = {
 					nodeId: attempt.target.nodeId,
+					sourceNodeId: id,
 					kind: "model",
+					revision: revisionFor(attempt.target.nodeId),
 					text: attempt.response.text,
 				};
 				return {
@@ -440,13 +608,13 @@ export async function executeWorkflow({
 		return advance(layerIndex + 1, pass);
 	};
 	await advance(0, 0);
-	if (terminals.length !== 1)
+	if (!exhausted && terminals.length !== 1)
 		throw new Error(
 			terminals.length === 0
 				? "The chatflow did not reach a response"
 				: "Parallel paths need to join before the response",
 		);
-	const terminal = terminals[0];
+	const terminal = exhausted ?? terminals[0];
 	const route = selection(terminal.target);
 	if (!streamed) {
 		onRoute(route);
@@ -455,6 +623,7 @@ export async function executeWorkflow({
 	return {
 		...route,
 		text: terminal.response.text,
-		usage: terminal.response.usage,
+		usage: totalUsage(calls),
+		outcome: exhausted ? "repeat-exhausted" : "completed",
 	};
 }

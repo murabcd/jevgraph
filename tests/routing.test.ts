@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { textModel } from "../src/lib/models";
 import {
-	effectiveModelThinking,
+	modelReasoningEffort,
 	routeRequestSchema,
 	routesUseJev,
 	workflowRoutesSchema,
@@ -23,7 +23,7 @@ const direct = {
 			id: "model",
 			kind: "model" as const,
 			provider: "openai" as const,
-			model: "gpt-5-mini",
+			model: "gpt-6-luna",
 			prompt: "Translate the answer to French.",
 		},
 	],
@@ -40,37 +40,15 @@ const request = {
 };
 
 describe("chatflow contract", () => {
-	test("uses model-specific reasoning defaults and supported efforts", () => {
-		expect(effectiveModelThinking("openai", "gpt-5-mini")).toEqual({
-			kind: "effort",
-			effort: "medium",
-		});
-		expect(
-			effectiveModelThinking("openai", "gpt-5-mini", {
-				reasoningEffort: "low",
-			}),
-		).toEqual({ kind: "effort", effort: "low" });
-		expect(effectiveModelThinking("openai", "gpt-4.1")).toBeUndefined();
-		expect(effectiveModelThinking("google", "gemini-3.5-flash-lite")).toEqual({
-			kind: "effort",
-			effort: "minimal",
-		});
-		expect(effectiveModelThinking("google", "gemini-3.1-pro-preview")).toEqual({
-			kind: "effort",
-			effort: "high",
-		});
-		expect(effectiveModelThinking("google", "gemini-2.5-flash-lite")).toEqual({
-			kind: "budget",
-			budget: 0,
-		});
-		expect(effectiveModelThinking("google", "gemini-2.5-pro")).toEqual({
-			kind: "budget",
-			budget: -1,
-		});
-		const proThinking = textModel("google", "gemini-3.1-pro-preview")?.thinking;
-		expect(proThinking?.kind === "effort" && proThinking.efforts).not.toContain(
-			"minimal",
-		);
+	test("uses current model defaults and supported reasoning efforts", () => {
+		expect(modelReasoningEffort("openai", "gpt-6-luna")).toBe("medium");
+		expect(modelReasoningEffort("openai", "gpt-6-luna", "none")).toBe("none");
+		expect(modelReasoningEffort("google", "gemini-3.8-flash")).toBe("medium");
+		expect(textModel("google", "gemini-3.8-flash")?.reasoning.efforts).toEqual([
+			"low",
+			"medium",
+			"high",
+		]);
 	});
 
 	test("accepts a conversation and a model-level prompt", () => {
@@ -113,52 +91,45 @@ describe("chatflow contract", () => {
 		).toBe(false);
 	});
 
-	test("validates Gemini 2.5 thinking budgets", () => {
-		const withBudget = (
+	test("rejects removed models and reasoning unsupported by the selected provider", () => {
+		const withModel = (
+			provider: string,
 			model: string,
-			thinkingBudget: number,
-			maxOutputTokens = 1400,
+			settings: object = {},
 		) => ({
 			...direct,
 			nodes: [
 				direct.nodes[0],
-				{
-					...direct.nodes[1],
-					provider: "google",
-					model,
-					thinkingBudget,
-					maxOutputTokens,
-				},
+				{ ...direct.nodes[1], provider, model, ...settings },
 			],
 		});
 		expect(
-			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-pro", 512)).success,
-		).toBe(true);
-		expect(
-			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-pro", 0)).success,
+			workflowRoutesSchema.safeParse(withModel("openai", "gpt-5-mini")).success,
 		).toBe(false);
 		expect(
-			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-pro", 1400))
-				.success,
+			workflowRoutesSchema.safeParse(
+				withModel("google", "gemini-3.5-flash-lite"),
+			).success,
 		).toBe(false);
 		expect(
-			workflowRoutesSchema.safeParse(withBudget("gemini-2.5-flash-lite", 0))
-				.success,
+			workflowRoutesSchema.safeParse(
+				withModel("google", "gemini-3.8-flash", { reasoningEffort: "minimal" }),
+			).success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse(
+				withModel("google", "gemini-3.8-flash", { reasoningEffort: "none" }),
+			).success,
+		).toBe(false);
+		expect(
+			workflowRoutesSchema.safeParse(
+				withModel("openai", "gpt-6-luna", { reasoningEffort: "max" }),
+			).success,
 		).toBe(true);
 		expect(
-			workflowRoutesSchema.safeParse({
-				...direct,
-				nodes: [
-					direct.nodes[0],
-					{
-						...direct.nodes[1],
-						provider: "google",
-						model: "gemini-2.5-flash-lite",
-						reasoningEffort: "low",
-						thinkingBudget: 0,
-					},
-				],
-			}).success,
+			workflowRoutesSchema.safeParse(
+				withModel("google", "gemini-3.8-flash", { thinkingBudget: 0 }),
+			).success,
 		).toBe(false);
 	});
 
@@ -279,7 +250,7 @@ describe("chatflow contract", () => {
 					{
 						...direct.nodes[1],
 						provider: "google",
-						model: "gemini-3.5-flash-lite",
+						model: "gemini-3.8-flash",
 						reasoningEffort: "low",
 					},
 				],
@@ -293,7 +264,7 @@ describe("chatflow contract", () => {
 					{
 						...direct.nodes[1],
 						provider: "google",
-						model: "gemini-3.1-pro-preview",
+						model: "gemini-3.8-flash",
 						reasoningEffort: "minimal",
 					},
 				],
@@ -306,15 +277,15 @@ describe("chatflow contract", () => {
 			kind: "workflow",
 			nodes: [
 				{ id: "input", kind: "input", fields: [] },
-				{ id: "first", kind: "model", provider: "openai", model: "gpt-5-mini" },
+				{ id: "first", kind: "model", provider: "openai", model: "gpt-6-luna" },
 				{
 					id: "second",
 					kind: "model",
 					provider: "google",
-					model: "gemini-3.5-flash-lite",
+					model: "gemini-3.8-flash",
 				},
 				{ id: "judge", kind: "jev", question: configuredJevQuestion() },
-				{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
+				{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 			],
 			edges: [
 				{ id: "a", source: "input", target: "first" },
@@ -373,7 +344,7 @@ describe("chatflow contract", () => {
 						id: "backup",
 						kind: "model",
 						provider: "google",
-						model: "gemini-3.5-flash-lite",
+						model: "gemini-3.8-flash",
 					},
 				],
 				edges: [
@@ -400,7 +371,7 @@ describe("chatflow contract", () => {
 						id: "second",
 						kind: "model",
 						provider: "google",
-						model: "gemini-3.5-flash-lite",
+						model: "gemini-3.8-flash",
 					},
 				],
 				edges: [

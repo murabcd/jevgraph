@@ -10,6 +10,8 @@ The browser owns graph editing and conversation display; the server owns executi
 - [src/flow/graph.ts](../src/flow/graph.ts) compiles canvas nodes and edges and persists the editable graph. [src/flow/use-routing-graph.ts](../src/flow/use-routing-graph.ts) owns graph edits.
 - [server/workflow.ts](../server/workflow.ts) schedules stages, joins parallel results, bounds repeats, and emits progress. [server/model-failover.ts](../server/model-failover.ts) limits an explicit backup model to one attempt.
 - [server/api.ts](../server/api.ts) owns the local API and direct provider calls.
+- [src/lib/context.ts](../src/lib/context.ts) and [server/context.ts](../server/context.ts) own node context policies, representations, and selection traces. See [[context]].
+- [src/lib/usage.ts](../src/lib/usage.ts) owns provider call records, workflow totals, and pricing calculations; [src/lib/model-pricing.ts](../src/lib/model-pricing.ts) owns dated published prices. [src/lib/node-timer.ts](../src/lib/node-timer.ts) owns in-memory running and settled timer transitions.
 - [src/chat/use-route-chat.ts](../src/chat/use-route-chat.ts) owns the in-memory conversation and stream lifecycle. [src/App.tsx](../src/App.tsx) composes chat and canvas.
 - [vite.config.ts](../vite.config.ts) mounts the API in development and preview. A static-only deployment has no API.
 
@@ -18,6 +20,8 @@ The browser owns graph editing and conversation display; the server owns executi
 Browser storage, in-memory chat, and server-only secrets have separate owners.
 
 Graph configuration, node positions, theme, viewport, and chat panel visibility live in browser local storage. Messages and the latest execution trace live in memory and reset on reload. API keys stay in the server's .env.local; the browser receives key availability, not key values.
+
+Graph configuration includes context policies, reference documents, and optional rates. Per-call usage, context excerpts, revisions, and structured decisions remain in memory with the chat turn. API request bodies have a shared two-MiB limit enforced by both the Vite adapter and API handler.
 
 The browser sends the graph with each turn, and the server validates Start fields, any supplied values, and node bindings before provider calls. The browser's configured defaults support local testing; trusted production values must be mapped by the server or an API caller. Intermediate model outputs are bounded data for downstream stages. Chat has no separate workflow-run action.
 

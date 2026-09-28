@@ -1,4 +1,4 @@
-import type { RouteStreamEvent } from "./routing";
+import { type RouteStreamEvent, routeStreamEventSchema } from "./routing";
 
 export async function readRouteStream(
 	response: Response,
@@ -17,7 +17,7 @@ export async function readRouteStream(
 
 	const processLine = (line: string) => {
 		if (!line.trim()) return;
-		const event = JSON.parse(line) as RouteStreamEvent;
+		const event = routeStreamEventSchema.parse(JSON.parse(line));
 		if (event.type === "error") throw new Error(event.error);
 		if (event.type === "done") completed = true;
 		onEvent(event);

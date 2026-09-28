@@ -29,10 +29,14 @@ describe("route stream", () => {
 				traversedEdges: [],
 				jevSteps: [],
 				outputs: [],
+				calls: [],
+				contexts: [],
+				usage: { complete: false, costComplete: false },
+				outcome: "completed",
 				latencyMs: 12,
 			},
 		};
-		const payload = `${JSON.stringify({ type: "delta", text: "Bon" })}\n${JSON.stringify({ type: "delta", text: "jour" })}\n${JSON.stringify(done)}\n`;
+		const payload = `${JSON.stringify({ type: "node-start", nodeId: "google" })}\n${JSON.stringify({ type: "delta", text: "Bon" })}\n${JSON.stringify({ type: "delta", text: "jour" })}\n${JSON.stringify(done)}\n`;
 		await readRouteStream(
 			responseFromChunks([
 				payload.slice(0, 9),
@@ -42,6 +46,7 @@ describe("route stream", () => {
 			(event) => received.push(event),
 		);
 		expect(received).toEqual([
+			{ type: "node-start", nodeId: "google" },
 			{ type: "delta", text: "Bon" },
 			{ type: "delta", text: "jour" },
 			done,
@@ -55,5 +60,15 @@ describe("route stream", () => {
 				() => {},
 			),
 		).rejects.toThrow("ended before");
+	});
+	test("rejects malformed usage rather than trusting streamed data", async () => {
+		await expect(
+			readRouteStream(
+				responseFromChunks([
+					'{"type":"progress","trace":{"path":[],"traversedEdges":[],"jevSteps":[],"outputs":[],"contexts":[],"calls":[{"id":"1","nodeId":"model","purpose":"model","provider":"openai","model":"test","status":"completed","durationMs":1,"usage":{"inputTokens":-1}}]}}\n',
+				]),
+				() => {},
+			),
+		).rejects.toThrow();
 	});
 });

@@ -33,7 +33,7 @@ export function nodeFooterValue(data: FlowNode["data"]) {
 }
 
 export function nodeTitle(data: FlowNode["data"]) {
-	if (data.kind === "jev") return jevRoleLabels[data.question.type];
+	if (data.kind === "jev") return "Jev";
 	if (data.kind === "input") return "Start";
 	return data.kind === "google" ? "Gemini" : "OpenAI";
 }

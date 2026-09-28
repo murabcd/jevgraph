@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import type { ChatTurn } from "@/chat/types";
+import { WorkflowUsage } from "@/chat/workflow-usage";
 import { Badge } from "@/components/ui/badge";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
@@ -84,6 +85,10 @@ export function ChatMessageItem({ message }: { message: ChatTurn }) {
 						</BubbleContent>
 					</Bubble>
 					<JevErrorBadge message={message} />
+					{!isUser &&
+						message.route &&
+						!message.streaming &&
+						!message.failed && <WorkflowUsage route={message.route} />}
 				</MessageContent>
 			</Message>
 		</MessageScrollerItem>

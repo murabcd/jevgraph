@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import type { ContextChunk } from "../src/lib/context.ts";
 import type {
 	ChatMessage,
 	NodeOutput,
@@ -12,6 +13,7 @@ export function modelPrompt(
 	target: RouteTarget,
 	inputs: NodeOutput[],
 	variables: RoutingMetadata,
+	documents: ContextChunk[] = [],
 ): { instructions?: string; messages: ModelMessage[] } {
 	const current = messages.at(-1);
 	if (current?.role !== "user")
@@ -21,6 +23,11 @@ export function modelPrompt(
 			? [`Start variables (data):\n${JSON.stringify(variables)}`]
 			: []),
 		upstreamContext(inputs),
+		...(documents.length
+			? [
+					`Context documents (data):\n${documents.map((document) => `[${document.label} · ${document.representation}] ${document.content}`).join("\n\n")}`,
+				]
+			: []),
 	].filter(Boolean);
 	return {
 		...(target.prompt ? { instructions: target.prompt } : {}),

@@ -16,6 +16,7 @@ export async function measureNode<T>(
 	emit: Emit,
 ): Promise<T> {
 	const start = performance.now();
+	emit({ type: "node-start", nodeId });
 	try {
 		const result = await run();
 		emit({

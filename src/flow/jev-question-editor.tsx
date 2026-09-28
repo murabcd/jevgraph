@@ -29,9 +29,19 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import {
+	ContextPolicyFields,
+	type ContextSourceOption,
+} from "@/flow/context-policy-fields";
 import type { JevNodeSettings } from "@/flow/graph";
-import { jevRoleLabels } from "@/flow/node-meta";
+import { PricingFields } from "@/flow/pricing-fields";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
+import {
+	type ContextDocument,
+	type ContextPolicy,
+	contextPolicySchema,
+	DEFAULT_CONTEXT_POLICY,
+} from "@/lib/context";
 import {
 	configuredJevQuestionSchema,
 	defaultJevQuestion,
@@ -41,7 +51,9 @@ import {
 	questionOutputs,
 	questionTypeLabels,
 } from "@/lib/jev-question";
+import { JEV_PUBLISHED_PRICING } from "@/lib/model-pricing";
 import { confidenceThresholdSchema, type StartField } from "@/lib/routing";
+import { type Pricing, pricingSchema } from "@/lib/usage";
 import { cn } from "@/lib/utils";
 
 type ChoiceQuestion = Extract<JevQuestion, { type: "choice" }>;
@@ -296,11 +308,16 @@ function ScoreFields({ question, onChange }: FieldsProps<ScoreQuestion>) {
 }
 
 type Props = {
+	title: string;
 	question: JevQuestion;
 	confidenceThreshold: number;
 	fallbackOutputId?: string;
 	fields: StartField[];
 	variables: string[];
+	context?: ContextPolicy;
+	pricing?: Pricing;
+	contextSources: ContextSourceOption[];
+	documents: ContextDocument[];
 	hasRepeat?: boolean;
 	maxRepeats: number;
 	open: boolean;
@@ -309,11 +326,16 @@ type Props = {
 };
 
 export function JevQuestionEditor({
+	title,
 	question,
 	confidenceThreshold,
 	fallbackOutputId,
 	fields,
 	variables,
+	context,
+	pricing,
+	contextSources,
+	documents,
 	hasRepeat,
 	maxRepeats,
 	open,
@@ -330,6 +352,10 @@ export function JevQuestionEditor({
 	const [repeatDraft, setRepeatDraft] = useState(maxRepeats);
 	const [variablesDraft, setVariablesDraft] = useState(variables);
 	const [error, setError] = useState("");
+	const [contextDraft, setContextDraft] = useState(
+		context ?? DEFAULT_CONTEXT_POLICY,
+	);
+	const [pricingDraft, setPricingDraft] = useState(pricing);
 	const save = () => {
 		const parsed = configuredJevQuestionSchema.safeParse(draft);
 		if (!parsed.success) {
@@ -359,11 +385,21 @@ export function JevQuestionEditor({
 			setError("Select a valid fallback choice.");
 			return;
 		}
+		const parsedContext = contextPolicySchema.safeParse(contextDraft);
+		const parsedPricing = pricingSchema.optional().safeParse(pricingDraft);
+		if (!parsedContext.success || !parsedPricing.success) {
+			setError(
+				"Check context settings: budget 1,000–120,000, probability 50–100%, and nonnegative pricing rates.",
+			);
+			return;
+		}
 		onSave({
 			question: parsed.data,
 			confidenceThreshold: parsedConfidence.data,
 			fallbackOutputId,
 			variables: variablesDraft,
+			context: parsedContext.data,
+			pricing: parsedPricing.data,
 			maxRepeats: repeatDraft,
 		});
 		onOpenChange(false);
@@ -377,7 +413,7 @@ export function JevQuestionEditor({
 		>
 			<SheetContent variant="floating">
 				<SheetHeader>
-					<SheetTitle>{jevRoleLabels[draft.type]}</SheetTitle>
+					<SheetTitle>{title}</SheetTitle>
 				</SheetHeader>
 				<ScrollArea
 					className="min-h-0 flex-1"
@@ -549,6 +585,19 @@ export function JevQuestionEditor({
 								</Select>
 							</Field>
 						)}
+						<ContextPolicyFields
+							id="jev"
+							value={contextDraft}
+							onChange={setContextDraft}
+							sources={contextSources}
+							documents={documents}
+						/>
+						<PricingFields
+							id="jev"
+							published={JEV_PUBLISHED_PRICING}
+							value={pricingDraft}
+							onChange={setPricingDraft}
+						/>
 						{error && <FieldError>{error}</FieldError>}
 					</div>
 				</ScrollArea>

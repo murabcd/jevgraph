@@ -5,12 +5,15 @@ import {
 	SheetHeader,
 	SheetTitle,
 } from "@/components/ui/sheet";
+import type { ContextSourceOption } from "@/flow/context-policy-fields";
 import type { FlowNode } from "@/flow/graph";
 import { JevQuestionEditor } from "@/flow/jev-question-editor";
-import { formatNodeDuration } from "@/flow/node-duration";
+import { NodeRunDetails } from "@/flow/node-run-details";
+import { NodeTimerLabel } from "@/flow/node-timer-label";
 import { PromptEditor } from "@/flow/prompt-editor";
 import { StartEditor } from "@/flow/start-editor";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
+import type { ContextDocument } from "@/lib/context";
 import type { StartField } from "@/lib/routing";
 
 type EditorActions = Pick<
@@ -23,6 +26,8 @@ type PanelProps = {
 	title: string;
 	view: "edit" | "inspect";
 	startFields: StartField[];
+	documents: ContextDocument[];
+	contextSources: ContextSourceOption[];
 	onClose: () => void;
 	actions: EditorActions;
 };
@@ -54,16 +59,17 @@ function LastTurnPanel({
 					<div className="px-4 pb-4">
 						{data.timing && (
 							<p className="mb-4 text-xs text-muted-foreground tabular-nums">
-								{data.timing.status === "failed" ? "Failed" : "Completed"} in{" "}
-								{formatNodeDuration(data.timing.durationMs)}
-								{data.timing.attempts && data.timing.attempts > 1
-									? ` across ${data.timing.attempts} runs`
-									: ""}
+								<NodeTimerLabel timer={data.timing} details />
 							</p>
 						)}
 						{data.decision && (
 							<p className="mb-4 text-sm">Jev decision: {data.decision}</p>
 						)}
+						<NodeRunDetails
+							contexts={data.contexts}
+							calls={data.calls}
+							decision={data.decisionDetails}
+						/>
 						{data.output && (
 							<pre className="whitespace-pre-wrap wrap-break-word font-sans text-sm leading-6">
 								{data.output}
@@ -79,7 +85,10 @@ function LastTurnPanel({
 function JevPanel({
 	id,
 	data,
+	title,
 	startFields,
+	documents,
+	contextSources,
 	actions,
 	onOpenChange,
 }: EditProps & {
@@ -87,11 +96,16 @@ function JevPanel({
 }) {
 	return (
 		<JevQuestionEditor
+			title={title}
 			question={data.question}
 			confidenceThreshold={data.confidenceThreshold}
 			fallbackOutputId={data.fallbackOutputId}
 			fields={startFields}
 			variables={data.variables ?? []}
+			context={data.context}
+			pricing={data.pricing}
+			documents={documents}
+			contextSources={contextSources}
 			hasRepeat={data.hasRepeat}
 			maxRepeats={data.maxRepeats ?? 3}
 			open
@@ -106,6 +120,8 @@ function ModelPanel({
 	data,
 	title,
 	startFields,
+	documents,
+	contextSources,
 	actions,
 	onOpenChange,
 }: EditProps & {
@@ -121,9 +137,12 @@ function ModelPanel({
 			modelId={data.model}
 			maxOutputTokens={data.maxOutputTokens}
 			reasoningEffort={data.reasoningEffort}
-			thinkingBudget={data.thinkingBudget}
 			fields={startFields}
 			variables={data.variables ?? []}
+			context={data.context}
+			pricing={data.pricing}
+			documents={documents}
+			contextSources={contextSources}
 			title={title}
 			id={`model-prompt-${id}`}
 		/>
@@ -146,6 +165,7 @@ export function RouteNodePanel(props: PanelProps) {
 		return (
 			<StartEditor
 				fields={props.data.fields}
+				documents={props.data.documents ?? []}
 				onOpenChange={onOpenChange}
 				onSave={props.actions.onStartFieldsChange}
 			/>

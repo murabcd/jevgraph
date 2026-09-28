@@ -12,7 +12,7 @@ import {
 	type CreatableNodeKind,
 	canConnectNodes,
 	defaultNodeData,
-	duplicatePosition,
+	duplicateModelNode,
 	type FlowNode,
 	hasFallbackConnection,
 	type JevNodeSettings,
@@ -25,6 +25,7 @@ import {
 	routesFromGraph,
 	saveGraph,
 } from "@/flow/graph";
+import type { ContextDocument } from "@/lib/context";
 import { questionOutputs } from "@/lib/jev-question";
 import { providerForModel } from "@/lib/models";
 import type { StartField } from "@/lib/routing";
@@ -71,12 +72,13 @@ export function useRoutingGraph() {
 	);
 
 	const onStartFieldsChange = useCallback(
-		(fields: StartField[]) => {
+		(fields: StartField[], documents: ContextDocument[]) => {
 			const names = new Set(fields.map((field) => field.name));
+			const documentIds = new Set(documents.map(({ id }) => id));
 			setNodes((current) =>
 				current.map((node) => {
 					if (node.data.kind === "input")
-						return { ...node, data: { ...node.data, fields } };
+						return { ...node, data: { ...node.data, fields, documents } };
 					if (
 						node.data.kind === "jev" ||
 						node.data.kind === "google" ||
@@ -86,6 +88,14 @@ export function useRoutingGraph() {
 							...node,
 							data: {
 								...node.data,
+								context: node.data.context
+									? {
+											...node.data.context,
+											documents: node.data.context.documents.filter(({ id }) =>
+												documentIds.has(id),
+											),
+										}
+									: undefined,
 								variables: node.data.variables?.filter((name) =>
 									names.has(name),
 								),
@@ -133,34 +143,7 @@ export function useRoutingGraph() {
 	const onDuplicateNode = useCallback(
 		(nodeId: string) => {
 			const id = crypto.randomUUID();
-			setNodes((current) => {
-				const original = current.find((node) => node.id === nodeId);
-				if (
-					!original ||
-					(original.data.kind !== "google" && original.data.kind !== "openai")
-				)
-					return current;
-				return [
-					...current.map((node) => ({ ...node, selected: false })),
-					{
-						id,
-						type: "route",
-						position: duplicatePosition(original, current),
-						selected: true,
-						data: {
-							kind: original.data.kind,
-							active: false,
-							model: original.data.model,
-							prompt: original.data.prompt,
-							promptMessages: original.data.promptMessages,
-							variables: original.data.variables,
-							maxOutputTokens: original.data.maxOutputTokens,
-							reasoningEffort: original.data.reasoningEffort,
-							thinkingBudget: original.data.thinkingBudget,
-						},
-					},
-				];
-			});
+			setNodes((current) => duplicateModelNode(current, nodeId, id));
 		},
 		[setNodes],
 	);

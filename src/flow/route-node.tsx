@@ -37,10 +37,10 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { FlowNode, NodeKind } from "@/flow/graph";
-import { formatNodeDuration } from "@/flow/node-duration";
 import { nodeFooterValue, nodeMeta, nodeTitle } from "@/flow/node-meta";
+import { NodeTimerLabel } from "@/flow/node-timer-label";
 import { questionOutputs } from "@/lib/jev-question";
-import type { NodeTiming } from "@/lib/routing";
+import type { NodeTimer } from "@/lib/node-timer";
 import { cn } from "@/lib/utils";
 
 function RouteNodeToolbar({
@@ -287,7 +287,7 @@ function RouteNodeStatus({
 	timing,
 }: {
 	step?: string;
-	timing?: NodeTiming;
+	timing?: NodeTimer;
 }) {
 	return (
 		<div className="route-node__eyebrow">
@@ -297,20 +297,7 @@ function RouteNodeStatus({
 			>
 				{step}
 			</Badge>
-			{timing && (
-				<span
-					className={cn(
-						"font-mono text-[10px] tabular-nums",
-						timing.status === "failed"
-							? "text-destructive"
-							: "text-muted-foreground",
-					)}
-					title={`${timing.status === "failed" ? "Failed" : "Completed"} in ${formatNodeDuration(timing.durationMs)}`}
-				>
-					{formatNodeDuration(timing.durationMs)}
-					{timing.attempts && timing.attempts > 1 ? ` ×${timing.attempts}` : ""}
-				</span>
-			)}
+			{timing && <NodeTimerLabel timer={timing} />}
 		</div>
 	);
 }

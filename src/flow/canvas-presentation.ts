@@ -11,7 +11,8 @@ import {
 } from "@/flow/node-connection-picker";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
 import { questionOutputs } from "@/lib/jev-question";
-import type { NodeTiming, RouteTrace } from "@/lib/routing";
+import type { NodeTimer } from "@/lib/node-timer";
+import type { RouteTrace } from "@/lib/routing";
 
 export type CanvasNode = FlowNode | NodePickerNode;
 
@@ -26,7 +27,7 @@ function nodeDecision(node: FlowNode, trace: RouteTrace | null) {
 				(output) => output.id === branch,
 			)?.label ?? branch)
 		: branch;
-	return `${label} · ${step.limitReached ? "repeat limit" : step.error ? "Jev unavailable" : `${Math.round((step.confidence ?? 0) * 100)}%`}`;
+	return `${label} · ${step.status === "exhausted" ? "review incomplete" : step.status === "uncertain" ? "uncertain" : step.error ? "Jev unavailable" : `${Math.round((step.confidence ?? 0) * 100)}%`}`;
 }
 
 export function useCanvasPresentation({
@@ -40,7 +41,7 @@ export function useCanvasPresentation({
 }: {
 	graph: ReturnType<typeof useRoutingGraph>;
 	trace: RouteTrace | null;
-	timings: Record<string, NodeTiming>;
+	timings: Record<string, NodeTimer>;
 	running: boolean;
 	onDuplicateNode: (nodeId: string) => void;
 	onRemoveNode: (nodeId: string) => void;
@@ -91,6 +92,13 @@ export function useCanvasPresentation({
 				step: stepLabels.get(node.id),
 				timing: timings[node.id],
 				decision: nodeDecision(node, trace),
+				decisionDetails: trace?.jevSteps.findLast(
+					(step) => step.nodeId === node.id,
+				),
+				contexts: trace?.contexts.filter(
+					(context) => context.nodeId === node.id,
+				),
+				calls: trace?.calls.filter((call) => call.nodeId === node.id),
 				output: trace?.outputs.findLast((output) => output.nodeId === node.id)
 					?.text,
 			},

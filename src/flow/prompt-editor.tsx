@@ -27,25 +27,35 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import {
+	ContextPolicyFields,
+	type ContextSourceOption,
+} from "@/flow/context-policy-fields";
 import type { ModelNodeSettings } from "@/flow/graph";
 import {
 	type DraftPromptMessage,
 	ModelMessagesEditor,
 } from "@/flow/model-messages-editor";
-import {
-	ModelThinkingField,
-	parseThinkingDraft,
-	thinkingDraftForModel,
-} from "@/flow/model-thinking-field";
+import { ModelThinkingField } from "@/flow/model-thinking-field";
+import { PricingFields } from "@/flow/pricing-fields";
 import { StartVariableBinding } from "@/flow/start-variable-binding";
+import {
+	type ContextDocument,
+	type ContextPolicy,
+	contextPolicySchema,
+	DEFAULT_CONTEXT_POLICY,
+} from "@/lib/context";
+import { publishedPricing } from "@/lib/model-pricing";
 import { textModels } from "@/lib/models";
 import {
 	MAX_PROMPT_LENGTH,
 	type ModelPromptMessage,
 	maxOutputTokensSchema,
 	modelPromptMessagesSchema,
+	modelReasoningEffort,
 	type StartField,
 } from "@/lib/routing";
+import { type Pricing, pricingSchema } from "@/lib/usage";
 
 function ModelOption({ model }: { model: (typeof textModels)[number] }) {
 	return (
@@ -71,9 +81,12 @@ type Props = {
 	modelId: string;
 	maxOutputTokens: number;
 	reasoningEffort?: ModelNodeSettings["reasoningEffort"];
-	thinkingBudget?: number;
 	fields: StartField[];
 	variables: string[];
+	context?: ContextPolicy;
+	pricing?: Pricing;
+	contextSources: ContextSourceOption[];
+	documents: ContextDocument[];
 };
 
 export function PromptEditor({
@@ -87,9 +100,12 @@ export function PromptEditor({
 	modelId,
 	maxOutputTokens,
 	reasoningEffort,
-	thinkingBudget,
 	fields,
 	variables,
+	context,
+	pricing,
+	contextSources,
+	documents,
 }: Props) {
 	const [draft, setDraft] = useState(value);
 	const [messagesDraft, setMessagesDraft] = useState<DraftPromptMessage[]>(() =>
@@ -100,13 +116,17 @@ export function PromptEditor({
 	const [outputTokensDraft, setOutputTokensDraft] = useState(
 		String(maxOutputTokens),
 	);
-	const [thinkingDraft, setThinkingDraft] = useState(() => {
+	const [reasoningDraft, setReasoningDraft] = useState(() => {
 		const model = textModels.find((item) => item.id === modelId);
 		return model
-			? thinkingDraftForModel(model, { reasoningEffort, thinkingBudget })
-			: { kind: "none" as const };
+			? modelReasoningEffort(model.provider, model.id, reasoningEffort)
+			: undefined;
 	});
 	const [error, setError] = useState("");
+	const [contextDraft, setContextDraft] = useState(
+		context ?? DEFAULT_CONTEXT_POLICY,
+	);
+	const [pricingDraft, setPricingDraft] = useState(pricing);
 	const selectedModel = textModels.find((model) => model.id === draftModel);
 	return (
 		<Sheet
@@ -141,7 +161,8 @@ export function PromptEditor({
 										);
 										if (!nextModel || value === draftModel) return;
 										setDraftModel(value);
-										setThinkingDraft(thinkingDraftForModel(nextModel));
+										setPricingDraft(undefined);
+										setReasoningDraft(nextModel.reasoning.defaultEffort);
 									}}
 								>
 									<SelectTrigger id={`model-select-${id}`} className="w-full">
@@ -199,8 +220,8 @@ export function PromptEditor({
 							<ModelThinkingField
 								id={id}
 								model={selectedModel}
-								draft={thinkingDraft}
-								onChange={setThinkingDraft}
+								value={reasoningDraft ?? selectedModel.reasoning.defaultEffort}
+								onChange={setReasoningDraft}
 							/>
 						)}
 						<StartVariableBinding
@@ -230,6 +251,22 @@ export function PromptEditor({
 							messages={messagesDraft}
 							onMessagesChange={setMessagesDraft}
 						/>
+						<ContextPolicyFields
+							id={id}
+							value={contextDraft}
+							onChange={setContextDraft}
+							sources={contextSources}
+							documents={documents}
+						/>
+						<PricingFields
+							id={id}
+							value={pricingDraft}
+							onChange={setPricingDraft}
+							published={
+								selectedModel &&
+								publishedPricing(selectedModel.provider, selectedModel.id)
+							}
+						/>
 						{error && <FieldError>{error}</FieldError>}
 					</FieldGroup>
 				</ScrollArea>
@@ -249,15 +286,11 @@ export function PromptEditor({
 								setError("Select a model.");
 								return;
 							}
-							const thinking = parseThinkingDraft(
-								selectedModel,
-								thinkingDraft,
-								parsed.data,
-							);
-							if (!thinking.success) {
-								setError(
-									"Choose a supported thinking setting below maximum output tokens.",
-								);
+							if (
+								reasoningDraft === undefined ||
+								!selectedModel.reasoning.efforts.includes(reasoningDraft)
+							) {
+								setError("Choose a supported reasoning effort.");
 								return;
 							}
 							const promptMessages = modelPromptMessagesSchema.safeParse(
@@ -267,15 +300,25 @@ export function PromptEditor({
 								setError("Each added message needs content.");
 								return;
 							}
+							const parsedContext = contextPolicySchema.safeParse(contextDraft);
+							const parsedPricing = pricingSchema
+								.optional()
+								.safeParse(pricingDraft);
+							if (!parsedContext.success || !parsedPricing.success) {
+								setError(
+									"Check context settings: budget 1,000–120,000, probability 50–100%, and nonnegative pricing rates.",
+								);
+								return;
+							}
 							onSave({
 								model: draftModel,
 								prompt: draft,
 								promptMessages: promptMessages.data,
 								variables: variablesDraft,
+								context: parsedContext.data,
+								pricing: parsedPricing.data,
 								maxOutputTokens: parsed.data,
-								reasoningEffort: undefined,
-								thinkingBudget: undefined,
-								...thinking.settings,
+								reasoningEffort: reasoningDraft,
 							});
 							onOpenChange(false);
 						}}

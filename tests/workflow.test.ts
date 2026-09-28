@@ -46,8 +46,8 @@ function run(
 			metadata: {},
 			evaluate: (nodeId, _question, state) =>
 				options.decide?.(nodeId, state) ?? Promise.resolve(answer("yes")),
-			runModel: async (target, inputs, onDelta) => {
-				const context = inputs.map((input) => input.text).join(" ");
+			runModel: async ({ target, context: prepared, onDelta }) => {
+				const context = prepared.inputs.map((input) => input.text).join(" ");
 				const text =
 					(await options.model?.(target, context)) ??
 					`answer from ${target.nodeId}`;
@@ -89,7 +89,7 @@ test("an unconnected Jev choice returns its label without a model call", async (
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
 			{ id: "judge", kind: "jev", question: configuredJevQuestion() },
-			{ id: "next", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "next", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
 			{ id: "entry", source: "input", target: "judge" },
@@ -119,7 +119,11 @@ test("an unconnected Jev choice returns its label without a model call", async (
 	const result = await execution.result;
 	expect(result.text).toBe("Choice 2");
 	expect(result.provider).toBe("jev");
-	expect(result.usage).toEqual({ inputTokens: 93, outputTokens: 0 });
+	expect(result.usage).toMatchObject({
+		inputTokens: 93,
+		outputTokens: 0,
+		complete: true,
+	});
 	expect(execution.deltas).toEqual(["Choice 2"]);
 });
 
@@ -162,7 +166,7 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 				id: "first-model",
 				kind: "model",
 				provider: "openai",
-				model: "gpt-5-mini",
+				model: "gpt-6-luna",
 			},
 		],
 		edges: [
@@ -189,7 +193,10 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 				latencyMs: 1,
 			};
 		},
-		runModel: async (target) => ({ text: target.nodeId, model: target.model }),
+		runModel: async ({ target }) => ({
+			text: target.nodeId,
+			model: target.model,
+		}),
 		onDelta: () => {},
 		onRoute: () => {},
 		onProgress: () => {},
@@ -238,7 +245,7 @@ test("Model execution receives its configured generation settings", async () => 
 				id: "model",
 				kind: "model",
 				provider: "openai",
-				model: "gpt-5-mini",
+				model: "gpt-6-luna",
 				maxOutputTokens: 640,
 				reasoningEffort: "low",
 			},
@@ -290,14 +297,14 @@ test("Start values reach only the nodes that select them", async () => {
 				id: "yes",
 				kind: "model",
 				provider: "openai",
-				model: "gpt-5-mini",
+				model: "gpt-6-luna",
 				variables: ["requestRateRps"],
 			},
 			{
 				id: "no",
 				kind: "model",
 				provider: "google",
-				model: "gemini-3.5-flash-lite",
+				model: "gemini-3.8-flash",
 			},
 		],
 		edges: [
@@ -316,9 +323,9 @@ test("Start values reach only the nodes that select them", async () => {
 			state = input;
 			return answer("yes");
 		},
-		runModel: async (_target, _inputs, _onDelta, variables) => {
+		runModel: async ({ variables }) => {
 			modelVariables = variables;
-			return { text: "ok", model: "gpt-5-mini" };
+			return { text: "ok", model: "gpt-6-luna" };
 		},
 		onDelta: () => {},
 		onRoute: () => {},
@@ -338,7 +345,7 @@ test("a model can feed its output to Jev and another model", async () => {
 				id: "draft",
 				kind: "model",
 				provider: "openai",
-				model: "gpt-5-mini",
+				model: "gpt-6-luna",
 				prompt: "Draft",
 			},
 			{ id: "gate", kind: "jev", question: configuredJevQuestion("noul") },
@@ -346,7 +353,7 @@ test("a model can feed its output to Jev and another model", async () => {
 				id: "final",
 				kind: "model",
 				provider: "google",
-				model: "gemini-3.5-flash-lite",
+				model: "gemini-3.8-flash",
 				prompt: "Revise",
 			},
 		],
@@ -370,7 +377,7 @@ test("a model can feed its output to Jev and another model", async () => {
 		},
 	});
 	const result = await execution.result;
-	expect(states[0]).toContain("[draft] Draft text");
+	expect(states[0]).toContain("[draft · revision 1] Draft text");
 	expect(inputs).toEqual(["draft: ", "final: Draft text Decision: Yes"]);
 	expect(execution.deltas).toEqual(["Final text"]);
 	expect(result.outputs.map((output) => output.nodeId)).toEqual([
@@ -385,15 +392,15 @@ test("parallel model results join before Jev evaluates them", async () => {
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "first", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "first", kind: "model", provider: "openai", model: "gpt-6-luna" },
 			{
 				id: "second",
 				kind: "model",
 				provider: "google",
-				model: "gemini-3.5-flash-lite",
+				model: "gemini-3.8-flash",
 			},
 			{ id: "judge", kind: "jev", question: configuredJevQuestion("noul") },
-			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
 			{ id: "a", source: "input", target: "first" },
@@ -429,8 +436,8 @@ test("parallel model results join before Jev evaluates them", async () => {
 		"judge",
 		"final",
 	]);
-	expect(judgedState).toContain("[first] first result");
-	expect(judgedState).toContain("[second] second result");
+	expect(judgedState).toContain("[first · revision 1] first result");
+	expect(judgedState).toContain("[second · revision 1] second result");
 	expect(result.traversedEdges.map((edge) => edge.id)).toEqual([
 		"a",
 		"b",
@@ -446,14 +453,14 @@ test("model failure uses the connected backup once before downstream work", asyn
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "primary", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "primary", kind: "model", provider: "openai", model: "gpt-6-luna" },
 			{
 				id: "backup",
 				kind: "model",
 				provider: "google",
-				model: "gemini-3.5-flash-lite",
+				model: "gemini-3.8-flash",
 			},
-			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
 			{ id: "entry", source: "input", target: "primary" },
@@ -489,19 +496,19 @@ test("model failure uses the connected backup once before downstream work", asyn
 	expect(result.fallbackReason).toContain("unavailable");
 });
 
-test("a Jev feedback branch repeats a model with the latest result and exits at its limit", async () => {
+test("a Jev feedback branch stops without approval when its repeat budget is exhausted", async () => {
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "draft", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "draft", kind: "model", provider: "openai", model: "gpt-6-luna" },
 			{
 				id: "judge",
 				kind: "jev",
 				question: configuredJevQuestion("noul"),
 				maxRepeats: 2,
 			},
-			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
 			{ id: "entry", source: "input", target: "draft" },
@@ -531,14 +538,16 @@ test("a Jev feedback branch repeats a model with the latest result and exits at 
 	});
 	const result = await execution.result;
 	expect(modelCalls).toBe(3);
-	expect(states[2]).toContain("[draft] draft 3");
-	expect(result.text).toContain("draft 3");
+	expect(states[2]).toContain("[draft · revision 3] draft 3");
+	expect(result.text).toBe("Repeat limit reached. Review did not pass.");
+	expect(result.outcome).toBe("repeat-exhausted");
+	expect(result.path.some((step) => step.nodeId === "final")).toBe(false);
 	expect(result.jevSteps.map((step) => step.branch)).toEqual([
 		"no",
 		"no",
-		"yes",
+		"no",
 	]);
-	expect(result.jevSteps.at(-1)?.limitReached).toBe(true);
+	expect(result.jevSteps.at(-1)?.status).toBe("exhausted");
 	expect(result.traversedEdges.filter((edge) => edge.repeat)).toHaveLength(2);
 });
 
@@ -547,15 +556,15 @@ test("a parallel join waits for a repeating branch before running the final mode
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "draft", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "draft", kind: "model", provider: "openai", model: "gpt-6-luna" },
 			{
 				id: "context",
 				kind: "model",
 				provider: "google",
-				model: "gemini-3.5-flash-lite",
+				model: "gemini-3.8-flash",
 			},
 			{ id: "judge", kind: "jev", question: configuredJevQuestion("noul") },
-			{ id: "final", kind: "model", provider: "openai", model: "gpt-5-mini" },
+			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
 			{ id: "draft-entry", source: "input", target: "draft" },

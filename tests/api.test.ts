@@ -37,7 +37,7 @@ describe("chatflow API", () => {
 					id: "selected-model",
 					kind: "model",
 					provider: "openai",
-					model: "gpt-4.1",
+					model: "gpt-6-luna",
 				},
 			],
 			edges: [{ id: "entry", source: "input", target: "selected-model" }],
@@ -45,7 +45,7 @@ describe("chatflow API", () => {
 		expect(response.status).toBe(200);
 		expect(events.find((event) => event.type === "route")).toMatchObject({
 			type: "route",
-			route: { model: "gpt-4.1", nodeId: "selected-model" },
+			route: { model: "gpt-6-luna", nodeId: "selected-model" },
 		});
 		expect(events).toContainEqual({
 			type: "timing",
@@ -75,13 +75,13 @@ describe("chatflow API", () => {
 					id: "first-model",
 					kind: "model",
 					provider: "google",
-					model: "gemini-3.5-flash-lite",
+					model: "gemini-3.8-flash",
 				},
 				{
 					id: "second-model",
 					kind: "model",
 					provider: "openai",
-					model: "gpt-5-mini",
+					model: "gpt-6-luna",
 				},
 			],
 			edges: [

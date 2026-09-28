@@ -4,6 +4,11 @@ import type {
 } from "ai";
 import { z } from "zod";
 
+const probabilitiesSchema = z.record(
+	z.string(),
+	z.number().finite().min(0).max(1),
+);
+
 function questionSchema(text: z.ZodString) {
 	const choiceQuestionSchema = z.object({
 		type: z.literal("choice"),
@@ -197,5 +202,10 @@ export function resolveJevAnswer(
 		confidence > 1
 	)
 		throw new Error("Jev returned no task confidence");
+	if (probabilities !== undefined) {
+		const parsed = probabilitiesSchema.safeParse(probabilities);
+		if (!parsed.success) throw new Error("Jev returned invalid probabilities");
+		probabilities = parsed.data;
+	}
 	return { branch, value, probabilities, confidence };
 }

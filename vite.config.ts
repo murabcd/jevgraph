@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { handleApi } from "./server/api.ts";
+import { MAX_REQUEST_BYTES } from "./src/lib/routing.ts";
 
 async function serveApi(
 	req: IncomingMessage,
@@ -18,7 +19,7 @@ async function serveApi(
 		let bytes = 0;
 		for await (const chunk of req) {
 			bytes += chunk.length;
-			if (bytes > 65536) {
+			if (bytes > MAX_REQUEST_BYTES) {
 				res.statusCode = 413;
 				res.end(JSON.stringify({ error: "Request is too large" }));
 				return;

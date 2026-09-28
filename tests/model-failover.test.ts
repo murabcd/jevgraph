@@ -6,13 +6,13 @@ import { DEFAULT_MODEL_MAX_OUTPUT_TOKENS } from "../src/lib/routing";
 const primary: RouteTarget = {
 	nodeId: "primary",
 	provider: "openai",
-	model: "gpt-5-mini",
+	model: "gpt-6-luna",
 	maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 };
 const backup: RouteTarget = {
 	nodeId: "backup",
 	provider: "google",
-	model: "gemini-2.5-flash",
+	model: "gemini-3.8-flash",
 	maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 };
 

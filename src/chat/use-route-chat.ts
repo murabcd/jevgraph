@@ -1,9 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import type { ChatTurn } from "@/chat/types";
+import {
+	applyNodeTimerEvent,
+	interruptNodeTimers,
+	type NodeTimer,
+} from "@/lib/node-timer";
 import { readRouteStream } from "@/lib/route-stream";
 import type {
 	ChatMessage,
-	NodeTiming,
 	RouteResult,
 	RouteStreamEvent,
 	RouteTrace,
@@ -19,9 +23,7 @@ export function useRouteChat(
 	const [result, setResult] = useState<RouteResult | null>(null);
 	const [trace, setTrace] = useState<RouteTrace | null>(null);
 	const [resultRouteKey, setResultRouteKey] = useState<string | null>(null);
-	const [nodeTimings, setNodeTimings] = useState<Record<string, NodeTiming>>(
-		{},
-	);
+	const [nodeTimings, setNodeTimings] = useState<Record<string, NodeTimer>>({});
 	const [error, setError] = useState("");
 	const [running, setRunning] = useState(false);
 	const routeKey = useMemo(
@@ -73,23 +75,20 @@ export function useRouteChat(
 			});
 			await readRouteStream(response, (event: RouteStreamEvent) => {
 				if (event.type === "progress") setTrace(event.trace);
-				if (event.type === "timing") {
+				if (event.type === "node-start" || event.type === "timing") {
+					const nodeId =
+						event.type === "node-start" ? event.nodeId : event.timing.nodeId;
+					const receivedAt = performance.now();
 					setNodeTimings((current) => ({
 						...current,
-						[event.timing.nodeId]: current[event.timing.nodeId]
-							? {
-									...event.timing,
-									durationMs:
-										current[event.timing.nodeId].durationMs +
-										event.timing.durationMs,
-									attempts: (current[event.timing.nodeId].attempts ?? 1) + 1,
-								}
-							: event.timing,
+						[nodeId]: applyNodeTimerEvent(current[nodeId], event, receivedAt),
 					}));
 				}
 				if (event.type === "route") {
 					const preview: RouteResult = {
 						...event.route,
+						usage: { complete: false, costComplete: false },
+						outcome: "completed",
 						text: "",
 						latencyMs: 0,
 					};
@@ -143,6 +142,8 @@ export function useRouteChat(
 				),
 			);
 		} finally {
+			const stoppedAt = performance.now();
+			setNodeTimings((current) => interruptNodeTimers(current, stoppedAt));
 			setRunning(false);
 		}
 	}, [draft, messages, routes, routeKey, running, onRequestStarted]);

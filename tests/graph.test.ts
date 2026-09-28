@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import type { Edge } from "@xyflow/react";
 import {
 	canConnectNodes,
+	duplicateModelNode,
 	type FlowNode,
 	nodeStepLabels,
 	readGraph,
@@ -10,6 +11,7 @@ import {
 	routesFromGraph,
 	saveGraph,
 } from "../src/flow/graph";
+import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import { defaultJevQuestion, questionOutputs } from "../src/lib/jev-question";
 import {
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
@@ -59,13 +61,13 @@ function node(
 				: {}),
 			...(kind === "openai"
 				? {
-						model: "gpt-5-mini",
+						model: "gpt-6-luna",
 						maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 					}
 				: {}),
 			...(kind === "google"
 				? {
-						model: "gemini-3.5-flash-lite",
+						model: "gemini-3.8-flash",
 						maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 					}
 				: {}),
@@ -74,6 +76,115 @@ function node(
 }
 
 describe("editable chatflow graph", () => {
+	test("duplicates model configuration without copying execution state or losing context and prices", () => {
+		const original: FlowNode = {
+			id: "original",
+			type: "route",
+			position: { x: 0, y: 0 },
+			selected: true,
+			data: {
+				kind: "openai",
+				active: true,
+				model: "gpt-6-luna",
+				maxOutputTokens: 800,
+				reasoningEffort: "none",
+				prompt: "Keep it short.",
+				promptMessages: [{ role: "user", content: "Example" }],
+				variables: ["test"],
+				context: {
+					...DEFAULT_CONTEXT_POLICY,
+					historyMessages: 2,
+					documents: [{ id: "kb", representation: "summary" }],
+				},
+				pricing: { input: 1, output: 2 },
+				output: "Last answer",
+				timing: { nodeId: "original", durationMs: 42, status: "completed" },
+				isBackup: true,
+			},
+		};
+		const duplicated = duplicateModelNode([original], "original", "copy");
+		const copy = duplicated.at(-1);
+		expect(copy).toMatchObject({
+			id: "copy",
+			selected: true,
+			data: {
+				kind: "openai",
+				active: false,
+				model: "gpt-6-luna",
+				maxOutputTokens: 800,
+				prompt: "Keep it short.",
+				promptMessages: original.data.promptMessages,
+				variables: ["test"],
+				reasoningEffort: "none",
+				context: original.data.context,
+				pricing: original.data.pricing,
+			},
+		});
+		expect(copy?.data.output).toBeUndefined();
+		expect(copy?.data.timing).toBeUndefined();
+		expect(copy?.data.isBackup).toBeUndefined();
+		expect(duplicated[0].selected).toBe(false);
+		expect(original.selected).toBe(true);
+		expect(duplicateModelNode([original], "missing", "copy")).toEqual([
+			original,
+		]);
+	});
+
+	test("restores document representations and prices without persisting execution data, and removes deleted output bindings", () => {
+		const graph = connectedWorkflowGraph();
+		const policy = {
+			...DEFAULT_CONTEXT_POLICY,
+			upstream: "selected" as const,
+			outputNodeIds: ["first-router"],
+			documents: [{ id: "guide", representation: "summary" as const }],
+			relevance: { instructions: "Keep constraints", minimumConfidence: 0.9 },
+		};
+		graph.nodes = graph.nodes.map(
+			(item): FlowNode => ({
+				...item,
+				data:
+					item.data.kind === "input"
+						? {
+								...item.data,
+								documents: [
+									{
+										id: "guide",
+										name: "Guide",
+										content: "Full source",
+										summary: "Short guide",
+									},
+								],
+							}
+						: item.id === "primary-model"
+							? {
+									...item.data,
+									context: policy,
+									pricing: { input: 1, output: 2 },
+									output: "Private execution result",
+								}
+							: item.data,
+			}),
+		);
+		saveGraph(graph.nodes, graph.edges);
+		const restored = readGraph();
+		const routes = routesFromGraph(restored.nodes, restored.edges);
+		expect(routes).not.toBeNull();
+		expect(
+			routes?.nodes.find(({ id }) => id === "primary-model"),
+		).toMatchObject({ context: policy, pricing: { input: 1, output: 2 } });
+		expect(
+			restored.nodes.find(({ id }) => id === "primary-model")?.data.output,
+		).toBeUndefined();
+		const removed = removeGraphNode(
+			restored.nodes,
+			restored.edges,
+			"first-router",
+		);
+		expect(
+			removed.nodes.find(({ id }) => id === "primary-model")?.data.context
+				?.outputNodeIds,
+		).toEqual([]);
+	});
 	test("compiles, persists, and restores a connected Jev flow with a model backup", () => {
 		const graph = connectedWorkflowGraph();
 		const routes = routesFromGraph(graph.nodes, graph.edges);
@@ -113,7 +224,7 @@ describe("editable chatflow graph", () => {
 				data: {
 					kind: "openai" as const,
 					active: false,
-					model: "gpt-5-mini",
+					model: "gpt-6-luna",
 					maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 					variables: ["plan"],
 				},
@@ -153,15 +264,8 @@ describe("editable chatflow graph", () => {
 		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
 		expect(routesFromGraph(nodes, edges)?.nodes[1]).toMatchObject({
 			kind: "model",
-			reasoningEffort: "minimal",
-		});
-		const lite = {
-			...nodes[1],
-			data: { ...nodes[1].data, model: "gemini-2.5-flash-lite" },
-		};
-		expect(routesFromGraph([nodes[0], lite], edges)?.nodes[1]).toMatchObject({
-			kind: "model",
-			thinkingBudget: 0,
+			model: "gemini-3.8-flash",
+			reasoningEffort: "medium",
 		});
 	});
 
@@ -478,7 +582,7 @@ describe("editable chatflow graph", () => {
 						position: { x: 1, y: 0 },
 						data: {
 							kind: "openai",
-							model: "gpt-5-mini",
+							model: "gpt-6-luna",
 							maxOutputTokens: 1400,
 						},
 					},

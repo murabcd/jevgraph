@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { NodeTimer } from "@/lib/node-timer";
 import "@xyflow/react/dist/style.css";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import {
 	type CreatableNodeKind,
 	canConnectNodes,
 	type FlowNode,
+	reachesNode,
 } from "@/flow/graph";
 import {
 	NODE_PICKER_NODE_ID,
@@ -44,14 +46,14 @@ import { nodeTitle } from "@/flow/node-meta";
 import { RouteNode } from "@/flow/route-node";
 import { RouteNodePanel } from "@/flow/route-node-panel";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
-import type { NodeTiming, RouteTrace } from "@/lib/routing";
+import type { RouteTrace } from "@/lib/routing";
 
 const nodeTypes = { route: RouteNode, "node-picker": NodeConnectionPicker };
 
 type RoutingCanvasProps = {
 	graph: ReturnType<typeof useRoutingGraph>;
 	result: RouteTrace | null;
-	timings: Record<string, NodeTiming>;
+	timings: Record<string, NodeTimer>;
 	running: boolean;
 	chatOpen: boolean;
 	onDuplicateNode: (nodeId: string) => void;
@@ -246,6 +248,22 @@ export function RoutingCanvas({
 					startFields={
 						startNode?.data.kind === "input" ? startNode.data.fields : []
 					}
+					documents={
+						startNode?.data.kind === "input"
+							? (startNode.data.documents ?? [])
+							: []
+					}
+					contextSources={nodes
+						.filter(
+							(node) =>
+								node.id !== panelNode.id &&
+								node.data.kind !== "input" &&
+								reachesNode(node.id, panelNode.id, graphEdges),
+						)
+						.map((node) => ({
+							id: node.id,
+							name: `${nodeTitle(node.data)} · ${node.id}`,
+						}))}
 					onClose={() => setPanel(null)}
 					actions={graph}
 				/>
