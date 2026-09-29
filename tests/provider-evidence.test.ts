@@ -103,3 +103,80 @@ test("cancelled provider streams retain consumed output and cancel their source"
 	});
 	expect(evidenceCoverage(recorder.snapshot(), ["cancel"])).toBe("partial");
 });
+
+test("raw byte counts survive split Unicode and malformed UTF-8 without claiming complete evidence", async () => {
+	const recorder = new ProviderEvidence();
+	const chunks = [
+		new Uint8Array([0xf0, 0x9f]),
+		new Uint8Array([0x98, 0x80, 0xff]),
+	];
+	const transport = recorder.fetch(
+		async () =>
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						for (const chunk of chunks) controller.enqueue(chunk);
+						controller.close();
+					},
+				}),
+			),
+	);
+	const bytes = await recorder.run(
+		"invalid",
+		async () =>
+			new Uint8Array(
+				await (
+					await transport("https://fixture.example", {
+						method: "POST",
+						body: new Uint8Array([0xff]),
+					})
+				).arrayBuffer(),
+			),
+	);
+	expect([...bytes]).toEqual([0xf0, 0x9f, 0x98, 0x80, 0xff]);
+	expect(recorder.snapshot()[0]).toMatchObject({
+		request: { bytes: 1, complete: false },
+		response: { bytes: 5, complete: false },
+		state: "completed",
+	});
+	expect(evidenceCoverage(recorder.snapshot(), ["invalid"])).toBe("partial");
+	const valid = new ProviderEvidence();
+	const validFetch = valid.fetch(
+		async () =>
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(new Uint8Array([0xef, 0xbb, 0xbf]));
+						controller.enqueue(chunks[0]);
+						controller.enqueue(new Uint8Array([0x98, 0x80]));
+						controller.close();
+					},
+				}),
+			),
+	);
+	await valid.run("unicode", async () =>
+		(await validFetch("https://fixture.example")).text(),
+	);
+	expect(valid.snapshot()[0].response).toEqual({
+		text: "\ufeff😀",
+		bytes: 7,
+		complete: true,
+	});
+});
+
+test("stream redaction protects every credential split and preserves ordinary text", () => {
+	const credential = "private-key-echo";
+	const recorder = new ProviderEvidence([credential]);
+	for (let split = 1; split < credential.length; split++) {
+		const stream = recorder.streamRedactor();
+		expect(
+			stream.write(`Before ${credential.slice(0, split)}`) +
+				stream.write(`${credential.slice(split)} after`) +
+				stream.finish(),
+		).toBe("Before * after");
+	}
+	const stream = recorder.streamRedactor();
+	expect(stream.write("Plain p") + stream.write("rose") + stream.finish()).toBe(
+		"Plain prose",
+	);
+});

@@ -161,14 +161,18 @@ test("indexing shares work, while changed source text gets a fresh index", async
 			embed: embedding,
 		}),
 	).rejects.toThrow("Retrieval document version is not declared");
-	await fixture.persistence.fail(
+	await fixture.persistence.settle(
 		fixture.run.runId,
-		"",
-		"New document version",
-		false,
-		emptyRouteTrace(),
-		0,
-		[],
+		{
+			status: "failed",
+			text: "",
+			error: "New document version",
+			trace: emptyRouteTrace(),
+			latencyMs: 0,
+			providerEvidence: [],
+			coverage: "complete",
+		},
+		(text) => text,
 	);
 	const updated = routes();
 	const start = updated.nodes.find((node) => node.kind === "input");
@@ -215,14 +219,18 @@ test("retrieval rejects forged source keys and stale document versions within th
 			})),
 		),
 	).rejects.toThrow("Retrieval key does not match its source");
-	await fixture.persistence.fail(
+	await fixture.persistence.settle(
 		fixture.run.runId,
-		"",
-		"Change source",
-		false,
-		emptyRouteTrace(),
-		0,
-		[],
+		{
+			status: "failed",
+			text: "",
+			error: "Change source",
+			trace: emptyRouteTrace(),
+			latencyMs: 0,
+			providerEvidence: [],
+			coverage: "complete",
+		},
+		(text) => text,
 	);
 	const updated = routes();
 	const start = updated.nodes.find((node) => node.kind === "input");

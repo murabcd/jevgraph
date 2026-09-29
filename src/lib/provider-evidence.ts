@@ -18,7 +18,15 @@ export const providerExchangeSchema = z.strictObject({
 	error: z.string().optional(),
 });
 export type ProviderExchange = z.infer<typeof providerExchangeSchema>;
-export const providerEvidenceSchema = z.array(providerExchangeSchema).max(200);
+export const providerEvidenceSchema = z
+	.array(providerExchangeSchema)
+	.max(200)
+	.refine(
+		(exchanges) =>
+			new Set(exchanges.map((exchange) => exchange.id)).size ===
+			exchanges.length,
+		"Provider exchange identities must be unique",
+	);
 
 export function evidenceCoverage(
 	exchanges: ProviderExchange[],

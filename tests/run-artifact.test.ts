@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { api } from "../convex/_generated/api";
+import { ProviderEvidence } from "../server/provider-evidence";
 import { serializeRunArtifact } from "../server/serialize-run-artifact";
 import { executeWorkflow } from "../server/workflow";
 import { type RouteTrace, workflowRoutesSchema } from "../src/lib/routing";
@@ -138,17 +139,62 @@ test("oversized artifacts preserve settlement and mark lost trace evidence", asy
 	});
 	const artifact = runArtifactSchema.parse(
 		JSON.parse(
-			serializeRunArtifact({
-				status: "failed",
-				text: "Partial answer",
-				error: "Provider failed",
-				latencyMs: 1,
-				trace,
-				providerEvidence: [],
-				coverage: "unavailable",
-			}),
+			serializeRunArtifact(
+				{
+					status: "failed",
+					text: "Partial answer",
+					error: "Provider failed",
+					latencyMs: 1,
+					trace,
+					providerEvidence: [],
+					coverage: "unavailable",
+				},
+				(text) => text,
+			),
 		),
 	);
 	expect(artifact.coverage).toBe("partial");
 	expect(artifactTrace(artifact).outputs[0].text).toHaveLength(4000);
+});
+
+test("credential echoes are removed from all persisted trace text and prevent complete coverage", () => {
+	const credential = 'private"key\\echo';
+	const trace = emptyRouteTrace();
+	trace.calls.push({
+		id: "call:1",
+		nodeId: "draft",
+		purpose: "model",
+		provider: "openai",
+		model: "gpt-6-luna",
+		status: "failed",
+		durationMs: 1,
+		error: `Call failed: ${credential}`,
+	});
+	trace.outputs.push({
+		nodeId: "draft",
+		sourceNodeId: "draft",
+		kind: "model",
+		revision: 1,
+		text: `Partial ${credential}`,
+	});
+	const input = {
+		status: "failed" as const,
+		text: `Partial ${credential}`,
+		error: `Failure ${credential}`,
+		latencyMs: 1,
+		trace,
+		providerEvidence: [],
+		coverage: "unavailable" as const,
+	};
+	const serialized = serializeRunArtifact(
+		input,
+		new ProviderEvidence([credential]).redact,
+	);
+	expect(serialized).not.toContain("private");
+	const artifact = runArtifactSchema.parse(JSON.parse(serialized));
+	expect(artifact.coverage).toBe("partial");
+	expect(artifact.status === "failed" && artifact.text).toBe("Partial *");
+	expect(() =>
+		runArtifactSchema.parse({ ...input, coverage: "complete" }),
+	).toThrow("all recorded provider bodies");
 });

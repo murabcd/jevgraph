@@ -2,11 +2,28 @@ import {
 	artifactTrace,
 	MAX_ARTIFACT_BYTES,
 	type RunArtifact,
+	runArtifactSchema,
 } from "../src/lib/run-artifact.ts";
 
 /** Retains ordinary full traces and explicitly marks exceptional size loss. */
-export function serializeRunArtifact(artifact: RunArtifact): string {
-	const serialized = JSON.stringify(artifact);
+export function serializeRunArtifact(
+	artifact: RunArtifact,
+	redact: (text: string) => string,
+): string {
+	let redacted = false;
+	let serialized = JSON.stringify(artifact, (_key, value: unknown) => {
+		if (typeof value !== "string") return value;
+		const sanitized = redact(value);
+		redacted ||= sanitized !== value;
+		return sanitized;
+	});
+	if (redacted) {
+		artifact = {
+			...runArtifactSchema.parse(JSON.parse(serialized)),
+			coverage: "partial",
+		};
+		serialized = JSON.stringify(artifact);
+	}
 	if (new TextEncoder().encode(serialized).length <= MAX_ARTIFACT_BYTES)
 		return serialized;
 	const trace = artifactTrace(artifact);

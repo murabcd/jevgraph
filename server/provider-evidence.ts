@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+	evidenceCoverage,
 	MAX_PROVIDER_EVIDENCE_BYTES,
 	type ProviderExchange,
 } from "../src/lib/provider-evidence.ts";
@@ -16,10 +17,41 @@ export class ProviderEvidence {
 		this.credentials = credentials.filter((value) => value.length > 0);
 	}
 
-	redact(text: string) {
+	redact = (text: string) => {
 		for (const credential of this.credentials)
 			text = text.replaceAll(credential, "*");
 		return text;
+	};
+
+	/** Holds only a possible credential prefix so split deltas cannot reveal a complete key. */
+	streamRedactor() {
+		let pending = "";
+		return {
+			write: (text: string) => {
+				pending = this.redact(pending + text);
+				let keep = 0;
+				for (const credential of this.credentials) {
+					for (
+						let length = Math.min(credential.length - 1, pending.length);
+						length > keep;
+						length--
+					) {
+						if (pending.endsWith(credential.slice(0, length))) {
+							keep = length;
+							break;
+						}
+					}
+				}
+				const visible = pending.slice(0, pending.length - keep);
+				pending = pending.slice(pending.length - keep);
+				return visible;
+			},
+			finish: () => {
+				const text = pending;
+				pending = "";
+				return text;
+			},
+		};
 	}
 
 	run<T>(callId: string, run: () => Promise<T>) {
@@ -44,8 +76,20 @@ export class ProviderEvidence {
 		}));
 	}
 
-	private retain(body: ProviderExchange["request"], text: string) {
-		body.bytes += new TextEncoder().encode(text).length;
+	artifactEvidence(callIds: string[]) {
+		const providerEvidence = this.snapshot();
+		return {
+			providerEvidence,
+			coverage: evidenceCoverage(providerEvidence, callIds),
+		};
+	}
+
+	private retain(
+		body: ProviderExchange["request"],
+		text: string,
+		bytes: number,
+	) {
+		body.bytes += bytes;
 		let end = text.length;
 		const size = (end: number) =>
 			new TextEncoder().encode(JSON.stringify(text.slice(0, end))).length - 2;
@@ -87,7 +131,22 @@ export class ProviderEvidence {
 			};
 			this.exchanges.push(exchange);
 			try {
-				this.retain(exchange.request, await request.clone().text());
+				const requestBytes = new Uint8Array(
+					await request.clone().arrayBuffer(),
+				);
+				let requestText: string;
+				try {
+					requestText = new TextDecoder("utf-8", {
+						fatal: true,
+						ignoreBOM: true,
+					}).decode(requestBytes);
+				} catch {
+					exchange.request.complete = false;
+					requestText = new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+						requestBytes,
+					);
+				}
+				this.retain(exchange.request, requestText, requestBytes.byteLength);
 				const response = await transport(input, init);
 				exchange.httpStatus = response.status;
 				if (!response.body) {
@@ -95,20 +154,33 @@ export class ProviderEvidence {
 					return response;
 				}
 				const reader = response.body.getReader();
-				const decoder = new TextDecoder();
+				let decoder = new TextDecoder("utf-8", {
+					fatal: true,
+					ignoreBOM: true,
+				});
+				const decode = (bytes?: Uint8Array) => {
+					try {
+						return decoder.decode(bytes, { stream: bytes !== undefined });
+					} catch {
+						exchange.response.complete = false;
+						decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+						return decoder.decode(bytes, { stream: bytes !== undefined });
+					}
+				};
 				const body = new ReadableStream<Uint8Array>({
 					pull: async (controller) => {
 						try {
 							const part = await reader.read();
 							if (part.done) {
-								this.retain(exchange.response, decoder.decode());
+								this.retain(exchange.response, decode(), 0);
 								exchange.state = "completed";
 								reader.releaseLock();
 								controller.close();
 							} else {
 								this.retain(
 									exchange.response,
-									decoder.decode(part.value, { stream: true }),
+									decode(part.value),
+									part.value.byteLength,
 								);
 								controller.enqueue(part.value);
 							}

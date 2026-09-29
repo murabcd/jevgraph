@@ -7,18 +7,13 @@ import {
 	type FrozenCase,
 	frozenCaseSchema,
 } from "../src/lib/evaluation-case.ts";
-import {
-	evidenceCoverage,
-	type ProviderExchange,
-} from "../src/lib/provider-evidence.ts";
 import { recordedReviewSchema } from "../src/lib/quality-review.ts";
 import { routeEvidenceSchema } from "../src/lib/route-evidence.ts";
-import type {
-	RouteResult,
-	RouteTrace,
-	WorkflowRoutes,
+import {
+	type WorkflowRoutes,
+	workflowRoutesSchema,
 } from "../src/lib/routing.ts";
-import { workflowRoutesSchema } from "../src/lib/routing.ts";
+import type { RunArtifact } from "../src/lib/run-artifact.ts";
 import type { RetrievalStore } from "./retrieval.ts";
 import { serializeRunArtifact } from "./serialize-run-artifact.ts";
 import type { SummaryStore } from "./session-memory.ts";
@@ -63,49 +58,17 @@ export class ConvexPersistence {
 			input: frozenCaseSchema.parse(JSON.parse(started.input)),
 		};
 	}
-	async finish(
+	async settle(
 		runId: Id<"runs">,
-		result: RouteResult,
-		providerEvidence: ProviderExchange[],
+		artifact: RunArtifact,
+		redact: (text: string) => string,
 	) {
 		await this.client.action(api.results.save, {
 			runId,
-			result: serializeRunArtifact({
-				status: "completed",
-				result,
-				providerEvidence,
-				coverage: evidenceCoverage(
-					providerEvidence,
-					result.calls.map((call) => call.id),
-				),
-			}),
+			result: serializeRunArtifact(artifact, redact),
 		});
 	}
-	async fail(
-		runId: Id<"runs">,
-		content: string,
-		error: string,
-		interrupted: boolean,
-		trace: RouteTrace,
-		latencyMs: number,
-		providerEvidence: ProviderExchange[],
-	) {
-		await this.client.action(api.results.save, {
-			runId,
-			result: serializeRunArtifact({
-				status: interrupted ? "interrupted" : "failed",
-				text: content,
-				error: error.slice(0, 2000),
-				trace,
-				latencyMs,
-				providerEvidence,
-				coverage: evidenceCoverage(
-					providerEvidence,
-					trace.calls.map((call) => call.id),
-				),
-			}),
-		});
-	}
+
 	async inspect(runId: string) {
 		const saved = await this.client.query(api.runs.inspect, { runId });
 		return {

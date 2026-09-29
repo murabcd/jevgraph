@@ -397,10 +397,27 @@ export async function handleApi(
 		);
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
-				const emit = (event: RouteStreamEvent) => {
-					if (event.type === "delta") partialText += event.text;
+				const redactedDeltas = providerEvidence.streamRedactor();
+				const send = (event: RouteStreamEvent) => {
 					if (!closed)
-						controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+						controller.enqueue(
+							encoder.encode(
+								`${JSON.stringify(event, (_key, value: unknown) => (typeof value === "string" ? providerEvidence.redact(value) : value))}\n`,
+							),
+						);
+				};
+				const emit = (event: RouteStreamEvent) => {
+					if (event.type === "delta") {
+						partialText += event.text;
+						const text = redactedDeltas.write(event.text);
+						if (text) send({ type: "delta", text });
+					} else {
+						if (event.type === "done" || event.type === "error") {
+							const text = redactedDeltas.finish();
+							if (text) send({ type: "delta", text });
+						}
+						send(event);
+					}
 				};
 				void executeRoute(
 					{
@@ -445,10 +462,16 @@ export async function handleApi(
 				)
 
 					.then(async (result) => {
-						await persistence.finish(
+						await persistence.settle(
 							saved.runId,
-							result,
-							providerEvidence.snapshot(),
+							{
+								status: "completed",
+								result,
+								...providerEvidence.artifactEvidence(
+									result.calls.map((call) => call.id),
+								),
+							},
+							providerEvidence.redact,
 						);
 						emit({ type: "done", route: result });
 					})
@@ -457,14 +480,19 @@ export async function handleApi(
 							error instanceof Error ? error.message : "Chatflow failed",
 						);
 						await persistence
-							.fail(
+							.settle(
 								saved.runId,
-								partialText,
-								message,
-								signal.aborted,
-								latestTrace,
-								Math.round(performance.now() - executionStarted),
-								providerEvidence.snapshot(),
+								{
+									status: signal.aborted ? "interrupted" : "failed",
+									text: partialText,
+									error: message.slice(0, 2000),
+									trace: latestTrace,
+									latencyMs: Math.round(performance.now() - executionStarted),
+									...providerEvidence.artifactEvidence(
+										latestTrace.calls.map((call) => call.id),
+									),
+								},
+								providerEvidence.redact,
 							)
 							// Lease expiry will release the run if the database is unavailable.
 							.catch((settlementError) => {

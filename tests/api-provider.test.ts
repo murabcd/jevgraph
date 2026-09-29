@@ -257,3 +257,93 @@ test("Luna Max reaches the Responses API and uses published cache read/write rat
 	});
 	expect(result?.usage.estimatedCostUsd).toBeCloseTo(0.00001915, 10);
 });
+
+test("split credential echoes never reach chat deltas, final replies or saved run traces", async () => {
+	const fixture = await createApiFixture();
+	const credential = "private-key-echo";
+	const response = await handleApi(
+		new Request("http://localhost/api/route", {
+			method: "POST",
+			headers: fixture.headers,
+			body: JSON.stringify({
+				...fixture.requestFields(),
+				messages: [{ role: "user", content: "Say hello" }],
+				routes: {
+					kind: "workflow",
+					nodes: [
+						{ id: "input", kind: "input", fields: [] },
+						{
+							id: "answer",
+							kind: "model",
+							provider: "google",
+							model: "gemini-3.8-flash",
+						},
+					],
+					edges: [{ id: "entry", source: "input", target: "answer" }],
+				},
+			}),
+		}),
+		{
+			keys: { GOOGLE_GENERATIVE_AI_API_KEY: credential },
+			connect: fixture.connect,
+			providerFetch: async () =>
+				new Response(
+					[
+						{
+							candidates: [
+								{
+									index: 0,
+									content: {
+										role: "model",
+										parts: [{ text: "Before private-" }],
+									},
+								},
+							],
+							modelVersion: "gemini-3.8-flash",
+						},
+						{
+							candidates: [
+								{
+									index: 0,
+									content: {
+										role: "model",
+										parts: [{ text: "key-echo after" }],
+									},
+									finishReason: "STOP",
+								},
+							],
+							usageMetadata: {
+								promptTokenCount: 10,
+								candidatesTokenCount: 10,
+								totalTokenCount: 20,
+							},
+							modelVersion: "gemini-3.8-flash",
+						},
+					]
+						.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+						.join(""),
+					{ headers: { "Content-Type": "text/event-stream" } },
+				),
+		},
+	);
+	let text = "";
+	let result: RouteResult | undefined;
+	await readRouteStream(response, (event) => {
+		expect(JSON.stringify(event)).not.toContain(credential);
+		if (event.type === "delta") text += event.text;
+		if (event.type === "done") result = event.route;
+	});
+	expect(text).toBe("Before * after");
+	expect(result?.text).toBe(text);
+	const stored = await fixture.t.run(async (ctx) => {
+		const run = await ctx.db.query("runs").first();
+		if (!run?.resultFile) throw new Error("Missing artifact");
+		const blob = await ctx.storage.get(run.resultFile);
+		if (!blob) throw new Error("Missing bytes");
+		return blob.text();
+	});
+	expect(stored).not.toContain(credential);
+	const artifact = runArtifactSchema.parse(JSON.parse(stored));
+	expect(artifact.coverage).toBe("partial");
+	expect(artifact.status === "completed" && artifact.result.text).toBe(text);
+});
