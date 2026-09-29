@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { providerEvidenceSchema } from "./provider-evidence";
 import {
 	type RouteTrace,
 	routeResultSchema,
@@ -17,9 +18,15 @@ export const emptyRouteTrace = (): RouteTrace => ({
 });
 
 export const runArtifactSchema = z.discriminatedUnion("status", [
-	z.strictObject({ status: z.literal("completed"), result: routeResultSchema }),
+	z.strictObject({
+		status: z.literal("completed"),
+		coverage: z.enum(["complete", "partial", "unavailable"]),
+		result: routeResultSchema,
+		providerEvidence: providerEvidenceSchema,
+	}),
 	z.strictObject({
 		status: z.enum(["failed", "interrupted"]),
+		providerEvidence: providerEvidenceSchema,
 		text: z.string().max(240000),
 		error: z.string().min(1).max(2000),
 		latencyMs: z.number().finite().min(0),

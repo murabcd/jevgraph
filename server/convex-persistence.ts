@@ -3,6 +3,10 @@ import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel";
 import type { ContextSummaries } from "../src/lib/context.ts";
+import {
+	evidenceCoverage,
+	type ProviderExchange,
+} from "../src/lib/provider-evidence.ts";
 import { routeEvidenceSchema } from "../src/lib/route-evidence.ts";
 import type {
 	RouteResult,
@@ -10,6 +14,7 @@ import type {
 	WorkflowRoutes,
 } from "../src/lib/routing.ts";
 import type { RetrievalStore } from "./retrieval.ts";
+import { serializeRunArtifact } from "./serialize-run-artifact.ts";
 import type { SummaryStore } from "./session-memory.ts";
 
 type PersistenceClient = Pick<
@@ -47,10 +52,22 @@ export class ConvexPersistence {
 			);
 		return started;
 	}
-	async finish(runId: Id<"runs">, result: RouteResult) {
+	async finish(
+		runId: Id<"runs">,
+		result: RouteResult,
+		providerEvidence: ProviderExchange[],
+	) {
 		await this.client.action(api.results.save, {
 			runId,
-			result: JSON.stringify({ status: "completed", result }),
+			result: serializeRunArtifact({
+				status: "completed",
+				result,
+				providerEvidence,
+				coverage: evidenceCoverage(
+					providerEvidence,
+					result.calls.map((call) => call.id),
+				),
+			}),
 		});
 	}
 	async fail(
@@ -60,16 +77,21 @@ export class ConvexPersistence {
 		interrupted: boolean,
 		trace: RouteTrace,
 		latencyMs: number,
+		providerEvidence: ProviderExchange[],
 	) {
 		await this.client.action(api.results.save, {
 			runId,
-			result: JSON.stringify({
+			result: serializeRunArtifact({
 				status: interrupted ? "interrupted" : "failed",
 				text: content,
 				error: error.slice(0, 2000),
 				trace,
 				latencyMs,
-				coverage: "partial",
+				providerEvidence,
+				coverage: evidenceCoverage(
+					providerEvidence,
+					trace.calls.map((call) => call.id),
+				),
 			}),
 		});
 	}

@@ -37,6 +37,7 @@ import {
 } from "./model-planner.ts";
 import { prepareModelExecution } from "./model-preparation.ts";
 import { type ContextProviders, prepareNodeContext } from "./node-context.ts";
+import type { ProviderEvidence } from "./provider-evidence.ts";
 import { ProviderLedger } from "./provider-ledger.ts";
 import { SessionMemory, type SummaryStore } from "./session-memory.ts";
 import { formattedUpstreamOutputs } from "./upstream-context.ts";
@@ -89,6 +90,7 @@ type Execution = {
 	contextProviders?: ContextProviders;
 	memory?: SessionMemory;
 	summaryStore?: SummaryStore;
+	providerEvidence?: ProviderEvidence;
 	evidenceFor?: (key: string) => Promise<RouteEvidence[]>;
 	availableModels?: ReadonlySet<string>;
 	evaluate: (
@@ -180,6 +182,7 @@ export async function executeWorkflow({
 	memory = new SessionMemory(),
 	summaryStore,
 	evidenceFor,
+	providerEvidence,
 	availableModels = new Set(textModels.map((model) => model.id)),
 	evaluate,
 	runModel,
@@ -206,7 +209,7 @@ export async function executeWorkflow({
 	const traversedEdges: WorkflowEdge[] = [];
 	const decisions: WorkflowDecision[] = [];
 	const outputs: NodeOutput[] = [];
-	const ledger = new ProviderLedger(() => report());
+	const ledger = new ProviderLedger(() => report(), providerEvidence);
 	const calls = ledger.calls;
 	const contexts: NodeContextTrace[] = [];
 	const modelPlans: ModelPlan[] = [];

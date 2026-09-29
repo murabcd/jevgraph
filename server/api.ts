@@ -38,6 +38,7 @@ import {
 	type ProviderFetch,
 	type ProviderKeys,
 } from "./provider-access.ts";
+import { ProviderEvidence } from "./provider-evidence.ts";
 import {
 	evaluationUsage,
 	languageModelUsage,
@@ -68,6 +69,7 @@ type RouteExecution = {
 	signal: AbortSignal;
 	emit: (event: RouteStreamEvent) => void;
 	onSnapshot: (trace: RouteTrace) => void;
+	providerEvidence: ProviderEvidence;
 };
 
 const jevConfidenceSchema = z.object({ task: z.number().finite() });
@@ -193,6 +195,7 @@ async function executeRoute(
 		signal,
 		emit,
 		onSnapshot,
+		providerEvidence,
 	}: RouteExecution,
 	routes: WorkflowRoutes,
 ) {
@@ -277,6 +280,7 @@ async function executeRoute(
 		onDelta: (text) => emit({ type: "delta", text }),
 		onRoute: (route) => emit({ type: "route", route }),
 		onSnapshot,
+		providerEvidence,
 		onProgress: (trace) => emit({ type: "progress", trace }),
 		signal,
 	});
@@ -378,6 +382,11 @@ export async function handleApi(
 			modelPlans: [],
 		};
 		const executionStarted = performance.now();
+		const providerEvidence = new ProviderEvidence(
+			Object.values(keys).filter(
+				(value): value is string => value !== undefined,
+			),
+		);
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const emit = (event: RouteStreamEvent) => {
@@ -407,7 +416,8 @@ export async function handleApi(
 						),
 						metadata,
 						documents: input.documents,
-						providerFetch,
+						providerFetch: providerEvidence.fetch(providerFetch),
+						providerEvidence,
 						keys,
 						memory: sessionMemories.get(
 							contentFingerprint(
@@ -427,12 +437,17 @@ export async function handleApi(
 				)
 
 					.then(async (result) => {
-						await persistence.finish(saved.runId, result);
+						await persistence.finish(
+							saved.runId,
+							result,
+							providerEvidence.snapshot(),
+						);
 						emit({ type: "done", route: result });
 					})
 					.catch(async (error) => {
-						const message =
-							error instanceof Error ? error.message : "Chatflow failed";
+						const message = providerEvidence.redact(
+							error instanceof Error ? error.message : "Chatflow failed",
+						);
 						await persistence
 							.fail(
 								saved.runId,
@@ -441,9 +456,17 @@ export async function handleApi(
 								signal.aborted,
 								latestTrace,
 								Math.round(performance.now() - executionStarted),
+								providerEvidence.snapshot(),
 							)
 							// Lease expiry will release the run if the database is unavailable.
-							.catch(() => {});
+							.catch((settlementError) => {
+								emit({
+									type: "error",
+									error: providerEvidence.redact(
+										`Could not save the failed run: ${settlementError instanceof Error ? settlementError.message : "Database unavailable"}`,
+									),
+								});
+							});
 						emit({ type: "error", error: message });
 					})
 					.finally(() => {

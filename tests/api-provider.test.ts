@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { api } from "../convex/_generated/api";
 import { handleApi } from "../server/api";
 import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
+import { evidenceCoverage } from "../src/lib/provider-evidence";
 import { readRouteStream } from "../src/lib/route-stream";
 import type { RouteResult } from "../src/lib/routing";
+import { runArtifactSchema } from "../src/lib/run-artifact";
 import { createApiFixture } from "./api-fixture";
 import { configuredJevQuestion } from "./jev-question-fixture";
 
@@ -88,6 +91,30 @@ test("the real TypeSafe SDK batches relevance and reports all evaluation usage t
 		included: false,
 		reason: "irrelevant",
 	});
+	const latest = await fixture.owner.query(api.runs.latest, {
+		conversationId: fixture.workspace.conversationId,
+	});
+	expect(latest?.resultUrl).toBeTruthy();
+	const artifact = await fixture.t.run(async (ctx) => {
+		const run = await ctx.db.query("runs").first();
+		if (!run?.resultFile) throw new Error("Artifact missing");
+		const file = await ctx.storage.get(run.resultFile);
+		if (!file) throw new Error("Artifact bytes missing");
+		return runArtifactSchema.parse(JSON.parse(await file.text()));
+	});
+	expect(artifact.providerEvidence).toHaveLength(2);
+	expect(
+		artifact.providerEvidence.map(
+			(entry) => bodySchema.parse(JSON.parse(entry.request.text)).state,
+		),
+	).toEqual(bodies);
+	expect(
+		evidenceCoverage(
+			artifact.providerEvidence,
+			result?.calls.map((call) => call.id) ?? [],
+		),
+	).toBe("complete");
+	expect(JSON.stringify(artifact)).not.toContain("test-key");
 });
 
 test("the real Gemini SDK preserves cached and reasoning token details in workflow accounting", async () => {

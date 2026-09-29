@@ -106,6 +106,7 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 		runId: first.runId,
 		result: JSON.stringify({
 			status: "interrupted",
+			providerEvidence: [],
 			text: "Проверяю заказ",
 			error: "Provider stopped",
 			trace: emptyRouteTrace(),
@@ -146,6 +147,7 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 		runId: next.runId,
 		result: JSON.stringify({
 			status: "failed",
+			providerEvidence: [],
 			text: "",
 			error: "Provider stopped",
 			trace: emptyRouteTrace(),
@@ -175,6 +177,7 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 		runId: first.runId,
 		result: JSON.stringify({
 			status: "failed",
+			providerEvidence: [],
 			text: "",
 			error: "First failed",
 			trace: emptyRouteTrace(),
@@ -205,7 +208,12 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 	const result = { ...response, latencyMs: 30 };
 	await owner.action(api.results.save, {
 		runId: next.runId,
-		result: JSON.stringify({ status: "completed", result: result }),
+		result: JSON.stringify({
+			status: "completed",
+			coverage: "unavailable",
+			providerEvidence: [],
+			result: result,
+		}),
 	});
 	const latest = await owner.query(api.runs.latest, {
 		conversationId: workspace.conversationId,
@@ -220,7 +228,12 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 		if (!file) throw new Error("Result bytes missing");
 		return file.text();
 	});
-	expect(JSON.parse(stored)).toEqual({ status: "completed", result });
+	expect(JSON.parse(stored)).toEqual({
+		status: "completed",
+		coverage: "unavailable",
+		providerEvidence: [],
+		result,
+	});
 	const turns = await owner.query(api.conversations.turns, {
 		conversationId: workspace.conversationId,
 	});

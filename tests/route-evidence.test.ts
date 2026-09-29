@@ -257,6 +257,8 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 		runId: first.runId,
 		result: JSON.stringify({
 			status: "completed",
+			coverage: "unavailable",
+			providerEvidence: [],
 			result: { ...result, latencyMs: 500 },
 		}),
 	});
@@ -265,6 +267,7 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 		runId: second.runId,
 		result: JSON.stringify({
 			status: "failed",
+			providerEvidence: [],
 			text: "Partial reply",
 			error: "Provider failed",
 			trace: empty,
@@ -357,6 +360,8 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 		runId: run.runId,
 		result: JSON.stringify({
 			status: "completed",
+			coverage: "unavailable",
+			providerEvidence: [],
 			result: { ...result, latencyMs: 500 },
 		}),
 	});
@@ -408,6 +413,7 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 		runId: failed.runId,
 		result: JSON.stringify({
 			status: "failed",
+			providerEvidence: [],
 			text: "",
 			error: "Provider failed",
 			trace: {

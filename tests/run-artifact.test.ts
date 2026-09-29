@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test";
 import { api } from "../convex/_generated/api";
+import { serializeRunArtifact } from "../server/serialize-run-artifact";
 import { executeWorkflow } from "../server/workflow";
 import { type RouteTrace, workflowRoutesSchema } from "../src/lib/routing";
-import { emptyRouteTrace, runArtifactSchema } from "../src/lib/run-artifact";
+import {
+	artifactTrace,
+	emptyRouteTrace,
+	runArtifactSchema,
+} from "../src/lib/run-artifact";
 import { createConvexFixture } from "./convex-fixture";
 
 const routes = workflowRoutesSchema.parse({
@@ -76,6 +81,7 @@ test("failure artifacts preserve traces, isolate owners, and delete files when s
 	});
 	const artifact = runArtifactSchema.parse({
 		status: "failed",
+		providerEvidence: [],
 		text: "Partial answer",
 		error: "Provider failed",
 		latencyMs: 100,
@@ -116,4 +122,30 @@ test("failure artifacts preserve traces, isolate owners, and delete files when s
 	expect(
 		await t.run((ctx) => ctx.db.system.query("_storage").collect()),
 	).toEqual(before);
+});
+
+test("oversized artifacts preserve settlement and mark lost trace evidence", async () => {
+	const trace = emptyRouteTrace();
+	trace.outputs.push({
+		nodeId: "draft",
+		sourceNodeId: "draft",
+		kind: "model",
+		revision: 1,
+		text: "x".repeat(8_000_001),
+	});
+	const artifact = runArtifactSchema.parse(
+		JSON.parse(
+			serializeRunArtifact({
+				status: "failed",
+				text: "Partial answer",
+				error: "Provider failed",
+				latencyMs: 1,
+				trace,
+				providerEvidence: [],
+				coverage: "unavailable",
+			}),
+		),
+	);
+	expect(artifact.coverage).toBe("partial");
+	expect(artifactTrace(artifact).outputs[0].text).toHaveLength(4000);
 });

@@ -5,6 +5,7 @@ import {
 	type ProviderCall,
 	type TokenUsage,
 } from "../src/lib/usage.ts";
+import { ProviderEvidence } from "./provider-evidence.ts";
 import { ProviderUsageError } from "./provider-usage.ts";
 
 /** Owns call identities, the execution budget, and completed or failed usage. */
@@ -13,9 +14,14 @@ export class ProviderLedger {
 	private sequence = 0;
 	private started = 0;
 	private onRecorded: () => void;
+	private evidence: ProviderEvidence;
 
-	constructor(onRecorded: () => void) {
+	constructor(
+		onRecorded: () => void,
+		evidence: ProviderEvidence = new ProviderEvidence(),
+	) {
 		this.onRecorded = onRecorded;
+		this.evidence = evidence;
 	}
 
 	nextId(): string {
@@ -47,14 +53,16 @@ export class ProviderLedger {
 		let error: string | undefined;
 		let status: ProviderCall["status"] = "completed";
 		try {
-			const result = await run();
+			const result = await this.evidence.run(callId, run);
 			usage = result.usage;
 			model = result.model ?? model;
 			return result;
 		} catch (caught) {
 			status = "failed";
 			usage = caught instanceof ProviderUsageError ? caught.usage : undefined;
-			error = caught instanceof Error ? caught.message : "Provider call failed";
+			error = this.evidence.redact(
+				caught instanceof Error ? caught.message : "Provider call failed",
+			);
 			throw caught;
 		} finally {
 			this.calls.push({

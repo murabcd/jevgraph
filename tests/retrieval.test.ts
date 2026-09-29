@@ -165,6 +165,7 @@ test("indexing shares work, while changed source text gets a fresh index", async
 		false,
 		emptyRouteTrace(),
 		0,
+		[],
 	);
 	const updated = routes();
 	const start = updated.nodes.find((node) => node.kind === "input");
@@ -215,6 +216,7 @@ test("retrieval rejects forged source keys and stale document versions within th
 		false,
 		emptyRouteTrace(),
 		0,
+		[],
 	);
 	const updated = routes();
 	const start = updated.nodes.find((node) => node.kind === "input");
