@@ -1,63 +1,166 @@
-# Route Studio
+<a href="#jevgraph">
+  <img alt="JevGraph canvas with Jev classification, model routing, and connected backup models." src="./public/jevgraph.png">
+  <h1 align="center">JevGraph</h1>
+</a>
 
-A local, visual chatflow for Jev-centered AI work. Every message in the ongoing chat runs the graph. Jev evaluates Choice, Noul, or Score; a connected output routes onward, while an unconnected output returns its label. Model nodes generate prose. The canvas shows what happened on each turn.
+<p align="center">
+  Visual chatflows with Jev, OpenAI, Gemini, and Convex.
+</p>
 
-## Start
+<p align="center">
+  <a href="#features"><strong>Features</strong></a> ·
+  <a href="#running-locally"><strong>Running locally</strong></a> ·
+  <a href="#building-chatflows"><strong>Building chatflows</strong></a> ·
+  <a href="#self-hosting"><strong>Self-hosting</strong></a>
+</p>
+<br/>
 
-~~~bash
+## Status
+
+JevGraph is early. Expect bugs.
+
+Each chat message runs the graph from Start. Conversations and completed runs
+persist in Convex; workflows that pause and resume across messages are not
+implemented yet.
+
+## Features
+
+- Visual chatflow editing with Jev and Model nodes
+- Jev Choice, Noul, and Score evaluations for branching decisions
+- OpenAI and Gemini generation with prompts, examples, and reasoning controls per node
+- Parallel model paths, joined results, bounded review loops, and explicit backup models
+- Context selection per node, relevance filtering, and automatic full-text or summary selection
+- Automatic model selection based on projected cost and observed provider-cache usage
+- Live execution paths, node timers, context inspection, token usage, and estimated costs
+- Realtime graph saves, chat history, completed run traces, and reusable context summaries in Convex
+
+## Built with
+
+- [Bun](https://bun.sh/), [Vite](https://vite.dev/), and [React](https://react.dev/) for the app and local API
+- [React Flow](https://reactflow.dev/) for the graph canvas
+- [Convex](https://www.convex.dev/) for realtime data and backend functions
+- [Convex Auth](https://labs.convex.dev/auth) for anonymous browser sessions
+- [AI SDK](https://ai-sdk.dev/) with direct [TypeSafe](https://docs.typesafe.ai/), [OpenAI](https://openai.com/), and [Google](https://ai.google.dev/) providers
+- [shadcn/ui](https://ui.shadcn.com/), [Base UI](https://base-ui.com/), and [Tailwind CSS](https://tailwindcss.com/) for UI
+- [Biome](https://biomejs.dev/), Konsistent, and Lat for code and architecture checks
+
+## Running locally
+
+Install dependencies and create your local environment file:
+
+```bash
 bun install
 cp .env.example .env.local
-bunx convex dev --configure existing --once
-bun run dev:convex # keep in a separate terminal while editing backend functions
-bun run dev
-~~~
+```
 
-Fill in .env.local with the provider keys you use:
+Add the keys for the providers you use to `.env.local`:
 
-~~~dotenv
+```dotenv
 TYPESAFE_API_KEY=your_jev_key
 OPENAI_API_KEY=your_openai_key
 GOOGLE_GENERATIVE_AI_API_KEY=your_gemini_key
-~~~
+```
 
-Keep actual keys only in .env.local. A turn needs keys for the providers it reaches; the chat warns about missing keys for providers configured anywhere in the connected graph. The local API runs with Vite in development and preview. A static-only deployment does not provide the API.
+Connect a development Convex deployment:
 
-Convex Auth uses the anonymous provider to scope records to this browser session. Configure `JWT_PRIVATE_KEY` and `JWKS` in the **development Convex deployment**, following the [manual auth setup](https://labs.convex.dev/auth/setup/manual), plus `SITE_URL=http://localhost:5173`. Do not put signing keys in browser-prefixed variables or commit them. `bunx convex dev` writes the public deployment URLs into `.env.local`. An anonymous identity survives reloads, but clearing browser authentication storage loses access to that identity; there is no account recovery or cross-device login yet.
+```bash
+bunx convex dev --configure --once
+```
 
-Reusable context summaries persist for up to thirty days. Provider-cache hits still depend on provider-reported usage and expiring server observations. Database persistence does not add search across documents or long-term semantic conversation memory. See [persistence](lat.md/persistence.md).
+The Convex CLI writes the deployment configuration and public URLs into
+`.env.local`. Configure `JWT_PRIVATE_KEY`, `JWKS`, and
+`SITE_URL=http://localhost:5173` in that Convex deployment, following the
+[manual Convex Auth setup](https://labs.convex.dev/auth/setup/manual).
+Provider keys stay on the local server; signing keys stay in Convex.
 
-## Build a chatflow
+Keep backend synchronization running in one terminal:
 
-1. Start is the required entry. Add custom text, number, or boolean fields there. The latest chat message is the built-in query. Defaults let you test fields locally; an API caller may supply declared values under `metadata`.
-2. Connect Jev and Model nodes. In each node's settings, select only the Start fields it needs. Jev outputs can connect onward or end the path with the selected label; a Model's Continue output can feed another Jev or Model. Several paths can run in parallel but must join before one final answer.
-3. Edit Model prompts for each model's specific task. A terminal Model generates the chat answer.
-4. To repeat work, connect one Jev output back to an earlier Model. Set the Jev repeat limit in its settings panel. Another output must exit the loop. If Jev still selects the repeat branch when its limit is reached, the turn stops with “Review incomplete” rather than taking the other branch.
+```bash
+bun run dev:convex
+```
 
-Start can also declare reference documents with full text and optional supplied summaries. Each Jev or Model chooses its own previous messages, earlier node results, and document representations, with a character budget for optional context. Optional Jev relevance filtering screens these chunks in one additional call; uncertain evaluations or provider failures retain the context. See [context](lat.md/context.md) for selection rules and bounds.
+Start the app in another:
 
-The node inspector shows selected context, structured Jev decisions, and each provider attempt. Chat totals include intermediate models, decisions, relevance calls, repeats, and backups. Missing provider usage is marked incomplete. USD cost is estimated automatically from published GPT-6 Luna, Gemini 3.8 Flash, and Jev prices; each node can override its rates, including separate relevance rates when enabled; these estimates are not provider bills.
+```bash
+bun run dev
+```
 
-Send a chat message to run the graph; there is no separate Run button. The canvas highlights reached nodes and edges, displays each node's elapsed time, and offers a last-turn output inspector. Convex saves the graph, documents, conversations, and completed run traces. Reload restores the current chat. New conversation retains earlier chats, and History reopens them. Revision checks prevent concurrent tabs from silently overwriting graph changes. Viewport, theme, and chat visibility remain local to the browser.
+The app runs at [localhost:5173](http://localhost:5173/).
 
-The server uses direct AI SDK provider packages for Jev, OpenAI, and Gemini. The installed Jev provider evaluates Choice, Noul, and Score questions; it does not generate prose. Each Jev node configures a minimum provider confidence for Choice and Score or a minimum selected-answer probability for Noul, plus an output for evaluations below that threshold or provider errors. A Model node configures its model, instructions, maximum output tokens, and supported reasoning effort. An explicit backup Model gets one attempt only if the primary fails before producing text. See [routing](lat.md/routing.md) for bounds, failure policy, and stream events.
+## Building chatflows
 
-New Jev nodes start as neutral drafts: Choice 1/Choice 2, Yes/No, or numbered Score levels with blank instructions and criteria. Complete the question in the node editor before sending a chat message. The initial canvas contains only Start and an unconfigured Jev node; model paths are added in the UI.
+1. Define custom text, number, or boolean fields in Start. The latest chat message is the built-in query. API callers can supply declared field values through `metadata`.
+2. Connect Jev and Model nodes. Select the Start fields and context each node needs. Jev evaluates its configured question; Model nodes generate text.
+3. Configure Jev output criteria and Model prompts. Connected outputs continue through the graph; unconnected Jev outputs return their labels in chat. Parallel paths must join before producing one final answer.
+4. Connect a Model's On error output to an explicit backup for one attempt if the primary fails before producing text. Connect a Jev output back to an earlier Model for a bounded review loop with a separate exit.
+5. Send a chat message to run the graph. Inspect the reached path, decisions, context, timings, and provider usage on the canvas.
 
-## Commands
+The initial canvas contains Start and an unconfigured Jev node. Complete the
+Jev question and criteria before sending a message. Reference documents belong
+to Start; each downstream node selects its own documents, history, and earlier
+results. See [context](lat.md/context.md) and [routing](lat.md/routing.md).
 
-~~~bash
-bun run dev:convex # development backend synchronization
-bun run dev        # Vite UI and local API
-bun run build      # TypeScript and production bundle
-bun run preview    # built UI with local API
-bun run check      # Lat, Konsistent, and read-only Biome
+## Self-hosting
+
+Self-hosting requires your own Convex deployment, auth signing keys, and provider
+keys. See [`.env.example`](.env.example).
+
+The local API is mounted by Vite in development and preview. A deployment must
+also run the server API; serving the static bundle alone does not provide it.
+
+Anonymous authentication retains access across reloads in the same browser.
+Clearing its authentication storage loses access to that identity. Account
+recovery and cross-device login are not implemented yet.
+
+## Build and preview
+
+```bash
+bun run build
+bun run preview
+```
+
+The build typechecks the app and Convex functions, then creates the production
+UI bundle. Preview serves that bundle with the local API.
+
+## Project structure
+
+- `src/flow`: graph canvas, node editors, and execution inspection
+- `src/chat`: composer, streamed replies, saved conversations, and history
+- `src/components`: shared UI primitives and AI components
+- `src/lib`: graph, context, model, pricing, and stream contracts
+- `src/storage`: Convex workspace initialization and realtime graph saves
+- `server`: graph execution, direct provider calls, context preparation, and cost planning
+- `convex`: authentication, schema, workspaces, conversations, runs, and reusable summaries
+- `tests`: routing, providers, context, persistence, and failure behavior
+- `lat.md`: architecture and runtime knowledge graph
+- `public`: app assets and the README preview
+
+## Model providers
+
+Jev evaluates Choice, Noul, and Score questions. GPT-6 Luna and Gemini 3.8 Flash
+generate replies through their direct AI SDK providers. API keys remain on the
+server.
+
+Cost totals include generation, decisions, context preparation, repeats, and
+backup attempts. Published rates provide estimates; node settings can override
+them. Missing usage is marked incomplete, and estimates are not provider bills.
+
+Automatic context selection can reuse summaries stored in Convex. Provider-cache
+hits depend on reported usage and expiring observations. These features do not
+provide semantic search or long-term conversation memory. See
+[optimization](lat.md/optimization.md) and [persistence](lat.md/persistence.md).
+
+## Contributing
+
+Read [AGENTS.md](AGENTS.md) and the [knowledge graph](lat.md/lat.md) before making
+changes. Run the relevant checks:
+
+```bash
+bun run check
 bun run typecheck
 bun run test
-~~~
-
-The `toml` override pins the patched parser used by the Lat CLI's XDG dependency; runtime providers are unaffected.
-
-The [knowledge graph](lat.md/lat.md) records the app's architecture and runtime contracts. [AGENTS.md](AGENTS.md) has repository working rules.
+bun run build
+```
 
 ## References
 

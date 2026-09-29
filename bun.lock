@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "vite-app",
+      "name": "jevgraph",
       "dependencies": {
         "@ai-sdk/google": "^4.0.79",
         "@ai-sdk/openai": "^4.0.74",

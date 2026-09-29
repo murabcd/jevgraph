@@ -70,7 +70,7 @@ async function serveApi(
 
 function localApi(): Plugin {
 	return {
-		name: "router-local-api",
+		name: "jevgraph-local-api",
 		configureServer(server) {
 			server.middlewares.use((req, res, next) => {
 				void serveApi(req, res, server.config.mode, next);

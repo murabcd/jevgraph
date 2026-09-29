@@ -1,6 +1,6 @@
 # Architecture
 
-Route Studio is a local Vite and React chatflow editor. Every chat turn runs the current graph on the local API; the canvas observes execution and edits the graph for later turns. See [[routing]], [[canvas]], [[chat]], [[optimization]], and [[persistence]].
+JevGraph is a local Vite and React chatflow editor. Every chat turn runs the current graph on the local API; the canvas observes execution and edits the graph for later turns. See [[routing]], [[canvas]], [[chat]], [[optimization]], and [[persistence]].
 
 ## Module ownership
 

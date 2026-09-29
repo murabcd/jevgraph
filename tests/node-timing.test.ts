@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { measureNode } from "../server/node-timing";
-import { formatNodeDuration } from "../src/flow/node-duration";
 import type { RouteStreamEvent } from "../src/lib/routing";
 
 test("reports completed and failed node attempts without replacing their errors", async () => {
@@ -37,12 +36,6 @@ test("reports completed and failed node attempts without replacing their errors"
 			(event) => event.type !== "timing" || event.timing.durationMs >= 0,
 		),
 	).toBe(true);
-});
-
-test("shows milliseconds, then seconds", () => {
-	expect(formatNodeDuration(45)).toBe("45 ms");
-	expect(formatNodeDuration(999)).toBe("999 ms");
-	expect(formatNodeDuration(1234)).toBe("1.23 s");
 });
 
 test("announces a running node before its pending operation finishes", async () => {

@@ -1,4 +1,4 @@
-# Router Knowledge Graph
+# JevGraph Knowledge Graph
 
 This graph describes the app's runtime boundaries and the contracts shared by routing, the canvas, and chat. Update the relevant section when a contract changes, then run `bun run check:lat`.
 
