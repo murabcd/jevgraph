@@ -206,6 +206,8 @@ describe("node-specific context", () => {
 		};
 		expect(
 			routeRequestSchema.safeParse({
+				conversationId: "test-conversation",
+				requestId: crypto.randomUUID(),
 				routes,
 				messages: [messages.at(-1)],
 				documents: [supplied],

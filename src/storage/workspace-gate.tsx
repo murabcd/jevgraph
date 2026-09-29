@@ -1,10 +1,8 @@
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { LoaderCircle } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { graphSnapshot, readGraph, removeImportedGraph } from "@/flow/graph";
 import { api } from "../../convex/_generated/api";
 
 export type Workspace = NonNullable<
@@ -38,37 +36,25 @@ export function WorkspaceGate({
 	useEffect(() => {
 		if (workspace !== null || initializing.current) return;
 		initializing.current = true;
-		const local = readGraph();
-		void initialize({
-			graph: JSON.stringify(graphSnapshot(local.nodes, local.edges)),
-		})
-			.then(removeImportedGraph)
-			.catch((caught) =>
-				setError(
-					caught instanceof Error
-						? caught.message
-						: "Could not save the workspace",
-				),
-			);
+		void initialize({}).catch((caught) =>
+			setError(
+				caught instanceof Error
+					? caught.message
+					: "Could not save the workspace",
+			),
+		);
 	}, [workspace, initialize]);
 	if (workspace) return children(workspace);
 	return (
 		<main className="studio grid place-items-center">
-			<div role="status" className="flex items-center gap-3">
-				{error ? (
-					<>
-						<span>{error}</span>
-						<Button variant="outline" onClick={() => window.location.reload()}>
-							Retry
-						</Button>
-					</>
-				) : (
-					<>
-						<LoaderCircle className="size-5 animate-spin" />
-						<span>Connecting…</span>
-					</>
-				)}
-			</div>
+			{error && (
+				<div role="alert" className="flex items-center gap-3">
+					<span>{error}</span>
+					<Button variant="outline" onClick={() => window.location.reload()}>
+						Retry
+					</Button>
+				</div>
+			)}
 		</main>
 	);
 }

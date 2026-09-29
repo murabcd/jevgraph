@@ -1,21 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { handleApi } from "../server/api";
 import type { RouteStreamEvent } from "../src/lib/routing";
+import { createApiFixture } from "./api-fixture";
 import { configuredJevQuestion } from "./jev-question-fixture";
 
 async function eventsFor(
 	routes: unknown,
 ): Promise<{ response: Response; events: RouteStreamEvent[] }> {
+	const fixture = await createApiFixture();
 	const response = await handleApi(
 		new Request("http://localhost/api/route", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: fixture.headers,
 			body: JSON.stringify({
+				...fixture.requestFields(),
 				messages: [{ role: "user", content: "Hello" }],
 				routes,
 			}),
 		}),
-		{},
+		{ keys: {}, connect: fixture.connect },
 	);
 	const body = await response.text();
 	return {
@@ -125,8 +128,9 @@ describe("chatflow API", () => {
 	});
 });
 
-test("configured persistence rejects missing authentication before touching providers", async () => {
+test("the API rejects missing authentication before touching providers", async () => {
 	let calls = 0;
+	const fixture = await createApiFixture();
 	const response = await handleApi(
 		new Request("http://localhost/api/route", {
 			method: "POST",
@@ -149,13 +153,59 @@ test("configured persistence rejects missing authentication before touching prov
 				},
 			}),
 		}),
-		{ GOOGLE_GENERATIVE_AI_API_KEY: "test" },
-		async () => {
-			calls++;
-			throw new Error("Should not call");
+		{
+			keys: { GOOGLE_GENERATIVE_AI_API_KEY: "test" },
+			connect: fixture.connect,
+			providerFetch: async () => {
+				calls++;
+				throw new Error("Should not call");
+			},
 		},
-		"https://example.convex.cloud",
 	);
 	expect(response.status).toBe(401);
 	expect(calls).toBe(0);
+});
+
+test("a Convex connection failure prevents provider calls and creates no unsaved response", async () => {
+	const fixture = await createApiFixture();
+	let providerCalls = 0;
+	const response = await handleApi(
+		new Request("http://localhost/api/route", {
+			method: "POST",
+			headers: fixture.headers,
+			body: JSON.stringify({
+				...fixture.requestFields(),
+				messages: [{ role: "user", content: "Здравствуйте" }],
+				routes: {
+					kind: "workflow",
+					nodes: [
+						{ id: "input", kind: "input", fields: [] },
+						{
+							id: "model",
+							kind: "model",
+							provider: "google",
+							model: "gemini-3.8-flash",
+						},
+					],
+					edges: [{ id: "entry", source: "input", target: "model" }],
+				},
+			}),
+		}),
+		{
+			keys: { GOOGLE_GENERATIVE_AI_API_KEY: "test" },
+			connect: () => {
+				throw new Error("Convex is unavailable");
+			},
+			providerFetch: async () => {
+				providerCalls++;
+				throw new Error("Should not call");
+			},
+		},
+	);
+	expect(response.status).toBe(502);
+	expect(await response.json()).toEqual({ error: "Convex is unavailable" });
+	expect(providerCalls).toBe(0);
+	expect(await fixture.t.run((ctx) => ctx.db.query("runs").collect())).toEqual(
+		[],
+	);
 });

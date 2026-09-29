@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { handleApi } from "../server/api";
+import type { ProviderFetch } from "../server/provider-access";
 import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import type { JevQuestion } from "../src/lib/jev-question";
 import { readRouteStream } from "../src/lib/route-stream";
@@ -9,8 +10,8 @@ import type {
 	WorkflowRoutes,
 } from "../src/lib/routing";
 import { workflowRoutesSchema } from "../src/lib/routing";
+import { createApiFixture } from "./api-fixture";
 
-type ProviderFetch = NonNullable<Parameters<typeof handleApi>[2]>;
 const keys = {
 	TYPESAFE_API_KEY: "test-key",
 	OPENAI_API_KEY: "test-key",
@@ -91,10 +92,16 @@ test("a model-only HTTP workflow accepts its backup as an alternative to the pri
 });
 
 async function runHttp(routes: WorkflowRoutes, providerFetch: ProviderFetch) {
+	const fixture = await createApiFixture();
 	const server = Bun.serve({
 		port: 0,
 		hostname: "127.0.0.1",
-		fetch: (request) => handleApi(request, keys, providerFetch),
+		fetch: (request) =>
+			handleApi(request, {
+				keys: keys,
+				connect: fixture.connect,
+				providerFetch: providerFetch,
+			}),
 	});
 	const events: RouteStreamEvent[] = [];
 	let result: RouteResult | undefined;
@@ -102,8 +109,9 @@ async function runHttp(routes: WorkflowRoutes, providerFetch: ProviderFetch) {
 	try {
 		const response = await fetch(new URL("/api/route", server.url), {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: fixture.headers,
 			body: JSON.stringify({
+				...fixture.requestFields(),
 				messages: [{ role: "user", content: "Где моя посылка?" }],
 				routes,
 			}),
@@ -272,27 +280,32 @@ test("cancelling the Russian response aborts the provider without invoking backu
 	let requests = 0;
 	const began = Promise.withResolvers<void>();
 	const aborted = Promise.withResolvers<void>();
+	const fixture = await createApiFixture();
 	const response = await handleApi(
 		new Request("http://localhost/api/route", {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: fixture.headers,
 			body: JSON.stringify({
+				...fixture.requestFields(),
 				messages: [
 					{ role: "user", content: "Проверьте сроки доставки посылки." },
 				],
 				routes: modelRoutes,
 			}),
 		}),
-		keys,
-		async (_url, init) => {
-			requests++;
-			began.resolve();
-			return new Promise<Response>((_resolve, reject) => {
-				init?.signal?.addEventListener("abort", () => {
-					aborted.resolve();
-					reject(new DOMException("Запрос отменён", "AbortError"));
+		{
+			keys: keys,
+			connect: fixture.connect,
+			providerFetch: async (_url, init) => {
+				requests++;
+				began.resolve();
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => {
+						aborted.resolve();
+						reject(new DOMException("Запрос отменён", "AbortError"));
+					});
 				});
-			});
+			},
 		},
 	);
 	await began.promise;

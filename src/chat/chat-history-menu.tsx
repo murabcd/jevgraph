@@ -1,12 +1,12 @@
 import type { FunctionReturnType } from "convex/server";
-import { Check, History, MessageSquare } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { History, MessageCircle } from "lucide-react";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+	Select,
+	SelectContent,
+	SelectGroup,
+	SelectItem,
+	SelectTrigger,
+} from "@/components/ui/select";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -22,35 +22,36 @@ export function ChatHistoryMenu({
 	onOpen: (id: Id<"conversations">) => void;
 }) {
 	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label="Conversation history"
-						disabled={disabled}
-					/>
-				}
-			>
+		<Select<Id<"conversations">>
+			value={
+				history.some((conversation) => conversation.id === currentId)
+					? currentId
+					: null
+			}
+			disabled={disabled || history.length === 0}
+			onValueChange={(id) => {
+				if (id && id !== currentId) onOpen(id);
+			}}
+		>
+			<SelectTrigger size="icon" aria-label="Conversation history">
 				<History />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-72 space-y-1 p-2">
-				{history.map((conversation) => (
-					<DropdownMenuItem
-						key={conversation.id}
-						onClick={() => onOpen(conversation.id)}
-						className="min-h-9 rounded-lg border border-border px-2.5 py-2 data-selected:bg-secondary"
-						data-selected={conversation.id === currentId || undefined}
-					>
-						<MessageSquare />
-						<span className="min-w-0 flex-1 truncate">
-							{conversation.title}
-						</span>
-						{conversation.id === currentId && <Check />}
-					</DropdownMenuItem>
-				))}
-			</DropdownMenuContent>
-		</DropdownMenu>
+			</SelectTrigger>
+			<SelectContent align="end" alignItemWithTrigger={false} className="w-72">
+				<SelectGroup>
+					{history.map((conversation) => (
+						<SelectItem
+							key={conversation.id}
+							value={conversation.id}
+							label={conversation.title}
+						>
+							<MessageCircle />
+							<span className="min-w-0 flex-1 truncate">
+								{conversation.title}
+							</span>
+						</SelectItem>
+					))}
+				</SelectGroup>
+			</SelectContent>
+		</Select>
 	);
 }

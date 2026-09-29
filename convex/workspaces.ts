@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { parseGraphJson } from "../src/lib/graph-snapshot";
+import { createInitialGraph, parseGraphJson } from "../src/lib/graph-snapshot";
 import { mutation, query } from "./_generated/server";
 import { ownWorkspace, requireOwner } from "./access";
 
@@ -31,16 +31,16 @@ export const current = query({
 });
 
 export const initialize = mutation({
-	args: { graph: v.string() },
+	args: {},
 	returns: v.id("workspaces"),
-	handler: async (ctx, args) => {
+	handler: async (ctx) => {
 		const owner = await requireOwner(ctx);
 		const existing = await ctx.db
 			.query("workspaces")
 			.withIndex("by_owner", (q) => q.eq("owner", owner))
 			.unique();
 		if (existing) return existing._id;
-		const graph = JSON.stringify(parseGraphJson(args.graph));
+		const graph = JSON.stringify(createInitialGraph());
 		const conversationId = await ctx.db.insert("conversations", { owner });
 		const workspaceId = await ctx.db.insert("workspaces", {
 			owner,

@@ -1,21 +1,12 @@
 import { expect, test } from "bun:test";
-import { convexTest } from "convex-test";
 import { api, internal } from "../convex/_generated/api";
-import schema from "../convex/schema";
 import { executeWorkflow } from "../server/workflow";
-import { graphSnapshot, startingEdges, startingNodes } from "../src/flow/graph";
-import { parseGraphJson } from "../src/lib/graph-snapshot";
+import { createInitialGraph, parseGraphJson } from "../src/lib/graph-snapshot";
 import { workflowRoutesSchema } from "../src/lib/routing";
 
-const modules = {
-	"./_generated/server.js": () => import("../convex/_generated/server.js"),
-	"./workspaces.ts": () => import("../convex/workspaces"),
-	"./conversations.ts": () => import("../convex/conversations"),
-	"./runs.ts": () => import("../convex/runs"),
-	"./results.ts": () => import("../convex/results"),
-	"./summaries.ts": () => import("../convex/summaries"),
-};
-const graph = JSON.stringify(graphSnapshot(startingNodes, startingEdges));
+import { createConvexFixture } from "./convex-fixture";
+
+const graph = JSON.stringify(createInitialGraph());
 const routes = workflowRoutesSchema.parse({
 	kind: "workflow",
 	nodes: [
@@ -30,20 +21,9 @@ const routes = workflowRoutesSchema.parse({
 	],
 	edges: [{ id: "entry", source: "input", target: "model" }],
 });
-async function fixture() {
-	const t = convexTest({ schema, modules, transactionLimits: true });
-	const userId = await t.run((ctx) =>
-		ctx.db.insert("users", { isAnonymous: true }),
-	);
-	const owner = t.withIdentity({ subject: `${userId}|session` });
-	const id = await owner.mutation(api.workspaces.initialize, { graph });
-	const workspace = await owner.query(api.workspaces.current, {});
-	if (!workspace) throw new Error("Workspace missing");
-	return { t, owner, id, workspace };
-}
 function request(
 	conversationId: Awaited<
-		ReturnType<typeof fixture>
+		ReturnType<typeof createConvexFixture>
 	>["workspace"]["conversationId"],
 	requestId = crypto.randomUUID(),
 ) {
@@ -56,7 +36,7 @@ function request(
 }
 
 test("Convex isolates owners and rejects stale graph writes atomically", async () => {
-	const { t, owner, id, workspace } = await fixture();
+	const { t, owner, id, workspace } = await createConvexFixture();
 	await expect(t.query(api.workspaces.current, {})).rejects.toThrow(
 		"Authentication required",
 	);
@@ -100,11 +80,14 @@ test("Convex isolates owners and rejects stale graph writes atomically", async (
 	).rejects.toThrow("Invalid graph connections");
 	expect((await owner.query(api.workspaces.current, {}))?.revision).toBe(1);
 
-	expect(await owner.mutation(api.workspaces.initialize, { graph })).toBe(id);
+	expect(await owner.mutation(api.workspaces.initialize, {})).toBe(id);
 });
 
 test("Convex deduplicates requests, protects running chats, and retains partial failures", async () => {
-	const { owner, id, workspace } = await fixture();
+	const { owner, id, workspace } = await createConvexFixture();
+	expect(
+		await owner.query(api.conversations.list, { workspaceId: id }),
+	).toEqual([]);
 	const input = request(workspace.conversationId);
 	const first = await owner.mutation(api.runs.begin, input);
 	expect(first.started).toBe(true);
@@ -144,10 +127,21 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 	const history = await owner.query(api.conversations.list, {
 		workspaceId: id,
 	});
-	expect(history.map((item) => item.id)).toEqual([
-		newId,
-		workspace.conversationId,
+	expect(history).toEqual([
+		{ id: workspace.conversationId, title: input.question },
 	]);
+	const next = await owner.mutation(api.runs.begin, request(newId));
+	expect(
+		(await owner.query(api.conversations.list, { workspaceId: id })).map(
+			(item) => item.id,
+		),
+	).toEqual([newId, workspace.conversationId]);
+	await owner.mutation(api.runs.fail, {
+		runId: next.runId,
+		content: "",
+		error: "Provider stopped",
+		interrupted: false,
+	});
 	await expect(
 		owner.mutation(api.runs.begin, request(workspace.conversationId)),
 	).rejects.toThrow("no longer active");
@@ -161,7 +155,7 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 });
 
 test("Convex stores full traces and picks the newest run by creation time", async () => {
-	const { owner, workspace, t } = await fixture();
+	const { owner, workspace, t } = await createConvexFixture();
 	const first = await owner.mutation(
 		api.runs.begin,
 		request(workspace.conversationId, "ffffffff-ffff-4fff-8fff-ffffffffffff"),
@@ -227,7 +221,7 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 });
 
 test("Convex expires abandoned runs and scoped summaries without crossing owners", async () => {
-	const { owner, workspace, t, id } = await fixture();
+	const { owner, workspace, t, id } = await createConvexFixture();
 	const run = await owner.mutation(
 		api.runs.begin,
 		request(workspace.conversationId),

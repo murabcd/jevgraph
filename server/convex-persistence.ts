@@ -5,11 +5,20 @@ import type { ContextSummaries } from "../src/lib/context.ts";
 import type { RouteResult, WorkflowRoutes } from "../src/lib/routing.ts";
 import type { SummaryStore } from "./session-memory.ts";
 
+type PersistenceClient = Pick<
+	ConvexHttpClient,
+	"mutation" | "query" | "action"
+>;
+
 export class ConvexPersistence {
-	private client: ConvexHttpClient;
-	constructor(url: string, token: string) {
-		this.client = new ConvexHttpClient(url);
-		this.client.setAuth(token);
+	private client: PersistenceClient;
+	constructor(client: PersistenceClient) {
+		this.client = client;
+	}
+	static connect(url: string, token: string) {
+		const client = new ConvexHttpClient(url);
+		client.setAuth(token);
+		return new ConvexPersistence(client);
 	}
 	async begin(input: {
 		conversationId: string;

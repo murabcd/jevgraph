@@ -20,7 +20,7 @@ The browser owns graph editing and conversation display; the server owns executi
 
 Browser storage, in-memory chat, and server-only secrets have separate owners.
 
-Convex owns graph configuration, positions, reference documents, messages, run snapshots, usage footers, and full result files. Anonymous Convex Auth gives each browser session a durable owner identity without a login form; owner checks protect every application query, mutation, and action. This is not cross-device account recovery. [[persistence]] defines migration, concurrent editing, and run lifecycle.
+Convex owns graph configuration, positions, reference documents, messages, run snapshots, usage footers, and full result files. Anonymous Convex Auth gives each browser session a durable owner identity without a login form; owner checks protect every application query, mutation, and action. This is not cross-device account recovery. [[persistence]] defines server-owned initialization, concurrent editing, and run lifecycle.
 
 The browser retains only theme, viewport, chat visibility, and authentication state in local storage. Streaming deltas and monotonic node timers are transient. The server keeps bounded, expiring provider-cache observations in memory; reusable content summaries additionally persist in Convex. API keys remain in the local server's .env.local and never reach browser or database. API request bodies have a shared two-MiB limit enforced by the Vite adapter and API handler.
 

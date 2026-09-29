@@ -399,7 +399,8 @@ export function selectedVariables(
 
 export const routeRequestSchema = z
 	.strictObject({
-		sessionId: z.string().uuid().optional(),
+		conversationId: z.string().min(1).max(100),
+		requestId: z.uuid(),
 		metadata: routingMetadataSchema.optional(),
 		documents: contextDocumentsSchema.optional(),
 		messages: z

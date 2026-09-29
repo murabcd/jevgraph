@@ -4,6 +4,7 @@ import { handleApi } from "../server/api";
 import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import { readRouteStream } from "../src/lib/route-stream";
 import type { RouteResult } from "../src/lib/routing";
+import { createApiFixture } from "./api-fixture";
 
 const summaries = {
 	short: "Доставка занимает 2 рабочих дня.",
@@ -15,18 +16,18 @@ const providerBody = z.object({
 	questions: z.record(z.string(), z.object({ type: z.string() })).optional(),
 });
 
-test("real SDK adapters optimize Russian context, reuse summaries by session and stream the actual selected provider with all preparation costs", async () => {
+test("real SDK adapters optimize Russian context, reuse summaries within a workspace and stream the actual selected provider with all preparation costs", async () => {
 	let generations = 0;
 	let assessments = 0;
 	const sent: string[] = [];
-	const sessionId = crypto.randomUUID();
-	const run = async (extra = "", session = sessionId) => {
+	const defaultFixture = await createApiFixture();
+	const run = async (extra = "", fixture = defaultFixture) => {
 		const response = await handleApi(
 			new Request("http://localhost/api/route", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: fixture.headers,
 				body: JSON.stringify({
-					sessionId: session,
+					...fixture.requestFields(),
 					messages: [
 						{
 							role: "user",
@@ -75,61 +76,64 @@ test("real SDK adapters optimize Russian context, reuse summaries by session and
 				}),
 			}),
 			{
-				OPENAI_API_KEY: "optimization-test",
-				GOOGLE_GENERATIVE_AI_API_KEY: "optimization-test",
-				TYPESAFE_API_KEY: "optimization-test",
-			},
-			async (url, init) => {
-				const body = providerBody.parse(JSON.parse(String(init?.body)));
-				if (body.questions) {
-					assessments++;
-					return Response.json({
-						model: "jev-1.13.0",
-						answers: Object.fromEntries(
-							Object.keys(body.questions).map((id) => [
-								id,
-								{ type: "noul", noul: 0.99 },
-							]),
-						),
-						usage: { input_tokens: 100, output_tokens: 0 },
-					});
-				}
-				if (String(url).includes("openai.com")) {
-					generations++;
-					expect(body.stream).not.toBe(true);
-					return Response.json({
-						id: "summary",
-						created_at: 1,
-						model: "gpt-6-luna",
-						status: "completed",
-						output: [
-							{
-								type: "message",
-								id: "summary-message",
-								role: "assistant",
-								status: "completed",
-								content: [
-									{
-										type: "output_text",
-										text: JSON.stringify(summaries),
-										annotations: [],
-									},
-								],
+				keys: {
+					OPENAI_API_KEY: "optimization-test",
+					GOOGLE_GENERATIVE_AI_API_KEY: "optimization-test",
+					TYPESAFE_API_KEY: "optimization-test",
+				},
+				connect: fixture.connect,
+				providerFetch: async (url, init) => {
+					const body = providerBody.parse(JSON.parse(String(init?.body)));
+					if (body.questions) {
+						assessments++;
+						return Response.json({
+							model: "jev-1.13.0",
+							answers: Object.fromEntries(
+								Object.keys(body.questions).map((id) => [
+									id,
+									{ type: "noul", noul: 0.99 },
+								]),
+							),
+							usage: { input_tokens: 100, output_tokens: 0 },
+						});
+					}
+					if (String(url).includes("openai.com")) {
+						generations++;
+						expect(body.stream).not.toBe(true);
+						return Response.json({
+							id: "summary",
+							created_at: 1,
+							model: "gpt-6-luna",
+							status: "completed",
+							output: [
+								{
+									type: "message",
+									id: "summary-message",
+									role: "assistant",
+									status: "completed",
+									content: [
+										{
+											type: "output_text",
+											text: JSON.stringify(summaries),
+											annotations: [],
+										},
+									],
+								},
+							],
+							usage: {
+								input_tokens: 100,
+								output_tokens: 20,
+								input_tokens_details: { cached_tokens: 0 },
+								output_tokens_details: { reasoning_tokens: 0 },
 							},
-						],
-						usage: {
-							input_tokens: 100,
-							output_tokens: 20,
-							input_tokens_details: { cached_tokens: 0 },
-							output_tokens_details: { reasoning_tokens: 0 },
-						},
-					});
-				}
-				sent.push(String(init?.body));
-				return new Response(
-					`data: ${JSON.stringify({ candidates: [{ index: 0, content: { role: "model", parts: [{ text: "Здравствуйте! Доставка занимает 2 рабочих дня." }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10, totalTokenCount: 110 }, modelVersion: "gemini-3.8-flash" })}\n\n`,
-					{ headers: { "Content-Type": "text/event-stream" } },
-				);
+						});
+					}
+					sent.push(String(init?.body));
+					return new Response(
+						`data: ${JSON.stringify({ candidates: [{ index: 0, content: { role: "model", parts: [{ text: "Здравствуйте! Доставка занимает 2 рабочих дня." }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10, totalTokenCount: 110 }, modelVersion: "gemini-3.8-flash" })}\n\n`,
+						{ headers: { "Content-Type": "text/event-stream" } },
+					);
+				},
 			},
 		);
 		let result: RouteResult | undefined;
@@ -181,7 +185,7 @@ test("real SDK adapters optimize Russian context, reuse summaries by session and
 	expect(generations).toBe(1);
 	await run("Новые условия.");
 	expect(generations).toBe(2);
-	await run("", crypto.randomUUID());
+	await run("", await createApiFixture(defaultFixture.t));
 	expect(generations).toBe(3);
 	expect(assessments).toBe(4);
 });
@@ -203,15 +207,15 @@ test("OpenAI SDK forwards explicit cache options and stable-prefix breakpoints, 
 			}),
 		),
 	});
-	const sessionId = crypto.randomUUID();
+	const fixture = await createApiFixture();
 	let calls = 0;
 	const run = async () => {
 		const response = await handleApi(
 			new Request("http://localhost/api/route", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: fixture.headers,
 				body: JSON.stringify({
-					sessionId,
+					...fixture.requestFields(),
 					messages: [{ role: "user", content: "Где мой заказ?" }],
 					routes: {
 						kind: "workflow",
@@ -250,51 +254,56 @@ test("OpenAI SDK forwards explicit cache options and stable-prefix breakpoints, 
 					},
 				}),
 			}),
-			{ OPENAI_API_KEY: "cache-options-test" },
-			async (_url, init) => {
-				const body = bodySchema.parse(JSON.parse(String(init?.body)));
-				expect(body.input[0].content[0].prompt_cache_breakpoint).toEqual({
-					mode: "explicit",
-				});
-				expect(
-					body.input.at(-1)?.content[0].prompt_cache_breakpoint,
-				).toBeUndefined();
-				const write = calls++ === 0;
-				const events = [
-					{
-						type: "response.created",
-						response: { id: "cached", created_at: 1, model: "gpt-6-luna" },
-					},
-					{
-						type: "response.output_item.added",
-						output_index: 0,
-						item: { id: "answer", type: "message" },
-					},
-					{
-						type: "response.output_text.delta",
-						item_id: "answer",
-						output_index: 0,
-						delta: "Уточните номер заказа.",
-					},
-					{
-						type: "response.completed",
-						response: {
-							usage: {
-								input_tokens: 10000,
-								output_tokens: 10,
-								input_tokens_details: {
-									cached_tokens: write ? 0 : 8192,
-									cache_write_tokens: write ? 8192 : 0,
+			{
+				keys: { OPENAI_API_KEY: "cache-options-test" },
+				connect: fixture.connect,
+				providerFetch: async (_url, init) => {
+					const body = bodySchema.parse(JSON.parse(String(init?.body)));
+					expect(body.input[0].content[0].prompt_cache_breakpoint).toEqual({
+						mode: "explicit",
+					});
+					expect(
+						body.input.at(-1)?.content[0].prompt_cache_breakpoint,
+					).toBeUndefined();
+					const write = calls++ === 0;
+					const events = [
+						{
+							type: "response.created",
+							response: { id: "cached", created_at: 1, model: "gpt-6-luna" },
+						},
+						{
+							type: "response.output_item.added",
+							output_index: 0,
+							item: { id: "answer", type: "message" },
+						},
+						{
+							type: "response.output_text.delta",
+							item_id: "answer",
+							output_index: 0,
+							delta: "Уточните номер заказа.",
+						},
+						{
+							type: "response.completed",
+							response: {
+								usage: {
+									input_tokens: 10000,
+									output_tokens: 10,
+									input_tokens_details: {
+										cached_tokens: write ? 0 : 8192,
+										cache_write_tokens: write ? 8192 : 0,
+									},
+									output_tokens_details: { reasoning_tokens: 0 },
 								},
-								output_tokens_details: { reasoning_tokens: 0 },
 							},
 						},
-					},
-				];
-				return new Response(
-					events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
-					{ headers: { "Content-Type": "text/event-stream" } },
-				);
+					];
+					return new Response(
+						events
+							.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+							.join(""),
+						{ headers: { "Content-Type": "text/event-stream" } },
+					);
+				},
 			},
 		);
 		let result: RouteResult | undefined;

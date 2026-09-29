@@ -6,7 +6,9 @@ Convex stores owner-scoped graph configuration, documents, conversations, run re
 
 Anonymous Convex Auth establishes a persistent browser identity, and application functions verify that identity before reading or writing records.
 
-[[convex/auth.ts]], [[convex/auth.config.ts]], and [[convex/http.ts]] configure the anonymous provider and auth HTTP routes. [[src/main.tsx]] creates the browser client; [[src/storage/workspace-gate.tsx]] signs in once and initializes an empty workspace from the existing local canvas. [[convex/access.ts]] owns typed access checks, and [[convex/schema.ts]] owns indexed tables. Provider credentials remain on the local API server. Development configuration uses CONVEX_DEPLOYMENT, VITE_CONVEX_URL, and VITE_CONVEX_SITE_URL; signing keys live only in Convex environment configuration. Anonymous sessions have no cross-device recovery.
+Workspace initialization displays no loading label or spinner. Connection failures remain visible with Retry.
+
+[[convex/auth.ts]], [[convex/auth.config.ts]], and [[convex/http.ts]] configure the anonymous provider and auth HTTP routes. [[src/main.tsx]] creates the browser client; [[src/storage/workspace-gate.tsx]] signs in once and requests server-owned initialization. [[src/lib/graph-snapshot.ts]] defines the initial Start and unconfigured Jev graph; an owner without a workspace receives that graph atomically. Browser graph drafts are never read or imported. [[convex/access.ts]] owns typed access checks, and [[convex/schema.ts]] owns indexed tables. Provider credentials remain on the local API server. Development configuration uses CONVEX_DEPLOYMENT, VITE_CONVEX_URL, and VITE_CONVEX_SITE_URL; signing keys live only in Convex environment configuration. Anonymous sessions have no cross-device recovery.
 
 ## Graph saves
 
@@ -18,13 +20,13 @@ The browser edits optimistically, then serializes and coalesces saves against it
 
 ## Conversations and runs
 
-Each run records its unique request ID and user/assistant pair atomically before any paid provider call.
+Each authenticated request requires a conversation ID and unique request UUID. The server records its user/assistant pair atomically before any paid provider call.
 
 [[convex/conversations.ts]] stores a workspace's current conversation and exposes the latest fifty conversations and latest hundred messages of a selected chat. New conversation retains earlier records. Switching conversations is owner-checked and blocked during an active response. [[src/chat/chat-history-menu.tsx]] renders saved conversations using bordered rows, icons, and a selected checkmark. [[src/chat/use-saved-conversation.ts]] restores messages and usage footers through reactive queries and downloads only the latest full result.
 
 [[convex/runs.ts]] deduplicates request UUIDs and permits one active response per conversation. Runs transition from running to completed, failed, or interrupted. A three-minute scheduled lease marks a run interrupted if the local server stops before settling it; the workflow's deadline is two minutes. Failed streams retain partial answer text. Completed results store text and a validated usage footer atomically with the final status; [[convex/results.ts]] stores the full validated result as a JSON file, up to eight MiB, and removes the file if finalization fails. Run ordering uses creation time, not request UUIDs.
 
-[[server/convex-persistence.ts]] forwards the browser's bearer token to Convex. [[server/api.ts]] registers a run before execution and settles it before emitting done. Duplicate submissions return an error without repeating model calls. [[vite.config.ts]] propagates client disconnects into the provider abort signal. Database failures before execution prevent provider calls; failures after a partial stream are reported and lease expiry releases any unsettled lock. Streaming deltas and live timers stay in the submitting tab; other tabs observe the running lock and settled messages in realtime. Saved results support trace inspection after reload when their workflow matches the current graph.
+[[server/convex-persistence.ts]] creates an authenticated Convex client using the browser's bearer token. The API requires this persistence connection and has no database-free execution mode. [[server/api.ts]] registers a run before execution and settles it before emitting done. Duplicate submissions return an error without repeating model calls. [[vite.config.ts]] propagates client disconnects into the provider abort signal. Database failures before execution prevent provider calls; failures after a partial stream are reported and lease expiry releases any unsettled lock. Streaming deltas and live timers stay in the submitting tab; other tabs observe the running lock and settled messages in realtime. Saved results support trace inspection after reload when their workflow matches the current graph.
 
 ## Reusable summaries
 

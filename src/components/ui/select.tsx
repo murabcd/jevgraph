@@ -2,6 +2,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
+import { Button } from "@/components/ui/button";
 
 const Select = SelectPrimitive.Root;
 
@@ -31,8 +32,22 @@ function SelectTrigger({
 	children,
 	...props
 }: SelectPrimitive.Trigger.Props & {
-	size?: "sm" | "default";
+	size?: "sm" | "default" | "icon";
 }) {
+	if (size === "icon") {
+		return (
+			<SelectPrimitive.Trigger
+				data-slot="select-trigger"
+				data-size={size}
+				render={<Button variant="ghost" size="icon-sm" />}
+				className={className}
+				{...props}
+			>
+				{children}
+			</SelectPrimitive.Trigger>
+		);
+	}
+
 	return (
 		<SelectPrimitive.Trigger
 			data-slot="select-trigger"
@@ -122,7 +137,7 @@ function SelectItem({
 			)}
 			{...props}
 		>
-			<SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
+			<SelectPrimitive.ItemText className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap">
 				{children}
 			</SelectPrimitive.ItemText>
 			<SelectPrimitive.ItemIndicator

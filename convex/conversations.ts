@@ -78,7 +78,7 @@ export const list = query({
 			.withIndex("by_owner", (q) => q.eq("owner", workspace.owner))
 			.order("desc")
 			.take(50);
-		return Promise.all(
+		const history = await Promise.all(
 			conversations.map(async (conversation) => {
 				const first = await ctx.db
 					.query("messages")
@@ -87,12 +87,14 @@ export const list = query({
 					)
 					.order("asc")
 					.first();
+				if (!first) return null;
 				return {
 					id: conversation._id,
-					title: first?.content.slice(0, 100) ?? "New conversation",
+					title: first.content.slice(0, 100),
 				};
 			}),
 		);
+		return history.filter((conversation) => conversation !== null);
 	},
 });
 export const open = mutation({

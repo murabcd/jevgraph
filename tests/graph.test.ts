@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Edge } from "@xyflow/react";
 import {
 	canConnectNodes,
@@ -6,12 +6,13 @@ import {
 	type FlowNode,
 	graphSnapshot,
 	nodeStepLabels,
-	readGraph,
 	removeGraphNode,
+	restoreGraph,
 	retainQuestionEdges,
 	routesFromGraph,
 } from "../src/flow/graph";
 import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
+import { parseGraphJson } from "../src/lib/graph-snapshot";
 import { defaultJevQuestion, questionOutputs } from "../src/lib/jev-question";
 import {
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
@@ -21,28 +22,10 @@ import {
 import { configuredJevQuestion } from "./jev-question-fixture";
 import { connectedWorkflowGraph } from "./workflow-graph";
 
-const stored = new Map<string, string>();
-const previousStorage = Object.getOwnPropertyDescriptor(
-	globalThis,
-	"localStorage",
-);
-Object.defineProperty(globalThis, "localStorage", {
-	configurable: true,
-	value: {
-		getItem: (key: string) => stored.get(key) ?? null,
-		setItem: (key: string, value: string) => stored.set(key, value),
-		removeItem: (key: string) => stored.delete(key),
-	},
-});
-afterAll(() => {
-	if (previousStorage)
-		Object.defineProperty(globalThis, "localStorage", previousStorage);
-	else Reflect.deleteProperty(globalThis, "localStorage");
-});
-
-// Exercises the one-time browser import using the current persisted projection.
-function importGraphFixture(nodes: FlowNode[], edges: Edge[]) {
-	stored.set("router:graph:v3", JSON.stringify(graphSnapshot(nodes, edges)));
+function roundTripGraph(nodes: FlowNode[], edges: Edge[]) {
+	return restoreGraph(
+		parseGraphJson(JSON.stringify(graphSnapshot(nodes, edges))),
+	);
 }
 
 function node(
@@ -117,8 +100,7 @@ describe("editable chatflow graph", () => {
 			},
 		];
 		const edges = [{ id: "entry", source: "input", target: "model" }];
-		importGraphFixture(nodes, edges);
-		const restored = readGraph();
+		const restored = roundTripGraph(nodes, edges);
 		expect(restored.nodes[1].data.modelPlans).toBeUndefined();
 		expect(
 			routesFromGraph(restored.nodes, restored.edges)?.nodes[1],
@@ -221,8 +203,7 @@ describe("editable chatflow graph", () => {
 							: item.data,
 			}),
 		);
-		importGraphFixture(graph.nodes, graph.edges);
-		const restored = readGraph();
+		const restored = roundTripGraph(graph.nodes, graph.edges);
 		const routes = routesFromGraph(restored.nodes, restored.edges);
 		expect(routes).not.toBeNull();
 		expect(
@@ -246,10 +227,8 @@ describe("editable chatflow graph", () => {
 		const routes = routesFromGraph(graph.nodes, graph.edges);
 		expect(routes?.kind).toBe("workflow");
 		expect(routes?.nodes.filter((item) => item.kind === "jev")).toHaveLength(2);
-		importGraphFixture(graph.nodes, graph.edges);
-		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
-			routes,
-		);
+		const restored = roundTripGraph(graph.nodes, graph.edges);
+		expect(routesFromGraph(restored.nodes, restored.edges)).toEqual(routes);
 		expect(
 			routesFromGraph(
 				graph.nodes,
@@ -300,10 +279,8 @@ describe("editable chatflow graph", () => {
 			variables: ["plan"],
 			reasoningEffort: "medium",
 		});
-		importGraphFixture(nodes, edges);
-		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
-			routes,
-		);
+		const restored = roundTripGraph(nodes, edges);
+		expect(routesFromGraph(restored.nodes, restored.edges)).toEqual(routes);
 		expect(
 			routesFromGraph(
 				[
@@ -437,13 +414,12 @@ describe("editable chatflow graph", () => {
 		});
 		expect(nodeStepLabels(nodes, edges).get("first")).toBe("02 / MODEL");
 		expect(nodeStepLabels(nodes, edges).get("final")).toBe("04 / OUTPUT");
-		importGraphFixture(nodes, edges);
+		const restored = roundTripGraph(nodes, edges);
 		expect(
-			readGraph().nodes.find((item) => item.id === "first")?.data.prompt,
+			restored.nodes.find((item) => item.id === "first")?.data.prompt,
 		).toBe("Write a draft");
 		expect(
-			readGraph().nodes.find((item) => item.id === "first")?.data
-				.promptMessages,
+			restored.nodes.find((item) => item.id === "first")?.data.promptMessages,
 		).toEqual([
 			{ role: "user", content: "Example request" },
 			{ role: "assistant", content: "Example response" },
@@ -531,10 +507,8 @@ describe("editable chatflow graph", () => {
 		expect(routes?.nodes.find((item) => item.id === "judge")).toMatchObject({
 			maxRepeats: 2,
 		});
-		importGraphFixture(nodes, edges);
-		expect(routesFromGraph(readGraph().nodes, readGraph().edges)).toEqual(
-			routes,
-		);
+		const restored = roundTripGraph(nodes, edges);
+		expect(routesFromGraph(restored.nodes, restored.edges)).toEqual(routes);
 	});
 
 	test("allows a Jev choice to answer directly on an unconnected output", () => {
@@ -614,49 +588,28 @@ describe("editable chatflow graph", () => {
 		).toEqual([edges[0]]);
 	});
 
-	test("restores the initial graph when Start is missing and rejects malformed nodes", () => {
-		stored.set("router:graph:v3", JSON.stringify({ nodes: [], edges: [] }));
-		const initial = readGraph();
-		expect(initial.nodes.map((item) => item.id)).toEqual(["input", "jev"]);
-		expect(initial.edges).toHaveLength(1);
-		expect(routesFromGraph(initial.nodes, initial.edges)).toBeNull();
-		importGraphFixture(initial.nodes, initial.edges);
-		expect(readGraph().nodes[1]?.data.question).toEqual(
-			defaultJevQuestion("choice"),
-		);
-		stored.set(
-			"router:graph:v3",
-			JSON.stringify({
-				nodes: [
-					{
-						id: "input",
-						position: { x: 0, y: 0 },
-						data: { kind: "input", fields: [] },
-					},
-					{
-						id: "model",
-						position: { x: 1, y: 0 },
-						data: {
-							kind: "openai",
-							model: "gpt-6-luna",
-							maxOutputTokens: 1400,
+	test("rejects malformed saved graphs without reconstructing a different graph", () => {
+		expect(() =>
+			parseGraphJson(JSON.stringify({ nodes: [], edges: [] })),
+		).toThrow();
+		expect(() =>
+			parseGraphJson(
+				JSON.stringify({
+					nodes: [
+						{
+							id: "input",
+							position: { x: 0, y: 0 },
+							data: { kind: "input", fields: [] },
 						},
-					},
-					{
-						id: "bad",
-						position: { x: "oops", y: 0 },
-						data: { kind: "openai" },
-					},
-				],
-				edges: [
-					{ id: "valid", source: "input", target: "model" },
-					{ id: "invalid", source: "input", target: "bad" },
-				],
-			}),
-		);
-		const graph = readGraph();
-		expect(graph.nodes.map((item) => item.id)).toEqual(["input", "jev"]);
-		expect(graph.edges).toHaveLength(1);
-		expect(routesFromGraph(graph.nodes, graph.edges)).toBeNull();
+						{
+							id: "bad",
+							position: { x: "oops", y: 0 },
+							data: { kind: "openai" },
+						},
+					],
+					edges: [{ id: "invalid", source: "input", target: "bad" }],
+				}),
+			),
+		).toThrow();
 	});
 });

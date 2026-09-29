@@ -10,7 +10,6 @@ import {
 	graphSnapshotSchema,
 	MAX_GRAPH_EDGES,
 	MAX_GRAPH_NODES,
-	parseGraphJson,
 } from "@/lib/graph-snapshot";
 import {
 	defaultJevQuestion,
@@ -137,32 +136,6 @@ export function defaultNodeData(
 		reasoningEffort,
 	};
 }
-export const startingNodes: FlowNode[] = [
-	{
-		id: "input",
-		type: "route",
-		position: { x: 0, y: 235 },
-		data: { kind: "input", active: false, fields: [] },
-	},
-	{
-		id: "jev",
-		type: "route",
-		position: { x: 355, y: 235 },
-		data: defaultNodeData("jev"),
-	},
-];
-
-export const startingEdges: Edge[] = [
-	{
-		id: "input-jev",
-		source: "input",
-		target: "jev",
-		type: "default",
-	},
-];
-
-const graphStorageKey = "router:graph:v3";
-
 function persistedNodeData(data: FlowNode["data"]) {
 	if (data.kind === "input")
 		return { kind: data.kind, fields: data.fields, documents: data.documents };
@@ -351,19 +324,6 @@ export function restoreGraph(snapshot: GraphSnapshot): {
 }
 
 /** One-time import of the existing local canvas into the user's empty workspace. */
-export function readGraph(): { nodes: FlowNode[]; edges: Edge[] } {
-	try {
-		const json = localStorage.getItem(graphStorageKey);
-		if (json) return restoreGraph(parseGraphJson(json));
-	} catch {
-		/* An invalid local draft is never written to the database. */
-	}
-	return { nodes: startingNodes, edges: startingEdges };
-}
-export function removeImportedGraph() {
-	localStorage.removeItem(graphStorageKey);
-}
-
 export function removeGraphNode(
 	nodes: FlowNode[],
 	edges: Edge[],

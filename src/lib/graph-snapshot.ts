@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { contextDocumentsSchema, contextPolicySchema } from "./context.ts";
-import { jevQuestionSchema } from "./jev-question.ts";
+import { defaultJevQuestion, jevQuestionSchema } from "./jev-question.ts";
 import { modelRoutingSchema } from "./model-routing.ts";
 import {
 	confidenceThresholdSchema,
+	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	MAX_PROMPT_LENGTH,
 	maxOutputTokensSchema,
 	modelIdSchema,
@@ -86,4 +87,26 @@ export function parseGraphJson(json: string): GraphSnapshot {
 	if (new TextEncoder().encode(json).length > 900000)
 		throw new Error("Graph is too large to save");
 	return graphSnapshotSchema.parse(JSON.parse(json));
+}
+
+export function createInitialGraph(): GraphSnapshot {
+	return {
+		nodes: [
+			{
+				id: "input",
+				position: { x: 0, y: 235 },
+				data: { kind: "input", fields: [] },
+			},
+			{
+				id: "jev",
+				position: { x: 355, y: 235 },
+				data: {
+					kind: "jev",
+					question: defaultJevQuestion(),
+					confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+				},
+			},
+		],
+		edges: [{ id: "input-jev", source: "input", target: "jev" }],
+	};
 }

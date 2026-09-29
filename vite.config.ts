@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { handleApi } from "./server/api.ts";
+import { ConvexPersistence } from "./server/convex-persistence.ts";
 import { MAX_REQUEST_BYTES } from "./src/lib/routing.ts";
 
 async function serveApi(
@@ -46,12 +47,10 @@ async function serveApi(
 		});
 		if (!env.VITE_CONVEX_URL)
 			throw new Error("Convex deployment is not configured");
-		const response = await handleApi(
-			request,
-			env,
-			undefined,
-			env.VITE_CONVEX_URL,
-		);
+		const response = await handleApi(request, {
+			keys: env,
+			connect: (token) => ConvexPersistence.connect(env.VITE_CONVEX_URL, token),
+		});
 		res.statusCode = response.status;
 		response.headers.forEach((value, key) => {
 			res.setHeader(key, value);

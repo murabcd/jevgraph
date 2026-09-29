@@ -31,6 +31,8 @@ const direct = {
 };
 
 const request = {
+	conversationId: "test-conversation",
+	requestId: crypto.randomUUID(),
 	routes: direct,
 	messages: [
 		{ role: "user", content: "My name is Alex" },
@@ -172,6 +174,18 @@ describe("chatflow contract", () => {
 	});
 
 	test("rejects obsolete route shapes and invalid chat messages", () => {
+		expect(
+			routeRequestSchema.safeParse({
+				...request,
+				sessionId: crypto.randomUUID(),
+			}).success,
+		).toBe(false);
+		const { conversationId: _conversationId, ...withoutConversation } = request;
+		const { requestId: _requestId, ...withoutRequestId } = request;
+		expect(routeRequestSchema.safeParse(withoutConversation).success).toBe(
+			false,
+		);
+		expect(routeRequestSchema.safeParse(withoutRequestId).success).toBe(false);
 		expect(
 			routeRequestSchema.safeParse({ ...request, context: {} }).success,
 		).toBe(false);

@@ -38,6 +38,8 @@ Use shadcn/ui components for app UI. Compose the existing primitives before addi
 
 Match the existing editor rhythm before adding controls: spacing, padding, typography, focus states, and selected borders. Use `FieldGroup` and `Field` for form layout, and `InputGroup` with its controls for complex inputs. Keep fields in the existing flat editor layout; do not add enclosing cards or tabs unless explicitly requested. Do not add explanatory descriptions beneath controls unless requested; concise labels, units, validation errors, and runtime results remain appropriate. Options menu items use action icons and keep labels on one line. Put removal actions in the item options menu, not a trash button beside an input. Reuse the established command interaction for selector editing and save valid fields independently where that editor already does so. Verify the visible result in the running app before calling UI work complete.
 
+Preserve the chat's Shimmer-animated `Thinking` text while an assistant turn is streaming and has no answer text yet. Never remove it as part of loading text, spinner, or fallback cleanup; the plain `Thinking` Suspense fallback must remain visible while Shimmer loads.
+
 ## Code Quality
 
 Avoid `any` unless it is necessary and locally justified. Before guessing an external API shape, inspect the installed dependency types and use exported types. Avoid inline runtime imports and `import("pkg").Type` in type positions; use top-level imports and `import type` declarations.
