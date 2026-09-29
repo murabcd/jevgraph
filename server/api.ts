@@ -67,6 +67,7 @@ type RouteExecution = {
 	evidenceFor: (key: string) => Promise<RouteEvidence[]>;
 	signal: AbortSignal;
 	emit: (event: RouteStreamEvent) => void;
+	onSnapshot: (trace: RouteTrace) => void;
 };
 
 const jevConfidenceSchema = z.object({ task: z.number().finite() });
@@ -191,6 +192,7 @@ async function executeRoute(
 		evidenceFor,
 		signal,
 		emit,
+		onSnapshot,
 	}: RouteExecution,
 	routes: WorkflowRoutes,
 ) {
@@ -274,6 +276,7 @@ async function executeRoute(
 			),
 		onDelta: (text) => emit({ type: "delta", text }),
 		onRoute: (route) => emit({ type: "route", route }),
+		onSnapshot,
 		onProgress: (trace) => emit({ type: "progress", trace }),
 		signal,
 	});
@@ -378,7 +381,6 @@ export async function handleApi(
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const emit = (event: RouteStreamEvent) => {
-					if (event.type === "progress") latestTrace = event.trace;
 					if (event.type === "delta") partialText += event.text;
 					if (!closed)
 						controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
@@ -417,6 +419,9 @@ export async function handleApi(
 						),
 						signal,
 						emit,
+						onSnapshot: (trace) => {
+							latestTrace = trace;
+						},
 					},
 					input.routes,
 				)

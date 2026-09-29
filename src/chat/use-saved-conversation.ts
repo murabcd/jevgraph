@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useMemo } from "react";
 import useSWR from "swr";
 import type { ChatTurn } from "@/chat/types";
-import { routeResultSchema } from "@/lib/routing";
+import { artifactTrace, runArtifactSchema } from "@/lib/run-artifact";
 import { runFooterSchema } from "@/lib/run-footer";
 import type { Workspace } from "@/storage/workspace-gate";
 import { api } from "../../convex/_generated/api";
@@ -28,7 +28,7 @@ export function useSavedConversation(
 		async (url: string) => {
 			const response = await fetch(url);
 			if (!response.ok) throw new Error("Could not restore the run");
-			return routeResultSchema.parse(await response.json());
+			return runArtifactSchema.parse(await response.json());
 		},
 	);
 	const messages = useMemo(
@@ -44,7 +44,11 @@ export function useSavedConversation(
 	return {
 		messages,
 		running: turns?.some((turn) => turn.streaming) ?? false,
-		result: latest?.routes === routeKey ? (data ?? null) : null,
+		result:
+			latest?.routes === routeKey && data?.status === "completed"
+				? data.result
+				: null,
+		trace: latest?.routes === routeKey && data ? artifactTrace(data) : null,
 		error: error instanceof Error ? error.message : (latest?.error ?? ""),
 		history: history ?? [],
 		start: () => start({ workspaceId: workspace.id }),

@@ -35,7 +35,7 @@ implemented yet.
 - Model evaluation with owner reviews, quality/latency gates, and complete-route cost comparisons
 - Optional pre-call context preparation payback and observed provider-cache planning
 - Live execution paths, node timers, context inspection, token usage, and estimated costs
-- Realtime graph saves, chat history, completed run traces, and reusable context summaries in Convex
+- Realtime graph saves, chat history, successful and failed run artifacts, and reusable context summaries in Convex
 
 ## Built with
 

@@ -3,6 +3,7 @@ import { api, internal } from "../convex/_generated/api";
 import { executeWorkflow } from "../server/workflow";
 import { createInitialGraph, parseGraphJson } from "../src/lib/graph-snapshot";
 import { workflowRoutesSchema } from "../src/lib/routing";
+import { emptyRouteTrace } from "../src/lib/run-artifact";
 
 import { createConvexFixture } from "./convex-fixture";
 
@@ -101,11 +102,16 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 	await expect(
 		owner.mutation(api.conversations.start, { workspaceId: id }),
 	).rejects.toThrow("Wait for the current response");
-	await owner.mutation(api.runs.fail, {
+	await owner.action(api.results.save, {
 		runId: first.runId,
-		content: "Проверяю заказ",
-		error: "Provider stopped",
-		interrupted: true,
+		result: JSON.stringify({
+			status: "interrupted",
+			text: "Проверяю заказ",
+			error: "Provider stopped",
+			trace: emptyRouteTrace(),
+			latencyMs: 0,
+			coverage: "partial",
+		}),
 	});
 	const turns = await owner.query(api.conversations.turns, {
 		conversationId: workspace.conversationId,
@@ -136,11 +142,16 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 			(item) => item.id,
 		),
 	).toEqual([newId, workspace.conversationId]);
-	await owner.mutation(api.runs.fail, {
+	await owner.action(api.results.save, {
 		runId: next.runId,
-		content: "",
-		error: "Provider stopped",
-		interrupted: false,
+		result: JSON.stringify({
+			status: "failed",
+			text: "",
+			error: "Provider stopped",
+			trace: emptyRouteTrace(),
+			latencyMs: 0,
+			coverage: "partial",
+		}),
 	});
 	await expect(
 		owner.mutation(api.runs.begin, request(workspace.conversationId)),
@@ -160,11 +171,16 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 		api.runs.begin,
 		request(workspace.conversationId, "ffffffff-ffff-4fff-8fff-ffffffffffff"),
 	);
-	await owner.mutation(api.runs.fail, {
+	await owner.action(api.results.save, {
 		runId: first.runId,
-		content: "",
-		error: "First failed",
-		interrupted: false,
+		result: JSON.stringify({
+			status: "failed",
+			text: "",
+			error: "First failed",
+			trace: emptyRouteTrace(),
+			latencyMs: 0,
+			coverage: "partial",
+		}),
 	});
 	const next = await owner.mutation(
 		api.runs.begin,
@@ -189,7 +205,7 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 	const result = { ...response, latencyMs: 30 };
 	await owner.action(api.results.save, {
 		runId: next.runId,
-		result: JSON.stringify(result),
+		result: JSON.stringify({ status: "completed", result: result }),
 	});
 	const latest = await owner.query(api.runs.latest, {
 		conversationId: workspace.conversationId,
@@ -204,7 +220,7 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 		if (!file) throw new Error("Result bytes missing");
 		return file.text();
 	});
-	expect(JSON.parse(stored)).toEqual(result);
+	expect(JSON.parse(stored)).toEqual({ status: "completed", result });
 	const turns = await owner.query(api.conversations.turns, {
 		conversationId: workspace.conversationId,
 	});

@@ -1,6 +1,11 @@
 import { v } from "convex/values";
 import { routeEvaluations } from "../src/lib/route-evidence";
-import { routeResultSchema, workflowRoutesSchema } from "../src/lib/routing";
+import { workflowRoutesSchema } from "../src/lib/routing";
+import {
+	artifactTrace,
+	MAX_ARTIFACT_BYTES,
+	runArtifactSchema,
+} from "../src/lib/run-artifact";
 import { runFooter } from "../src/lib/run-footer";
 import { internal } from "./_generated/api";
 import { action } from "./_generated/server";
@@ -10,23 +15,35 @@ export const save = action({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const run = await ctx.runQuery(internal.runs.owned, { runId: args.runId });
-		if (new TextEncoder().encode(args.result).length > 8000000)
+		if (new TextEncoder().encode(args.result).length > MAX_ARTIFACT_BYTES)
 			throw new Error("Run result is too large to save");
-		const result = routeResultSchema.parse(JSON.parse(args.result));
+		const artifact = runArtifactSchema.parse(JSON.parse(args.result));
+		const trace = artifactTrace(artifact);
 		const evaluations = await routeEvaluations(
 			workflowRoutesSchema.parse(JSON.parse(run.routes)),
-			result,
-			result.latencyMs,
-			result.outcome === "completed",
+			trace,
+			artifact.status === "completed"
+				? artifact.result.latencyMs
+				: artifact.latencyMs,
+			artifact.status === "completed" &&
+				artifact.result.outcome === "completed",
 		);
 		const resultFile = await ctx.storage.store(
-			new Blob([JSON.stringify(result)], { type: "application/json" }),
+			new Blob([JSON.stringify(artifact)], { type: "application/json" }),
 		);
 		try {
-			await ctx.runMutation(internal.runs.finish, {
+			await ctx.runMutation(internal.runs.settleArtifact, {
 				runId: args.runId,
-				content: result.text,
-				footer: JSON.stringify(runFooter(result)),
+				content:
+					artifact.status === "completed"
+						? artifact.result.text
+						: artifact.text,
+				status: artifact.status,
+				error: artifact.status === "completed" ? undefined : artifact.error,
+				footer:
+					artifact.status === "completed"
+						? JSON.stringify(runFooter(artifact.result))
+						: undefined,
 				resultFile,
 				evaluations: JSON.stringify(evaluations),
 			});

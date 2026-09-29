@@ -13,6 +13,7 @@ import {
 	splitPassages,
 } from "../src/lib/retrieval";
 import type { WorkflowRoutes } from "../src/lib/routing";
+import { emptyRouteTrace } from "../src/lib/run-artifact";
 import { createConvexFixture } from "./convex-fixture";
 
 const document = {
@@ -162,6 +163,8 @@ test("indexing shares work, while changed source text gets a fresh index", async
 		"",
 		"New document version",
 		false,
+		emptyRouteTrace(),
+		0,
 	);
 	const updated = routes();
 	const start = updated.nodes.find((node) => node.kind === "input");
@@ -205,7 +208,14 @@ test("retrieval rejects forged source keys and stale document versions within th
 			})),
 		),
 	).rejects.toThrow("Retrieval key does not match its source");
-	await fixture.persistence.fail(fixture.run.runId, "", "Change source", false);
+	await fixture.persistence.fail(
+		fixture.run.runId,
+		"",
+		"Change source",
+		false,
+		emptyRouteTrace(),
+		0,
+	);
 	const updated = routes();
 	const start = updated.nodes.find((node) => node.kind === "input");
 	if (start?.kind !== "input") throw new Error("Start missing");

@@ -4,7 +4,8 @@ import {
 	routeEvaluationSchema,
 	routeEvaluations,
 } from "../src/lib/route-evidence";
-import { routeTraceSchema, workflowRoutesSchema } from "../src/lib/routing";
+import { workflowRoutesSchema } from "../src/lib/routing";
+import { emptyRouteTrace } from "../src/lib/run-artifact";
 import { runFooterSchema } from "../src/lib/run-footer";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -136,40 +137,6 @@ export const begin = mutation({
 	},
 });
 
-export const fail = mutation({
-	args: {
-		runId: v.id("runs"),
-		content: v.string(),
-		error: v.string(),
-		interrupted: v.boolean(),
-		trace: v.optional(v.string()),
-		latencyMs: v.optional(v.number()),
-	},
-	returns: v.null(),
-	handler: async (ctx, args) => {
-		const run = await ownRun(ctx, args.runId);
-		if (run.status !== "running") return null;
-		if (args.trace && args.latencyMs !== undefined) {
-			await recordRouteEvaluations(
-				ctx,
-				run,
-				await routeEvaluations(
-					workflowRoutesSchema.parse(JSON.parse(run.routes)),
-					routeTraceSchema.parse(JSON.parse(args.trace)),
-					args.latencyMs,
-					false,
-				),
-			);
-		}
-		await settle(ctx, args.runId, args.content, true);
-		await ctx.db.patch(args.runId, {
-			status: args.interrupted ? "interrupted" : "failed",
-			error: args.error.slice(0, 2000),
-		});
-		return null;
-	},
-});
-
 export const expire = internalMutation({
 	args: { runId: v.id("runs") },
 	returns: v.null(),
@@ -183,15 +150,7 @@ export const expire = internalMutation({
 				run,
 				await routeEvaluations(
 					workflowRoutesSchema.parse(JSON.parse(run.routes)),
-					{
-						path: [],
-						traversedEdges: [],
-						jevSteps: [],
-						outputs: [],
-						calls: [],
-						contexts: [],
-						modelPlans: [],
-					},
+					emptyRouteTrace(),
 					RUN_LEASE_MS,
 					false,
 				),
@@ -206,11 +165,17 @@ export const expire = internalMutation({
 	},
 });
 
-export const finish = internalMutation({
+export const settleArtifact = internalMutation({
 	args: {
 		runId: v.id("runs"),
 		content: v.string(),
-		footer: v.string(),
+		footer: v.optional(v.string()),
+		status: v.union(
+			v.literal("completed"),
+			v.literal("failed"),
+			v.literal("interrupted"),
+		),
+		error: v.optional(v.string()),
 		resultFile: v.id("_storage"),
 		evaluations: v.string(),
 	},
@@ -219,7 +184,7 @@ export const finish = internalMutation({
 		const run = await ownRun(ctx, args.runId);
 		if (run.status !== "running")
 			throw new ConvexError("This run is already settled");
-		runFooterSchema.parse(JSON.parse(args.footer));
+		if (args.footer) runFooterSchema.parse(JSON.parse(args.footer));
 		await recordRouteEvaluations(
 			ctx,
 			run,
@@ -228,9 +193,10 @@ export const finish = internalMutation({
 				.max(100)
 				.parse(JSON.parse(args.evaluations)),
 		);
-		await settle(ctx, args.runId, args.content, false);
+		await settle(ctx, args.runId, args.content, args.status !== "completed");
 		await ctx.db.patch(args.runId, {
-			status: "completed",
+			status: args.status,
+			error: args.error,
 			footer: args.footer,
 			resultFile: args.resultFile,
 		});

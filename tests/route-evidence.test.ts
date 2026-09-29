@@ -255,16 +255,22 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 	});
 	await owner.action(api.results.save, {
 		runId: first.runId,
-		result: JSON.stringify({ ...result, latencyMs: 500 }),
+		result: JSON.stringify({
+			status: "completed",
+			result: { ...result, latencyMs: 500 },
+		}),
 	});
 	const second = await begin();
-	await owner.mutation(api.runs.fail, {
+	await owner.action(api.results.save, {
 		runId: second.runId,
-		content: "Partial reply",
-		error: "Provider failed",
-		interrupted: false,
-		trace: JSON.stringify(empty),
-		latencyMs: 1000,
+		result: JSON.stringify({
+			status: "failed",
+			text: "Partial reply",
+			error: "Provider failed",
+			trace: empty,
+			latencyMs: 1000,
+			coverage: "partial",
+		}),
 	});
 	const args = { conversationId: workspace.conversationId, nodeId: "answer" };
 	const records = await owner.query(api.routeEvaluations.list, args);
@@ -349,7 +355,10 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 	});
 	await owner.action(api.results.save, {
 		runId: run.runId,
-		result: JSON.stringify({ ...result, latencyMs: 500 }),
+		result: JSON.stringify({
+			status: "completed",
+			result: { ...result, latencyMs: 500 },
+		}),
 	});
 	const current = await owner.query(api.routeEvaluations.latest, {
 		conversationId: workspace.conversationId,
@@ -395,27 +404,30 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 		routes: JSON.stringify(routes),
 		evaluation: { scope, caseKey: "d".repeat(64) },
 	});
-	await owner.mutation(api.runs.fail, {
+	await owner.action(api.results.save, {
 		runId: failed.runId,
-		content: "",
-		error: "Provider failed",
-		interrupted: false,
-		trace: JSON.stringify({
-			...empty,
-			path: [{ nodeId: "input" }, { nodeId: "answer" }],
-			calls: [
-				{
-					id: "1",
-					nodeId: "answer",
-					purpose: "model",
-					provider: "openai",
-					model: "gpt-6-luna",
-					status: "failed",
-					durationMs: 60000,
-				},
-			],
+		result: JSON.stringify({
+			status: "failed",
+			text: "",
+			error: "Provider failed",
+			trace: {
+				...empty,
+				path: [{ nodeId: "input" }, { nodeId: "answer" }],
+				calls: [
+					{
+						id: "1",
+						nodeId: "answer",
+						purpose: "model",
+						provider: "openai",
+						model: "gpt-6-luna",
+						status: "failed",
+						durationMs: 60000,
+					},
+				],
+			},
+			latencyMs: 60000,
+			coverage: "partial",
 		}),
-		latencyMs: 60000,
 	});
 	await expect(
 		owner.mutation(api.routeEvaluations.review, {

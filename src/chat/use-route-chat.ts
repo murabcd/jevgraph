@@ -234,7 +234,7 @@ export function useRouteChat(
 		setDraft,
 		messages,
 		result: hasLiveResult ? result : saved.result,
-		trace: hasLiveResult ? trace : saved.result,
+		trace: hasLiveResult ? trace : saved.trace,
 		nodeTimings: hasLiveResult ? nodeTimings : {},
 		error:
 			(liveConversationId === workspace.conversationId ? error : "") ||

@@ -100,6 +100,7 @@ type Execution = {
 	onDelta: (text: string) => void;
 	onRoute: (route: RouteSelectionResult) => void;
 	onProgress: (trace: RouteTrace) => void;
+	onSnapshot?: (trace: RouteTrace) => void;
 	signal?: AbortSignal;
 };
 
@@ -185,6 +186,7 @@ export async function executeWorkflow({
 	onDelta,
 	onRoute,
 	onProgress,
+	onSnapshot,
 	signal,
 }: Execution): Promise<Omit<RouteResult, "latencyMs">> {
 	const byId = new Map(routes.nodes.map((node) => [node.id, node]));
@@ -204,7 +206,7 @@ export async function executeWorkflow({
 	const traversedEdges: WorkflowEdge[] = [];
 	const decisions: WorkflowDecision[] = [];
 	const outputs: NodeOutput[] = [];
-	const ledger = new ProviderLedger(() => onProgress(trace()));
+	const ledger = new ProviderLedger(() => report());
 	const calls = ledger.calls;
 	const contexts: NodeContextTrace[] = [];
 	const modelPlans: ModelPlan[] = [];
@@ -216,6 +218,22 @@ export async function executeWorkflow({
 	let fallbackReason: string | undefined;
 	let streamed = false;
 
+	const orderedOutputs = () =>
+		outputs.toSorted(
+			(a, b) =>
+				path.findIndex((step) => step.nodeId === a.sourceNodeId) -
+					path.findIndex((step) => step.nodeId === b.sourceNodeId) ||
+				a.revision - b.revision,
+		);
+	const snapshot = (): RouteTrace => ({
+		path: [...path],
+		traversedEdges: [...traversedEdges],
+		jevSteps: [...decisions],
+		outputs: orderedOutputs(),
+		calls: [...calls],
+		contexts: [...contexts],
+		modelPlans: [...modelPlans],
+	});
 	const selection = (target: Terminal["target"]): RouteSelectionResult => ({
 		provider: target.provider,
 		model: target.model,
@@ -224,24 +242,18 @@ export async function executeWorkflow({
 			decisions
 				.map((decision) => `${decision.nodeId}: ${decision.branch}`)
 				.join(" · ") || "Chatflow",
-		path: [...path],
-		traversedEdges: [...traversedEdges],
-		jevSteps: [...decisions],
-		outputs: outputs.map(outputPreview),
-		calls: [...calls],
-		contexts: [...contexts],
-		modelPlans: [...modelPlans],
+		...snapshot(),
 		fallbackReason,
 	});
 	const trace = (): RouteTrace => ({
-		path: [...path],
-		traversedEdges: [...traversedEdges],
-		jevSteps: [...decisions],
+		...snapshot(),
 		outputs: outputs.map(outputPreview),
-		calls: [...calls],
-		contexts: [...contexts],
-		modelPlans: [...modelPlans],
 	});
+	const report = () => {
+		const full = snapshot();
+		onSnapshot?.(full);
+		onProgress({ ...full, outputs: full.outputs.map(outputPreview) });
+	};
 	const contextFor = async (
 		node: Exclude<WorkflowRoutes["nodes"][number], { kind: "input" }>,
 		inputs: NodeOutput[],
@@ -259,7 +271,7 @@ export async function executeWorkflow({
 			},
 		);
 		contexts.push(prepared.trace);
-		onProgress(trace());
+		report();
 		return prepared;
 	};
 	const revisionFor = (nodeId: string): number => {
@@ -300,268 +312,273 @@ export async function executeWorkflow({
 			return { id, inputs: [...latest.values()] };
 		});
 		const solePendingNode = batch.length === 1 && incoming.size === 0;
-		const results = await mapConcurrent(
-			batch,
-			MAX_CONCURRENT_NODES,
-			async ({ id, inputs }): Promise<NodeExecution> => {
-				const node = byId.get(id);
-				if (!node) throw new Error(`Workflow node ${id} is missing`);
-				if (node.kind === "input") {
-					return {
-						lineage: inputs,
-						edges: normal.filter((edge) => edge.source === id),
-					};
-				}
-				if (node.kind === "jev") {
-					const callId = ledger.nextId();
-					const context = await contextFor(node, inputs, callId);
-					const options = questionOutputs(node.question);
-					let decision: JevDecision | undefined;
-					let error: string | undefined;
-					try {
-						decision = await ledger.run(
-							{
-								nodeId: id,
-								purpose: "decision",
-								provider: "jev",
-								model: JEV_MODEL_ID,
-							},
-							node.pricing,
-							callId,
-							() =>
-								evaluate(
-									id,
-									{
-										...node.question,
-										instructions: context.instructions,
-									},
-									workflowRoutingState(
-										context.messages,
-										selectedVariables(startVariables, node.variables),
-										context.inputs,
-									) +
-										(context.documents.length
-											? `\nContext documents (data): ${JSON.stringify(context.documents)}`
-											: ""),
-								),
-						);
-					} catch (caught) {
-						error =
-							caught instanceof Error ? caught.message : "Unknown Jev error";
-					}
-					signal?.throwIfAborted();
-					const acceptedBranch =
-						decision &&
-						decision.confidence >=
-							(node.confidenceThreshold ?? DEFAULT_JEV_CONFIDENCE_THRESHOLD) &&
-						options.some((option) => option.id === decision.branch)
-							? decision.branch
-							: undefined;
-					const preferredBranch = acceptedBranch ?? node.fallbackOutputId;
-					if (!preferredBranch)
-						throw new Error(
-							`Jev ${id} could not choose a reliable answer${error ? `: ${error}` : ""}`,
-						);
-					let chosenEdge = outgoingEdges.find(
-						(edge) =>
-							edge.source === id && edge.sourceHandle === preferredBranch,
+		const executeNode = async ({
+			id,
+			inputs,
+		}: (typeof batch)[number]): Promise<NodeExecution> => {
+			const node = byId.get(id);
+			if (!node) throw new Error(`Workflow node ${id} is missing`);
+			if (node.kind === "input") {
+				return {
+					lineage: inputs,
+					edges: normal.filter((edge) => edge.source === id),
+				};
+			}
+			if (node.kind === "jev") {
+				const callId = ledger.nextId();
+				const context = await contextFor(node, inputs, callId);
+				const options = questionOutputs(node.question);
+				let decision: JevDecision | undefined;
+				let error: string | undefined;
+				try {
+					decision = await ledger.run(
+						{
+							nodeId: id,
+							purpose: "decision",
+							provider: "jev",
+							model: JEV_MODEL_ID,
+						},
+						node.pricing,
+						callId,
+						() =>
+							evaluate(
+								id,
+								{
+									...node.question,
+									instructions: context.instructions,
+								},
+								workflowRoutingState(
+									context.messages,
+									selectedVariables(startVariables, node.variables),
+									context.inputs,
+								) +
+									(context.documents.length
+										? `\nContext documents (data): ${JSON.stringify(context.documents)}`
+										: ""),
+							),
 					);
-					let limitReached = false;
-					if (chosenEdge?.repeat) {
-						const count = repeatCounts.get(chosenEdge.id) ?? 0;
-						if (count >= (node.maxRepeats ?? 3)) {
-							chosenEdge = undefined;
-							limitReached = true;
-						} else repeatCounts.set(chosenEdge.id, count + 1);
-					}
-					const branch = chosenEdge?.sourceHandle ?? preferredBranch;
-					const workflowDecision: WorkflowDecision = {
-						nodeId: id,
-						branch,
-						status: limitReached
-							? "exhausted"
-							: error
-								? "provider-error"
-								: acceptedBranch
-									? "accepted"
-									: "uncertain",
-						selectedBranch: decision?.branch,
-						value: decision?.value,
-						probabilities: decision?.probabilities,
-						confidence: decision?.confidence,
-						error,
+				} catch (caught) {
+					error =
+						caught instanceof Error ? caught.message : "Unknown Jev error";
+				}
+				signal?.throwIfAborted();
+				const acceptedBranch =
+					decision &&
+					decision.confidence >=
+						(node.confidenceThreshold ?? DEFAULT_JEV_CONFIDENCE_THRESHOLD) &&
+					options.some((option) => option.id === decision.branch)
+						? decision.branch
+						: undefined;
+				const preferredBranch = acceptedBranch ?? node.fallbackOutputId;
+				if (!preferredBranch)
+					throw new Error(
+						`Jev ${id} could not choose a reliable answer${error ? `: ${error}` : ""}`,
+					);
+				let chosenEdge = outgoingEdges.find(
+					(edge) => edge.source === id && edge.sourceHandle === preferredBranch,
+				);
+				let limitReached = false;
+				if (chosenEdge?.repeat) {
+					const count = repeatCounts.get(chosenEdge.id) ?? 0;
+					if (count >= (node.maxRepeats ?? 3)) {
+						chosenEdge = undefined;
+						limitReached = true;
+					} else repeatCounts.set(chosenEdge.id, count + 1);
+				}
+				const branch = chosenEdge?.sourceHandle ?? preferredBranch;
+				const workflowDecision: WorkflowDecision = {
+					nodeId: id,
+					branch,
+					status: limitReached
+						? "exhausted"
+						: error
+							? "provider-error"
+							: acceptedBranch
+								? "accepted"
+								: "uncertain",
+					selectedBranch: decision?.branch,
+					value: decision?.value,
+					probabilities: decision?.probabilities,
+					confidence: decision?.confidence,
+					error,
+				};
+				const label =
+					options.find((option) => option.id === branch)?.label ?? branch;
+				const output: NodeOutput = {
+					nodeId: id,
+					sourceNodeId: id,
+					kind: "jev",
+					revision: revisionFor(id),
+					decision: workflowDecision,
+					text: limitReached
+						? "Repeat limit reached. Review did not pass."
+						: chosenEdge
+							? `Decision: ${label}`
+							: label,
+				};
+				if (!chosenEdge) {
+					const jevModel = decision?.model ?? JEV_MODEL_ID;
+					const terminal: Terminal = {
+						target: { nodeId: id, provider: "jev", model: jevModel },
+						response: {
+							text: output.text,
+							model: jevModel,
+							usage: decision?.usage,
+						},
 					};
-					const label =
-						options.find((option) => option.id === branch)?.label ?? branch;
-					const output: NodeOutput = {
-						nodeId: id,
-						sourceNodeId: id,
-						kind: "jev",
-						revision: revisionFor(id),
-						decision: workflowDecision,
-						text: limitReached
-							? "Repeat limit reached. Review did not pass."
-							: chosenEdge
-								? `Decision: ${label}`
-								: label,
-					};
-					if (!chosenEdge) {
-						const jevModel = decision?.model ?? JEV_MODEL_ID;
-						const terminal: Terminal = {
-							target: { nodeId: id, provider: "jev", model: jevModel },
-							response: {
-								text: output.text,
-								model: jevModel,
-								usage: decision?.usage,
-							},
-						};
-						if (limitReached) exhausted = terminal;
-						return {
-							lineage: [...inputs, output],
-							decision: workflowDecision,
-							output,
-							edges: [],
-							terminal,
-						};
-					}
+					if (limitReached) exhausted = terminal;
 					return {
 						lineage: [...inputs, output],
 						decision: workflowDecision,
 						output,
-						edges: [chosenEdge],
+						edges: [],
+						terminal,
 					};
 				}
-				const target = modelTarget(node);
-				const next = normal.filter((edge) => edge.source === id);
-				const fallbackEdge = routes.edges.find(
-					(edge) => edge.source === id && edge.sourceHandle === "fallback",
-				);
-				const backupNode = fallbackEdge
-					? byId.get(fallbackEdge.target)
-					: undefined;
-				const backup =
-					backupNode?.kind === "model" ? modelTarget(backupNode) : undefined;
-				const canStream = next.length === 0 && solePendingNode;
-				let usedTarget = target;
-				let usedFallback: { edge: WorkflowEdge; reason: string } | undefined;
-				const attempt = await runWithOneFallback(
-					target,
-					backup,
-					async (model, delta) => {
-						const callId = ledger.nextId();
-						const actual = byId.get(model.nodeId);
-						if (actual?.kind !== "model")
-							throw new Error("Model node is missing");
-						let evidence: RouteEvidence[] = [];
-						if (actual.routing?.mode === "automatic" && evidenceFor) {
-							const pending =
-								evidenceByNode.get(actual.id) ??
-								routeEvidenceKey(routes, actual.id, documents).then(
-									evidenceFor,
-								);
-							evidenceByNode.set(actual.id, pending);
-							evidence = await pending;
-						}
-						const prepared = await prepareModelExecution(
-							{
-								node: actual,
-								callId,
-								messages,
-								inputs,
-								documents,
-								variables: startVariables,
-								evidence,
-							},
-							{
-								memory,
-								summaryStore,
-								availableModels,
-								ledger,
-								providers: contextProviders,
-								signal,
-							},
-						);
-						const { context, variables, quote } = prepared;
-						contexts.push(context.trace);
-						if (prepared.plan) modelPlans.push(prepared.plan);
-						model = prepared.target;
-						onProgress(trace());
-						usedTarget = model;
-						if (canStream) {
-							const route = selection(model);
-							onRoute(
-								usedFallback && fallbackEdge
-									? {
-											...route,
-											path: [
-												...route.path,
-												{ nodeId: model.nodeId, via: "fallback" },
-											],
-											traversedEdges: [...route.traversedEdges, fallbackEdge],
-											fallbackReason: usedFallback.reason,
-										}
-									: route,
-							);
-						}
-						const response = await ledger.run(
-							{
-								nodeId: model.nodeId,
-								purpose: "model",
-								provider: model.provider,
-								model: model.model,
-							},
-							model.pricing,
-							callId,
-							() =>
-								runModel({
-									target: model,
-									context,
-									onDelta: delta,
-									variables,
-									cache: quote?.cache,
-								}),
-						);
-						if (quote)
-							observeModelCache(model, context, memory, quote, response.usage);
-						return response;
-					},
-					(text) => {
-						if (canStream) {
-							streamed = true;
-							onDelta(text);
-						}
-					},
-					(reason) => {
-						if (fallbackEdge) usedFallback = { edge: fallbackEdge, reason };
-					},
-					() => !signal?.aborted,
-				);
-				const output: NodeOutput = {
-					nodeId: usedTarget.nodeId,
-					sourceNodeId: id,
-					kind: "model",
-					revision: revisionFor(usedTarget.nodeId),
-					text: attempt.response.text,
-				};
 				return {
 					lineage: [...inputs, output],
-					edges: next,
+					decision: workflowDecision,
 					output,
-					...(next.length === 0
-						? {
-								terminal: {
-									target: usedTarget,
-									response: attempt.response,
-								},
-							}
-						: {}),
-					...(usedFallback ? { fallback: usedFallback } : {}),
+					edges: [chosenEdge],
 				};
+			}
+			const target = modelTarget(node);
+			const next = normal.filter((edge) => edge.source === id);
+			const fallbackEdge = routes.edges.find(
+				(edge) => edge.source === id && edge.sourceHandle === "fallback",
+			);
+			const backupNode = fallbackEdge
+				? byId.get(fallbackEdge.target)
+				: undefined;
+			const backup =
+				backupNode?.kind === "model" ? modelTarget(backupNode) : undefined;
+			const canStream = next.length === 0 && solePendingNode;
+			let usedTarget = target;
+			let usedFallback: { edge: WorkflowEdge; reason: string } | undefined;
+			const attempt = await runWithOneFallback(
+				target,
+				backup,
+				async (model, delta) => {
+					const callId = ledger.nextId();
+					const actual = byId.get(model.nodeId);
+					if (actual?.kind !== "model")
+						throw new Error("Model node is missing");
+					let evidence: RouteEvidence[] = [];
+					if (actual.routing?.mode === "automatic" && evidenceFor) {
+						const pending =
+							evidenceByNode.get(actual.id) ??
+							routeEvidenceKey(routes, actual.id, documents).then(evidenceFor);
+						evidenceByNode.set(actual.id, pending);
+						evidence = await pending;
+					}
+					const prepared = await prepareModelExecution(
+						{
+							node: actual,
+							callId,
+							messages,
+							inputs,
+							documents,
+							variables: startVariables,
+							evidence,
+						},
+						{
+							memory,
+							summaryStore,
+							availableModels,
+							ledger,
+							providers: contextProviders,
+							signal,
+						},
+					);
+					const { context, variables, quote } = prepared;
+					contexts.push(context.trace);
+					if (prepared.plan) modelPlans.push(prepared.plan);
+					model = prepared.target;
+					report();
+					usedTarget = model;
+					if (canStream) {
+						const route = { ...selection(model), ...trace() };
+						onRoute(
+							usedFallback && fallbackEdge
+								? {
+										...route,
+										path: [
+											...route.path,
+											{ nodeId: model.nodeId, via: "fallback" },
+										],
+										traversedEdges: [...route.traversedEdges, fallbackEdge],
+										fallbackReason: usedFallback.reason,
+									}
+								: route,
+						);
+					}
+					const response = await ledger.run(
+						{
+							nodeId: model.nodeId,
+							purpose: "model",
+							provider: model.provider,
+							model: model.model,
+						},
+						model.pricing,
+						callId,
+						() =>
+							runModel({
+								target: model,
+								context,
+								onDelta: delta,
+								variables,
+								cache: quote?.cache,
+							}),
+					);
+					if (quote)
+						observeModelCache(model, context, memory, quote, response.usage);
+					return response;
+				},
+				(text) => {
+					if (canStream) {
+						streamed = true;
+						onDelta(text);
+					}
+				},
+				(reason) => {
+					if (fallbackEdge) usedFallback = { edge: fallbackEdge, reason };
+				},
+				() => !signal?.aborted,
+			);
+			const output: NodeOutput = {
+				nodeId: usedTarget.nodeId,
+				sourceNodeId: id,
+				kind: "model",
+				revision: revisionFor(usedTarget.nodeId),
+				text: attempt.response.text,
+			};
+			return {
+				lineage: [...inputs, output],
+				edges: next,
+				output,
+				...(next.length === 0
+					? {
+							terminal: {
+								target: usedTarget,
+								response: attempt.response,
+							},
+						}
+					: {}),
+				...(usedFallback ? { fallback: usedFallback } : {}),
+			};
+		};
+		const results = await mapConcurrent(
+			batch,
+			MAX_CONCURRENT_NODES,
+			async (item) => {
+				const result = await executeNode(item);
+				if (result.decision) decisions.push(result.decision);
+				if (result.output) outputs.push(result.output);
+				report();
+				return result;
 			},
 		);
 		for (const result of results) {
-			if (result.decision) decisions.push(result.decision);
-			if (result.output) outputs.push(result.output);
 			if (result.terminal) terminals.push(result.terminal);
 			if (result.fallback) {
 				fallbackReason = result.fallback.reason;
@@ -575,7 +592,7 @@ export async function executeWorkflow({
 				incoming.set(edge.target, values);
 			}
 		}
-		onProgress(trace());
+		report();
 		return advance(layerIndex + 1, pass);
 	};
 	await advance(0, 0);
@@ -588,7 +605,7 @@ export async function executeWorkflow({
 	const terminal = exhausted ?? terminals[0];
 	const route = selection(terminal.target);
 	if (!streamed) {
-		onRoute(route);
+		onRoute({ ...route, ...trace() });
 		onDelta(terminal.response.text);
 	}
 	return {

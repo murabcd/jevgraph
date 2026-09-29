@@ -50,7 +50,7 @@ export class ConvexPersistence {
 	async finish(runId: Id<"runs">, result: RouteResult) {
 		await this.client.action(api.results.save, {
 			runId,
-			result: JSON.stringify(result),
+			result: JSON.stringify({ status: "completed", result }),
 		});
 	}
 	async fail(
@@ -58,16 +58,19 @@ export class ConvexPersistence {
 		content: string,
 		error: string,
 		interrupted: boolean,
-		trace?: RouteTrace,
-		latencyMs?: number,
+		trace: RouteTrace,
+		latencyMs: number,
 	) {
-		await this.client.mutation(api.runs.fail, {
+		await this.client.action(api.results.save, {
 			runId,
-			content,
-			error,
-			interrupted,
-			trace: trace ? JSON.stringify(trace) : undefined,
-			latencyMs,
+			result: JSON.stringify({
+				status: interrupted ? "interrupted" : "failed",
+				text: content,
+				error: error.slice(0, 2000),
+				trace,
+				latencyMs,
+				coverage: "partial",
+			}),
 		});
 	}
 	async routeEvidence(
