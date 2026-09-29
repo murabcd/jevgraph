@@ -229,9 +229,12 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 		owner.mutation(api.runs.begin, {
 			conversationId: workspace.conversationId,
 			requestId: crypto.randomUUID(),
-			question: "Return question",
+			input: JSON.stringify({
+				messages: [{ role: "user", content: "Return question" }],
+				metadata: {},
+			}),
 			routes: JSON.stringify(flow),
-			evaluation: { scope: "a".repeat(64), caseKey: "b".repeat(64) },
+			evaluation: { scope: "a".repeat(64) },
 		});
 	const first = await begin();
 	const result = await executeWorkflow({
@@ -336,9 +339,12 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 	const run = await owner.mutation(api.runs.begin, {
 		conversationId: workspace.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Can I return this?",
+		input: JSON.stringify({
+			messages: [{ role: "user", content: "Can I return this?" }],
+			metadata: {},
+		}),
 		routes: JSON.stringify(routes),
-		evaluation: { scope, caseKey: "b".repeat(64) },
+		evaluation: { scope },
 	});
 	const result = await executeWorkflow({
 		routes,
@@ -405,9 +411,12 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 	const failed = await owner.mutation(api.runs.begin, {
 		conversationId: workspace.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Damaged return",
+		input: JSON.stringify({
+			messages: [{ role: "user", content: "Damaged return" }],
+			metadata: {},
+		}),
 		routes: JSON.stringify(routes),
-		evaluation: { scope, caseKey: "d".repeat(64) },
+		evaluation: { scope },
 	});
 	await owner.action(api.results.save, {
 		runId: failed.runId,
@@ -536,9 +545,12 @@ test("an abandoned evaluation lease records a failed unknown-cost complete-route
 	const run = await owner.mutation(api.runs.begin, {
 		conversationId: workspace.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Test interrupted route",
+		input: JSON.stringify({
+			messages: [{ role: "user", content: "Test interrupted route" }],
+			metadata: {},
+		}),
 		routes: JSON.stringify(routes),
-		evaluation: { scope, caseKey: "f".repeat(64) },
+		evaluation: { scope },
 	});
 	await owner.mutation(internal.runs.expire, { runId: run.runId });
 	const key = await routeEvidenceKey(routes, "answer");

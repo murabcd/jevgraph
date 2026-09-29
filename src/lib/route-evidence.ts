@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { contentHash } from "./content-identity.ts";
 import type { ContextDocument } from "./context.ts";
+import { EVALUATION_VERSIONS } from "./evaluation-version.ts";
 import type { RouteTrace, WorkflowRoutes } from "./routing.ts";
 import { totalUsage } from "./usage.ts";
 
@@ -52,7 +53,7 @@ export async function routeEvidenceKey(
 		throw new Error("Evaluation requires model routing settings");
 	return contentHash(
 		JSON.stringify({
-			version: "route-evidence:v1",
+			versions: EVALUATION_VERSIONS,
 			nodeId,
 			criteria: node.routing.quality.criteria,
 			nodes: routes.nodes

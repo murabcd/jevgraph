@@ -16,6 +16,7 @@ import type * as http from "../http.js";
 import type * as results from "../results.js";
 import type * as retrieval from "../retrieval.js";
 import type * as routeEvaluations from "../routeEvaluations.js";
+import type * as runInputs from "../runInputs.js";
 import type * as runs from "../runs.js";
 import type * as summaries from "../summaries.js";
 import type * as workspaces from "../workspaces.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   results: typeof results;
   retrieval: typeof retrieval;
   routeEvaluations: typeof routeEvaluations;
+  runInputs: typeof runInputs;
   runs: typeof runs;
   summaries: typeof summaries;
   workspaces: typeof workspaces;

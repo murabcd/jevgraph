@@ -73,7 +73,10 @@ async function setup() {
 	const run = await persistence.begin({
 		conversationId: fixture.workspace.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Can I get a refund?",
+		input: {
+			messages: [{ role: "user", content: "Can I get a refund?" }],
+			metadata: {},
+		},
 		routes: routes(),
 	});
 	const store = persistence.retrievalStore(run.workspaceId, run.runId, scope);
@@ -174,7 +177,10 @@ test("indexing shares work, while changed source text gets a fresh index", async
 	const next = await fixture.persistence.begin({
 		conversationId: fixture.run.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Can I get a refund?",
+		input: {
+			messages: [{ role: "user", content: "Can I get a refund?" }],
+			metadata: {},
+		},
 		routes: updated,
 	});
 	const result = await createContextRetriever(
@@ -225,7 +231,10 @@ test("retrieval rejects forged source keys and stale document versions within th
 	const next = await fixture.persistence.begin({
 		conversationId: fixture.run.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Can I return this?",
+		input: {
+			messages: [{ role: "user", content: "Can I return this?" }],
+			metadata: {},
+		},
 		routes: updated,
 	});
 	await expect(
@@ -251,24 +260,45 @@ test("retrieval rejects forged source keys and stale document versions within th
 });
 
 test("history retrieval reaches older saved messages and excludes the active pair", async () => {
-	const fixture = await setup();
+	const fixture = await createConvexFixture();
+	const persistence = new ConvexPersistence(fixture.owner);
 	await fixture.t.run(async (ctx) => {
 		const oldRun = await ctx.db.insert("runs", {
-			conversationId: fixture.run.conversationId,
+			conversationId: fixture.workspace.conversationId,
 			requestId: crypto.randomUUID(),
 			routes: JSON.stringify(routes()),
 			status: "completed",
 			expiresAt: 0,
 		});
 		await ctx.db.insert("messages", {
-			conversationId: fixture.run.conversationId,
+			conversationId: fixture.workspace.conversationId,
 			runId: oldRun,
 			role: "user",
 			content: "My order number is 1234",
 			failed: false,
 		});
 	});
-	const result = await fixture.retrieve({
+	const flow = routes();
+	const answer = flow.nodes.find((node) => node.kind === "model");
+	if (answer?.kind !== "model" || !answer.context)
+		throw new Error("Answer context missing");
+	answer.context.retrieval = {
+		...DEFAULT_RETRIEVAL_POLICY,
+		historyMessages: 100,
+	};
+	const run = await persistence.begin({
+		conversationId: fixture.workspace.conversationId,
+		requestId: crypto.randomUUID(),
+		input: {
+			messages: [{ role: "user", content: "Find my order" }],
+			metadata: {},
+		},
+		routes: flow,
+	});
+	const store = persistence.retrievalStore(run.workspaceId, run.runId, scope);
+	const retrieve = createContextRetriever(store);
+
+	const result = await retrieve({
 		...request(),
 		query: "order number",
 		documents: [],
@@ -282,10 +312,11 @@ test("history retrieval reaches older saved messages and excludes the active pai
 });
 
 test("history embeddings batch across messages and indexing failures stay explicit", async () => {
-	const fixture = await setup();
+	const fixture = await createConvexFixture();
+	const persistence = new ConvexPersistence(fixture.owner);
 	await fixture.t.run(async (ctx) => {
 		const oldRun = await ctx.db.insert("runs", {
-			conversationId: fixture.run.conversationId,
+			conversationId: fixture.workspace.conversationId,
 			requestId: crypto.randomUUID(),
 			routes: JSON.stringify(routes()),
 			status: "completed",
@@ -293,15 +324,35 @@ test("history embeddings batch across messages and indexing failures stay explic
 		});
 		for (let index = 0; index < 34; index++)
 			await ctx.db.insert("messages", {
-				conversationId: fixture.run.conversationId,
+				conversationId: fixture.workspace.conversationId,
 				runId: oldRun,
 				role: "user",
 				content: `Order history ${index}`,
 				failed: false,
 			});
 	});
+	const flow = routes();
+	const answer = flow.nodes.find((node) => node.kind === "model");
+	if (answer?.kind !== "model" || !answer.context)
+		throw new Error("Answer context missing");
+	answer.context.retrieval = {
+		...DEFAULT_RETRIEVAL_POLICY,
+		historyMessages: 100,
+	};
+	const run = await persistence.begin({
+		conversationId: fixture.workspace.conversationId,
+		requestId: crypto.randomUUID(),
+		input: {
+			messages: [{ role: "user", content: "Find my order" }],
+			metadata: {},
+		},
+		routes: flow,
+	});
+	const store = persistence.retrievalStore(run.workspaceId, run.runId, scope);
+	const retrieve = createContextRetriever(store);
+
 	const sizes: number[] = [];
-	await fixture.retrieve({
+	await retrieve({
 		...request(),
 		documents: [],
 		policy: { ...DEFAULT_RETRIEVAL_POLICY, historyMessages: 100 },
@@ -313,7 +364,7 @@ test("history embeddings batch across messages and indexing failures stay explic
 	expect(sizes).toEqual([16, 16, 2, 1]);
 	await expect(
 		createContextRetriever({
-			...fixture.store,
+			...store,
 			search: async () => {
 				throw new Error("Database unavailable");
 			},

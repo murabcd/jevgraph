@@ -76,7 +76,10 @@ test("failure artifacts preserve traces, isolate owners, and delete files when s
 	const run = await owner.mutation(api.runs.begin, {
 		conversationId: workspace.conversationId,
 		requestId: crypto.randomUUID(),
-		question: "Review",
+		input: JSON.stringify({
+			messages: [{ role: "user", content: "Review" }],
+			metadata: {},
+		}),
 		routes: JSON.stringify(routes),
 	});
 	const artifact = runArtifactSchema.parse({

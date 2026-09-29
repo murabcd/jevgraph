@@ -4,6 +4,10 @@ import { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel";
 import type { ContextSummaries } from "../src/lib/context.ts";
 import {
+	type FrozenCase,
+	frozenCaseSchema,
+} from "../src/lib/evaluation-case.ts";
+import {
 	evidenceCoverage,
 	type ProviderExchange,
 } from "../src/lib/provider-evidence.ts";
@@ -35,14 +39,16 @@ export class ConvexPersistence {
 	async begin(input: {
 		conversationId: string;
 		requestId: string;
-		question: string;
+		input: Pick<FrozenCase, "messages" | "metadata">;
+		replayRunId?: string;
 		routes: WorkflowRoutes;
-		evaluation?: { scope: string; caseKey: string };
+		evaluation?: { scope: string };
 	}) {
 		const started = await this.client.mutation(api.runs.begin, {
 			conversationId: input.conversationId,
 			requestId: input.requestId,
-			question: input.question,
+			input: JSON.stringify(input.input),
+			replayRunId: input.replayRunId,
 			routes: JSON.stringify(input.routes),
 			evaluation: input.evaluation,
 		});
@@ -50,7 +56,10 @@ export class ConvexPersistence {
 			throw new Error(
 				"This request has already started. It will not call the models again.",
 			);
-		return started;
+		return {
+			...started,
+			input: frozenCaseSchema.parse(JSON.parse(started.input)),
+		};
 	}
 	async finish(
 		runId: Id<"runs">,
@@ -94,6 +103,9 @@ export class ConvexPersistence {
 				),
 			}),
 		});
+	}
+	async replay(runId: string) {
+		return this.client.query(api.runs.replay, { runId });
 	}
 	async routeEvidence(
 		workspaceId: Id<"workspaces">,

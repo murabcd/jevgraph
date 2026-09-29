@@ -1,6 +1,11 @@
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
 import {
+	assertCurrentCase,
+	evaluationInputSchema,
+	frozenCaseKey,
+} from "../src/lib/evaluation-case";
+import {
 	routeEvaluationSchema,
 	routeEvaluations,
 } from "../src/lib/route-evidence";
@@ -18,6 +23,7 @@ import {
 } from "./_generated/server";
 import { ownConversation, ownRun } from "./access";
 import { recordRouteEvaluations } from "./routeEvaluations";
+import { freezeRunInput, readRunInput } from "./runInputs";
 
 const RUN_LEASE_MS = 180000;
 
@@ -47,14 +53,14 @@ export const begin = mutation({
 	args: {
 		conversationId: v.string(),
 		requestId: v.string(),
-		question: v.string(),
+		input: v.string(),
+		replayRunId: v.optional(v.string()),
 		routes: v.string(),
-		evaluation: v.optional(
-			v.object({ scope: v.string(), caseKey: v.string() }),
-		),
+		evaluation: v.optional(v.object({ scope: v.string() })),
 	},
 	returns: v.object({
 		runId: v.id("runs"),
+		input: v.string(),
 		started: v.boolean(),
 		conversationId: v.id("conversations"),
 		workspaceId: v.id("workspaces"),
@@ -72,10 +78,12 @@ export const begin = mutation({
 			.unique();
 		if (!workspace || workspace.conversationId !== conversation._id)
 			throw new ConvexError("This conversation is no longer active");
+		const submitted = evaluationInputSchema.parse(JSON.parse(args.input));
+		const question = submitted.messages.at(-1)?.content ?? "";
 		if (
 			!z.uuid().safeParse(args.requestId).success ||
-			!args.question.trim() ||
-			args.question.length > 12000
+			!question.trim() ||
+			question.length > 12000
 		)
 			throw new ConvexError("Invalid chat request");
 		const existing = await ctx.db
@@ -87,6 +95,7 @@ export const begin = mutation({
 		if (existing)
 			return {
 				runId: existing._id,
+				input: JSON.stringify(await readRunInput(ctx, existing._id)),
 				started: false,
 				conversationId,
 				workspaceId: workspace._id,
@@ -101,27 +110,38 @@ export const begin = mutation({
 		const routes = JSON.stringify(
 			workflowRoutesSchema.parse(JSON.parse(args.routes)),
 		);
-		if (
-			args.evaluation &&
-			(!/^[a-f0-9]{64}$/.test(args.evaluation.scope) ||
-				!/^[a-f0-9]{64}$/.test(args.evaluation.caseKey))
-		)
+		if (args.evaluation && !/^[a-f0-9]{64}$/.test(args.evaluation.scope))
 			throw new ConvexError("Invalid evaluation identity");
 		if (new TextEncoder().encode(routes).length > 900000)
 			throw new ConvexError("Workflow is too large to save");
+		const graph = workflowRoutesSchema.parse(JSON.parse(routes));
+		const frozen = await freezeRunInput(
+			ctx,
+			conversationId,
+			graph,
+			submitted,
+			args.replayRunId,
+		);
+		const input = JSON.stringify(frozen);
+		if (new TextEncoder().encode(input).length > 900000)
+			throw new ConvexError("Frozen case is too large");
+		const evaluation = args.evaluation
+			? { scope: args.evaluation.scope, caseKey: await frozenCaseKey(frozen) }
+			: undefined;
 		const runId = await ctx.db.insert("runs", {
 			conversationId: conversationId,
 			requestId: args.requestId,
 			routes,
-			evaluation: args.evaluation,
+			evaluation,
 			status: "running",
 			expiresAt: Date.now() + RUN_LEASE_MS,
 		});
+		await ctx.db.insert("runInputs", { runId, input });
 		await ctx.db.insert("messages", {
 			conversationId: conversationId,
 			runId,
 			role: "user",
-			content: args.question,
+			content: question,
 			failed: false,
 		});
 		await ctx.db.insert("messages", {
@@ -133,7 +153,13 @@ export const begin = mutation({
 		});
 		await ctx.db.patch(conversation._id, { activeRunId: runId });
 		await ctx.scheduler.runAfter(RUN_LEASE_MS, internal.runs.expire, { runId });
-		return { runId, started: true, conversationId, workspaceId: workspace._id };
+		return {
+			runId,
+			input,
+			started: true,
+			conversationId,
+			workspaceId: workspace._id,
+		};
 	},
 });
 
@@ -240,5 +266,20 @@ export const latest = query({
 				: null,
 			error: run[0].error,
 		};
+	},
+});
+
+export const replay = query({
+	args: { runId: v.string() },
+	returns: v.object({ input: v.string(), routes: v.string() }),
+	handler: async (ctx, args) => {
+		const runId = ctx.db.normalizeId("runs", args.runId);
+		if (!runId) throw new ConvexError("Run unavailable");
+		const run = await ownRun(ctx, runId);
+		if (run.status === "running")
+			throw new ConvexError("An active run cannot be replayed");
+		const input = await readRunInput(ctx, run._id);
+		assertCurrentCase(input);
+		return { input: JSON.stringify(input), routes: run.routes };
 	},
 });

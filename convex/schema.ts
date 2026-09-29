@@ -12,6 +12,10 @@ export const runStatus = v.union(
 
 export default defineSchema({
 	...authTables,
+	runInputs: defineTable({ runId: v.id("runs"), input: v.string() }).index(
+		"by_run",
+		["runId"],
+	),
 	routeEvaluations: defineTable({
 		workspaceId: v.id("workspaces"),
 		runId: v.id("runs"),

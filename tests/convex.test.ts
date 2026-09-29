@@ -31,7 +31,12 @@ function request(
 	return {
 		conversationId,
 		requestId,
-		question: "Здравствуйте, когда доставят мой заказ?",
+		input: JSON.stringify({
+			messages: [
+				{ role: "user", content: "Здравствуйте, когда доставят мой заказ?" },
+			],
+			metadata: {},
+		}),
 		routes: JSON.stringify(routes),
 	};
 }
@@ -135,7 +140,10 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 		workspaceId: id,
 	});
 	expect(history).toEqual([
-		{ id: workspace.conversationId, title: input.question },
+		{
+			id: workspace.conversationId,
+			title: JSON.parse(input.input).messages[0].content,
+		},
 	]);
 	const next = await owner.mutation(api.runs.begin, request(newId));
 	expect(

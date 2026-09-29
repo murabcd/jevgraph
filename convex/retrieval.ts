@@ -21,6 +21,7 @@ import {
 	query,
 } from "./_generated/server";
 import { ownRun, ownWorkspace } from "./access";
+import { readRunInput } from "./runInputs";
 
 const identity = {
 	workspaceId: v.id("workspaces"),
@@ -68,34 +69,12 @@ export const history = query({
 		const run = await authorize(ctx, args);
 		if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 200)
 			throw new ConvexError("Invalid history limit");
-		const messages = await ctx.db
-			.query("messages")
-			.withIndex("by_conversation", (q) =>
-				q.eq("conversationId", run.conversationId),
-			)
-			.order("desc")
-			.take(args.limit + 3);
-		const sources = [];
-		let characters = 0;
-		let limited = messages.length === args.limit + 3;
-		for (const message of messages) {
-			if (message.runId === args.runId || !message.content.trim()) continue;
-			if (
-				sources.length === args.limit ||
-				characters + message.content.length > 120000
-			) {
-				limited = true;
-				break;
-			}
-			characters += message.content.length;
-			sources.push({
-				id: message._id,
-				kind: "message" as const,
-				label: `${message.role}${message.failed ? " (partial)" : ""} · ${new Date(message._creationTime).toISOString()}`,
-				content: message.content,
-			});
-		}
-		return { sources: sources.reverse(), limited };
+		const input = await readRunInput(ctx, run._id);
+		return {
+			sources: input.history.sources.slice(-args.limit),
+			limited:
+				input.history.limited || input.history.sources.length > args.limit,
+		};
 	},
 });
 
@@ -158,15 +137,16 @@ export const put = mutation({
 		)
 			throw new ConvexError("Invalid retrieval key");
 		if (source.kind === "message") {
-			const id = ctx.db.normalizeId("messages", source.id);
-			const message = id ? await ctx.db.get(id) : null;
+			const input = await readRunInput(ctx, run._id);
 			if (
-				!message ||
-				message.conversationId !== run.conversationId ||
-				message.runId === run._id ||
-				message.content !== source.content
+				!input.history.sources.some(
+					(message) =>
+						message.id === source.id &&
+						message.content === source.content &&
+						message.label === source.label,
+				)
 			)
-				throw new ConvexError("Retrieval message unavailable");
+				throw new ConvexError("Retrieval message is not in the frozen history");
 		} else {
 			const routes = workflowRoutesSchema.parse(JSON.parse(run.routes));
 			const start = routes.nodes.find((node) => node.kind === "input");
@@ -229,7 +209,7 @@ export const put = mutation({
 		const namespace =
 			source.kind === "document"
 				? args.key
-				: `${args.workspaceId}:${args.scope}:conversation:${run.conversationId}`;
+				: `${args.workspaceId}:${args.scope}:history:${(await readRunInput(ctx, run._id)).history.conversationId}`;
 		await ctx.db.insert("retrievalSources", {
 			workspaceId: args.workspaceId,
 			scope: args.scope,
@@ -278,6 +258,14 @@ async function loadSelected(
 			),
 		),
 	);
+	const input = await readRunInput(ctx, run._id);
+	const historyKeys = new Set(
+		await Promise.all(
+			input.history.sources.map((source) =>
+				retrievalSourceKey(`${args.workspaceId}:${args.scope}`, source),
+			),
+		),
+	);
 	if (!args.keys.length || args.keys.length > 220)
 		throw new ConvexError("Invalid retrieval selection");
 	return Promise.all(
@@ -292,9 +280,7 @@ async function loadSelected(
 				source.scope !== args.scope ||
 				source.expiresAt <= Date.now() ||
 				(source.kind === "document" && !documentKeys.has(key)) ||
-				(source.kind === "message" &&
-					source.namespace !==
-						`${args.workspaceId}:${args.scope}:conversation:${run.conversationId}`)
+				(source.kind === "message" && !historyKeys.has(key))
 			)
 				throw new ConvexError("Retrieval index unavailable. Retry the turn.");
 			return {

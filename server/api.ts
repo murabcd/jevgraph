@@ -1,7 +1,6 @@
 import type { OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
 import { experimental_evaluate, streamText } from "ai";
 import { z } from "zod";
-import { contentHash } from "../src/lib/content-identity.ts";
 import type { ContextDocument } from "../src/lib/context.ts";
 import { resolveContextDocuments } from "../src/lib/context.ts";
 import {
@@ -20,6 +19,7 @@ import {
 	type RouteStreamEvent,
 	type RouteTrace,
 	type RoutingMetadata,
+	resolveStartVariables,
 	routeRequestSchema,
 	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
@@ -44,6 +44,7 @@ import {
 	languageModelUsage,
 	ProviderUsageError,
 } from "./provider-usage.ts";
+import { resolveReplay, routeReplayRequestSchema } from "./replay.ts";
 import { type ContextRetriever, createContextRetriever } from "./retrieval.ts";
 import { embedContext, rerankContext } from "./retrieval-providers.ts";
 import {
@@ -307,7 +308,10 @@ export async function handleApi(
 			google: Boolean(keys.GOOGLE_GENERATIVE_AI_API_KEY),
 		});
 	}
-	if (request.method !== "POST" || path !== "/api/route") {
+	if (
+		request.method !== "POST" ||
+		(path !== "/api/route" && path !== "/api/replay")
+	) {
 		return Response.json({ error: "Not found" }, { status: 404 });
 	}
 	try {
@@ -322,8 +326,14 @@ export async function handleApi(
 				{ error: "Authenticated conversation required" },
 				{ status: 401 },
 			);
-		const input = routeRequestSchema.parse(JSON.parse(bodyText));
 		const persistence = connect(token);
+		const replay =
+			path === "/api/replay"
+				? routeReplayRequestSchema.parse(JSON.parse(bodyText))
+				: undefined;
+		const input = replay
+			? await resolveReplay(persistence, replay)
+			: routeRequestSchema.parse(JSON.parse(bodyText));
 		const credentialScope = contentFingerprint(
 			JSON.stringify([
 				keys.TYPESAFE_API_KEY,
@@ -337,14 +347,18 @@ export async function handleApi(
 			input.documents,
 		);
 		const metadata = Object.fromEntries(
-			Object.entries(input.metadata ?? {}).sort(([a], [b]) =>
-				a.localeCompare(b),
-			),
+			Object.entries(
+				resolveStartVariables(
+					start?.kind === "input" ? start.fields : [],
+					input.metadata ?? {},
+				),
+			).sort(([a], [b]) => a.localeCompare(b)),
 		);
 		const saved = await persistence.begin({
 			conversationId: input.conversationId,
 			requestId: input.requestId,
-			question: input.messages[input.messages.length - 1].content,
+			input: { messages: input.messages, metadata },
+			replayRunId: replay?.runId,
 			routes: {
 				...input.routes,
 				nodes: input.routes.nodes.map((node) =>
@@ -355,12 +369,6 @@ export async function handleApi(
 			},
 			evaluation: {
 				scope: credentialScope,
-				caseKey: await contentHash(
-					JSON.stringify({
-						messages: input.messages,
-						metadata,
-					}),
-				),
 			},
 		});
 		const encoder = new TextEncoder();
@@ -396,7 +404,7 @@ export async function handleApi(
 				};
 				void executeRoute(
 					{
-						messages: input.messages,
+						messages: saved.input.messages,
 						evidenceFor: (key) =>
 							persistence.routeEvidence(
 								saved.workspaceId,
@@ -414,7 +422,7 @@ export async function handleApi(
 							saved.workspaceId,
 							credentialScope,
 						),
-						metadata,
+						metadata: saved.input.metadata ?? {},
 						documents: input.documents,
 						providerFetch: providerEvidence.fetch(providerFetch),
 						providerEvidence,
@@ -485,6 +493,7 @@ export async function handleApi(
 			headers: {
 				"Content-Type": "application/x-ndjson; charset=utf-8",
 				"Cache-Control": "no-cache, no-transform",
+				"X-Run-Id": saved.runId,
 			},
 		});
 	} catch (error) {
