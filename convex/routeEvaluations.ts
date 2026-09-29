@@ -25,7 +25,7 @@ import {
 	query,
 } from "./_generated/server";
 import { ownConversation, ownRun, ownWorkspace } from "./access";
-import { readRunInput } from "./runInputs";
+import { followupFor, readRunInput } from "./runInputs";
 
 export async function recordRouteEvaluations(
 	ctx: MutationCtx,
@@ -102,22 +102,6 @@ async function evaluationFor(
 }
 
 const followupValue = v.object({ id: v.string(), content: v.string() });
-async function followupFor(ctx: QueryCtx, run: Doc<"runs">) {
-	const messages = await ctx.db
-		.query("messages")
-		.withIndex("by_conversation", (q) =>
-			q
-				.eq("conversationId", run.conversationId)
-				.gte("_creationTime", run._creationTime),
-		)
-		.order("asc")
-		.take(4);
-	const message = messages.find(
-		(message) => message.role === "user" && message.runId !== run._id,
-	);
-	return message ? { id: message._id, content: message.content } : undefined;
-}
-
 export const latest = query({
 	args: {
 		conversationId: v.id("conversations"),

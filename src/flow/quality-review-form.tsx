@@ -5,7 +5,7 @@ import { QualityReviewEditor } from "@/flow/quality-review-editor";
 import { frozenCaseSchema } from "@/lib/evaluation-case";
 import { reviewSources } from "@/lib/quality-review";
 import { workflowRoutesSchema } from "@/lib/routing";
-import { loadRunArtifact } from "@/storage/run-artifact";
+import { loadRunArtifact } from "@/lib/run-artifact-load";
 import { api } from "../../convex/_generated/api";
 
 type Evaluation = NonNullable<

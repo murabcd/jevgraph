@@ -110,9 +110,9 @@ reached call and are reused when content and credential scope match.
 **Automatic context** prepares summaries for the current query and effective
 node instructions. **Conditional instructions** activate from selected Start
 values or accepted reached Jev outputs; their status appears in run inspection.
-Model settings also offer Evaluate selected model and Route using reviewed results. Define answer criteria, run distinct cases with each candidate, and mark answers Pass/Fail in last-turn inspection. Automatic routing requires reviewed quality, acceptable full-turn p95 latency, and complete costs; qualifying candidates must share the same test cases. Context settings can retain full sources when cold preparation cost exceeds optimistic savings.
+Model settings also offer Evaluate selected model and Route using reviewed results. Define answer criteria, run distinct cases with each candidate, and review each criterion using quotes from recorded evidence in last-turn inspection. Insufficient evidence leaves an answer unapproved. Automatic routing requires reviewed quality, acceptable full-turn p95 latency, and complete costs; qualifying candidates must share the same test cases. Context settings can retain full sources when cold preparation cost exceeds optimistic savings.
 
-Use the [shop-support evaluation cases](evals/shop-support.md) for the initial demo comparison. These features use the existing node settings. See [context](lat.md/context.md) and [routing](lat.md/routing.md).
+Use the [shop-support evaluation cases](evals/shop-support.md) and the [repeatable evaluation harness](lat.md/evaluation.md) for the initial demo comparison. These features use the existing node settings. See [context](lat.md/context.md) and [routing](lat.md/routing.md).
 
 ## Self-hosting
 
@@ -187,3 +187,5 @@ bun run build
 - [Anthropic, Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
 
 Evaluation mode records both successful and failed attempts. Each nonempty answer-criteria line is reviewed separately with an exact quote from recorded evidence; insufficient evidence prevents automatic model approval. Task outcome and later user reaction have separate labels, so a completed graph or a handoff does not imply a resolved customer request. Authenticated `/api/replay` reruns a settled owned case with frozen messages, Start values, documents, opt-in history and version identities, optionally varying one allowed model candidate.
+
+`bun run eval` validates the versioned seed dataset without provider calls. The [evaluation guide](lat.md/evaluation.md) documents authenticated candidate runs, human review templates, held-out comparisons and confidence calibration. Live execution requires explicit `--live`; results are private files under gitignored `eval-results/`. Offline labels affect reports only and never approve runtime routing.

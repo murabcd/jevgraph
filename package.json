@@ -16,7 +16,8 @@
     "format": "biome format --write .",
     "typecheck": "tsc -b && tsc --noEmit -p convex",
     "test": "bun test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "eval": "bun server/evaluation/cli.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.79",

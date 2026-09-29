@@ -1,13 +1,7 @@
 import { z } from "zod";
-import {
-	assertCurrentCase,
-	frozenCaseSchema,
-} from "../src/lib/evaluation-case.ts";
-import { textModels } from "../src/lib/models.ts";
-import {
-	routeRequestSchema,
-	workflowRoutesSchema,
-} from "../src/lib/routing.ts";
+import { evaluationCandidate } from "../src/lib/evaluation-candidate.ts";
+import { assertCurrentCase } from "../src/lib/evaluation-case.ts";
+import { routeRequestSchema } from "../src/lib/routing.ts";
 import type { ConvexPersistence } from "./convex-persistence.ts";
 
 export const routeReplayRequestSchema = z.strictObject({
@@ -27,30 +21,16 @@ export async function resolveReplay(
 	persistence: ConvexPersistence,
 	request: z.infer<typeof routeReplayRequestSchema>,
 ) {
-	const saved = await persistence.replay(request.runId);
-	const input = frozenCaseSchema.parse(JSON.parse(saved.input));
+	const saved = await persistence.inspect(request.runId);
+	const input = saved.input;
 	assertCurrentCase(input);
-	const routes = workflowRoutesSchema.parse(JSON.parse(saved.routes));
-	if (request.candidate) {
-		const node = routes.nodes.find(
-			(node) => node.id === request.candidate?.nodeId,
-		);
-		const model = textModels.find(
-			(model) => model.id === request.candidate?.model,
-		);
-		if (
-			node?.kind !== "model" ||
-			!node.routing ||
-			!model ||
-			!node.routing.models.includes(model.id)
-		)
-			throw new Error(
-				"Replay candidate must be an allowed model on an evaluated node",
-			);
-		node.provider = model.provider;
-		node.model = model.id;
-		node.routing = { ...node.routing, mode: "evaluate" };
-	}
+	const routes = request.candidate
+		? evaluationCandidate(
+				saved.routes,
+				request.candidate.nodeId,
+				request.candidate.model,
+			)
+		: saved.routes;
 	return routeRequestSchema.parse({
 		conversationId: request.conversationId,
 		requestId: request.requestId,

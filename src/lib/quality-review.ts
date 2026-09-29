@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { FrozenCase } from "./evaluation-case";
-import { EVALUATION_VERSIONS } from "./evaluation-version";
-import type { WorkflowRoutes } from "./routing";
-import { artifactTrace, type RunArtifact } from "./run-artifact";
+import type { FrozenCase } from "./evaluation-case.ts";
+import { EVALUATION_VERSIONS } from "./evaluation-version.ts";
+import type { WorkflowRoutes } from "./routing.ts";
+import { artifactTrace, type RunArtifact } from "./run-artifact.ts";
 
 export function reviewCriteria(criteria: string) {
 	return criteria
@@ -83,6 +83,19 @@ export function reviewSources(
 			id: `history:${source.id}`,
 			label: source.label,
 			text: source.content,
+		})),
+		{
+			id: "path",
+			label: "Reached path and edges",
+			text: JSON.stringify({
+				path: trace.path,
+				traversedEdges: trace.traversedEdges,
+			}),
+		},
+		...trace.jevSteps.map((step, index) => ({
+			id: `decision:${step.nodeId}:${index + 1}`,
+			label: `${step.nodeId} decision ${index + 1}`,
+			text: JSON.stringify(step),
 		})),
 		...trace.outputs.map((output) => ({
 			id: `output:${output.nodeId}:${output.revision}`,
@@ -168,3 +181,10 @@ export function validateQualityReview(
 		return undefined;
 	return true;
 }
+
+export const recordedReviewSchema = z.strictObject({
+	value: qualityReviewSchema,
+	reviewerId: z.string().min(1).max(100),
+	reviewedAt: z.number().int().min(0),
+	expiresAt: z.number().int().min(0),
+});

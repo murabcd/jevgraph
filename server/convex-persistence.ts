@@ -11,12 +11,14 @@ import {
 	evidenceCoverage,
 	type ProviderExchange,
 } from "../src/lib/provider-evidence.ts";
+import { recordedReviewSchema } from "../src/lib/quality-review.ts";
 import { routeEvidenceSchema } from "../src/lib/route-evidence.ts";
 import type {
 	RouteResult,
 	RouteTrace,
 	WorkflowRoutes,
 } from "../src/lib/routing.ts";
+import { workflowRoutesSchema } from "../src/lib/routing.ts";
 import type { RetrievalStore } from "./retrieval.ts";
 import { serializeRunArtifact } from "./serialize-run-artifact.ts";
 import type { SummaryStore } from "./session-memory.ts";
@@ -104,8 +106,24 @@ export class ConvexPersistence {
 			}),
 		});
 	}
-	async replay(runId: string) {
-		return this.client.query(api.runs.replay, { runId });
+	async inspect(runId: string) {
+		const saved = await this.client.query(api.runs.inspect, { runId });
+		return {
+			...saved,
+			input: frozenCaseSchema.parse(JSON.parse(saved.input)),
+			routes: workflowRoutesSchema.parse(JSON.parse(saved.routes)),
+			reviews: saved.reviews.map((row) => ({
+				nodeId: row.nodeId,
+				review: row.review
+					? recordedReviewSchema.parse({
+							value: JSON.parse(row.review),
+							reviewerId: row.reviewerId,
+							reviewedAt: row.reviewedAt,
+							expiresAt: row.expiresAt,
+						})
+					: undefined,
+			})),
+		};
 	}
 	async routeEvidence(
 		workspaceId: Id<"workspaces">,

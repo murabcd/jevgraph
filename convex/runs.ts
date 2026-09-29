@@ -1,7 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
 import {
-	assertCurrentCase,
 	evaluationInputSchema,
 	frozenCaseKey,
 } from "../src/lib/evaluation-case";
@@ -23,7 +22,7 @@ import {
 } from "./_generated/server";
 import { ownConversation, ownRun } from "./access";
 import { recordRouteEvaluations } from "./routeEvaluations";
-import { freezeRunInput, readRunInput } from "./runInputs";
+import { followupFor, freezeRunInput, readRunInput } from "./runInputs";
 
 const RUN_LEASE_MS = 180000;
 
@@ -269,17 +268,50 @@ export const latest = query({
 	},
 });
 
-export const replay = query({
+export const inspect = query({
 	args: { runId: v.string() },
-	returns: v.object({ input: v.string(), routes: v.string() }),
+	returns: v.object({
+		input: v.string(),
+		routes: v.string(),
+		artifactUrl: v.union(v.null(), v.string()),
+		credentialScope: v.union(v.null(), v.string()),
+		reviews: v.array(
+			v.object({
+				nodeId: v.string(),
+				review: v.optional(v.string()),
+				reviewerId: v.optional(v.id("users")),
+				reviewedAt: v.optional(v.number()),
+				expiresAt: v.number(),
+			}),
+		),
+		followup: v.optional(v.object({ id: v.string(), content: v.string() })),
+	}),
 	handler: async (ctx, args) => {
 		const runId = ctx.db.normalizeId("runs", args.runId);
 		if (!runId) throw new ConvexError("Run unavailable");
 		const run = await ownRun(ctx, runId);
 		if (run.status === "running")
-			throw new ConvexError("An active run cannot be replayed");
+			throw new ConvexError("This run is still active");
 		const input = await readRunInput(ctx, run._id);
-		assertCurrentCase(input);
-		return { input: JSON.stringify(input), routes: run.routes };
+		const rows = await ctx.db
+			.query("routeEvaluations")
+			.withIndex("by_run", (q) => q.eq("runId", run._id))
+			.take(100);
+		return {
+			input: JSON.stringify(input),
+			routes: run.routes,
+			credentialScope: run.evaluation?.scope ?? null,
+			artifactUrl: run.resultFile
+				? await ctx.storage.getUrl(run.resultFile)
+				: null,
+			reviews: rows.map((row) => ({
+				nodeId: row.nodeId,
+				review: row.review,
+				reviewerId: row.reviewerId,
+				reviewedAt: row.reviewedAt,
+				expiresAt: row.expiresAt,
+			})),
+			followup: await followupFor(ctx, run),
+		};
 	},
 });

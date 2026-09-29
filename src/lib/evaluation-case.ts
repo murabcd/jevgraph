@@ -1,20 +1,18 @@
 import { z } from "zod";
-import { contentHash } from "./content-identity";
-import { EVALUATION_VERSIONS } from "./evaluation-version";
-import { retrievalSourceSchema } from "./retrieval";
-import { routeRequestSchema } from "./routing";
+import { contentHash } from "./content-identity.ts";
+import {
+	EVALUATION_VERSIONS,
+	evaluationVersionsSchema,
+} from "./evaluation-version.ts";
+import { retrievalSourceSchema } from "./retrieval.ts";
+import { routeRequestSchema } from "./routing.ts";
 
 export const evaluationInputSchema = z.strictObject({
 	messages: routeRequestSchema.shape.messages,
 	metadata: routeRequestSchema.shape.metadata,
 });
 export const frozenCaseSchema = evaluationInputSchema.extend({
-	versions: z.strictObject({
-		runtime: z.string(),
-		prompts: z.string(),
-		evaluator: z.string(),
-		retrieval: z.string(),
-	}),
+	versions: evaluationVersionsSchema,
 	history: z.strictObject({
 		conversationId: z.string().min(1).max(100),
 		sources: z.array(retrievalSourceSchema).max(200),
@@ -23,17 +21,27 @@ export const frozenCaseSchema = evaluationInputSchema.extend({
 });
 export type FrozenCase = z.infer<typeof frozenCaseSchema>;
 
+export function canonicalEvaluationInput(
+	input: z.infer<typeof evaluationInputSchema>,
+) {
+	const parsed = evaluationInputSchema.parse({
+		messages: input.messages,
+		metadata: input.metadata,
+	});
+	return {
+		...parsed,
+		metadata: Object.fromEntries(
+			Object.entries(parsed.metadata ?? {}).sort(([a], [b]) =>
+				a.localeCompare(b),
+			),
+		),
+	};
+}
+
 export function frozenCaseKey(input: FrozenCase) {
 	const canonical = frozenCaseSchema.parse(input);
 	return contentHash(
-		JSON.stringify({
-			...canonical,
-			metadata: Object.fromEntries(
-				Object.entries(canonical.metadata ?? {}).sort(([a], [b]) =>
-					a.localeCompare(b),
-				),
-			),
-		}),
+		JSON.stringify({ ...canonical, ...canonicalEvaluationInput(canonical) }),
 	);
 }
 

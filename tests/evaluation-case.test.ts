@@ -123,7 +123,7 @@ test("registration freezes saved history and replay preserves case identity whil
 	).toBe(rows.find((row) => row._id === registered.runId)?.evaluation?.caseKey);
 	const other = await createConvexFixture(fixture.t);
 	await expect(
-		other.owner.query(api.runs.replay, { runId: registered.runId }),
+		other.owner.query(api.runs.inspect, { runId: registered.runId }),
 	).rejects.toThrow("Conversation unavailable");
 	await expect(
 		resolveReplay(persistence, {

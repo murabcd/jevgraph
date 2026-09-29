@@ -26,3 +26,6 @@ dist-ssr
 *.sln
 *.sw?
 .codex
+
+# Owner-scoped evaluation artifacts and local human labels
+eval-results/

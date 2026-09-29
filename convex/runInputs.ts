@@ -6,7 +6,7 @@ import {
 } from "../src/lib/evaluation-case";
 import { EVALUATION_VERSIONS } from "../src/lib/evaluation-version";
 import type { WorkflowRoutes } from "../src/lib/routing";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { ownRun } from "./access";
 
@@ -87,4 +87,20 @@ export async function freezeRunInput(
 		};
 	}
 	return frozen;
+}
+
+export async function followupFor(ctx: Pick<QueryCtx, "db">, run: Doc<"runs">) {
+	const messages = await ctx.db
+		.query("messages")
+		.withIndex("by_conversation", (q) =>
+			q
+				.eq("conversationId", run.conversationId)
+				.gte("_creationTime", run._creationTime),
+		)
+		.order("asc")
+		.take(4);
+	const message = messages.find(
+		(message) => message.role === "user" && message.runId !== run._id,
+	);
+	return message ? { id: message._id, content: message.content } : undefined;
 }

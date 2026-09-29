@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { providerEvidenceSchema } from "./provider-evidence";
+import { providerEvidenceSchema } from "./provider-evidence.ts";
 import {
 	type RouteTrace,
 	routeResultSchema,
 	routeTraceSchema,
-} from "./routing";
+} from "./routing.ts";
 
 export const MAX_ARTIFACT_BYTES = 8_000_000;
 export const emptyRouteTrace = (): RouteTrace => ({

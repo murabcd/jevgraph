@@ -2,6 +2,8 @@
 
 This local pilot validates the evaluated-routing and preparation-payback flow against the saved shop-support demo. It uses real provider calls and development Convex persistence. Codex inspected the complete answers and saved explicit Pass/Fail labels against the configured document-based criteria. These five cases are a small demo sample, not production quality evidence or a calibrated judge.
 
+This historical pilot predates frozen replay, provider-body coverage and criterion-level review. Its old boolean labels are not current routing approval evidence; the current harness requires fresh runs and human evidence-backed reviews.
+
 ## Configuration
 
 The graph uses Start → Jev Choice → Model, with return and support branches reaching the same model. Both demo documents, the selected `customer_tier=vip` field, retrieval, query-aware context, and conditional instructions are enabled. The candidates are GPT-6 Luna and Gemini 3.8 Flash at Low reasoning, with a 1,400-token output ceiling. The pilot gate requires five distinct request cases, every attempt reviewed, at least 95% pass, and full-turn p95 at most 20,000 ms. Preparation requires optimistic savings of at least 1.1 times its cold estimated cost.

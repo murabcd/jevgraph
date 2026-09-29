@@ -2,7 +2,7 @@
 
 These hand-written cases exercise the document-based shop demo. They are a pilot suite, not customer traffic or evidence of production quality.
 
-Use the configured answer criteria and inspect the entire answer before choosing Pass or Fail. Run the same messages, supplied Start values and fixed history for each candidate. For single-turn comparisons, start a fresh conversation for each case. Keep prompts, reasoning, retrieval, documents and preparation settings fixed; changing behavior requires a fresh comparison. Repeat measurements count as attempts, not additional distinct cases.
+Use the configured answer criteria and inspect the entire answer before labelling each criterion pass, fail or insufficient-evidence with recorded quotes. Run the same messages, supplied Start values and fixed history for each candidate. For single-turn comparisons, start a fresh conversation for each case. Keep prompts, reasoning, retrieval, documents and preparation settings fixed; changing behavior requires a fresh comparison. Repeat measurements count as attempts, not additional distinct cases.
 
 The example policy requires twenty distinct cases, a 95% reviewed pass rate and full-turn p95 below twenty seconds. Five distinct cases are permitted for a small pilot. The measured complete-turn cost includes every provider attempt; unknown usage is never priced as zero. Review includes failed turns and exhausted loops. Cost per passing answer and empirical p95 describe this sample only.
 
@@ -30,3 +30,5 @@ The example policy requires twenty distinct cases, a 95% reviewed pass rate and 
 | Delivery follow-up | Fixed history: customer says parcel already handed to carrier and asks address change; assistant explains coordination. Follow-up: А завтра точно успеют? | Do not guarantee timing; retain carrier-coordination context and request employee clarification. |
 
 For the live pilot, inspect last-turn model plans and preparation decisions as well as the answer. Review labels are saved independently of the graph and survive reload. Qualifying candidates must share case identities and repetition counts; dissimilar suites cannot establish a cost comparison. A candidate that times out or reports incomplete usage remains excluded until sufficient usable evidence exists for the configured strategy.
+
+The machine-readable [shop-support.json](shop-support.json) freezes a synthetic policy, graph, input fields and all twenty cases. Its twelve dev and eight held-out test cases are **seed labels** requiring independent owner review. The eight test cases cannot satisfy the example twenty-case routing gate. Add distinct held-out cases before claiming that gate is met. See the [evaluation harness](../lat.md/evaluation.md) for commands and report rules.
