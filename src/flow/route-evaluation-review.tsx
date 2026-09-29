@@ -1,8 +1,7 @@
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { useId, useState } from "react";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import {
 	Select,
@@ -12,6 +11,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { QualityReviewForm } from "@/flow/quality-review-form";
 import { routeEvidenceSchema } from "@/lib/route-evidence";
 import { formatCostUsd } from "@/lib/usage";
 import { api } from "../../convex/_generated/api";
@@ -34,11 +34,9 @@ function recordLabel(
 export function RouteEvaluationReview({
 	conversationId,
 	nodeId,
-	output,
 }: {
 	conversationId: Id<"conversations">;
 	nodeId: string;
-	output?: string;
 }) {
 	const id = useId();
 	const [selectedRunId, setSelectedRunId] = useState<Id<"runs"> | null>(null);
@@ -51,21 +49,18 @@ export function RouteEvaluationReview({
 		nodeId,
 		...(selectedRunId ? { runId: selectedRunId } : {}),
 	});
-	const review = useMutation(api.routeEvaluations.review);
-	const [pending, setPending] = useState(false);
-	const [error, setError] = useState<string>();
+
 	if (!evaluation && !records?.length) return null;
 	const selected = records?.find(
 		(record) => record.runId === (selectedRunId ?? evaluation?.runId),
 	);
-	const selector = ((records?.length ?? 0) > 1 || !evaluation) && (
+	const selector = (
 		<Field>
 			<FieldLabel htmlFor={id} className="text-xs text-muted-foreground">
 				Recorded answer
 			</FieldLabel>
 			<Select<Id<"runs">>
 				value={selected?.runId ?? null}
-				disabled={pending}
 				onValueChange={setSelectedRunId}
 			>
 				<SelectTrigger id={id} className="w-full">
@@ -94,32 +89,22 @@ export function RouteEvaluationReview({
 		.array(routeEvidenceSchema)
 		.max(2)
 		.parse(JSON.parse(evaluation.report));
-	const save = async (passed: boolean) => {
-		setPending(true);
-		setError(undefined);
-		try {
-			await review({ runId: evaluation.runId, nodeId, passed });
-		} catch (error) {
-			setError(
-				error instanceof Error ? error.message : "Could not save review",
-			);
-		} finally {
-			setPending(false);
-		}
-	};
+
 	return (
 		<div className="my-4 grid gap-3 text-sm">
 			{selector}
 			<h3 className="font-medium">
 				Answer review · {evaluation.model} ·{" "}
 				{evaluation.passed === undefined
-					? "unreviewed"
+					? evaluation.review
+						? "insufficient evidence"
+						: "unreviewed"
 					: evaluation.passed
 						? "passed"
 						: "failed"}
 			</h3>
 			<p className="text-muted-foreground">{evaluation.question}</p>
-			{(selectedRunId || evaluation.answer !== output) && evaluation.answer && (
+			{evaluation.answer && (
 				<pre className="whitespace-pre-wrap wrap-break-word font-sans leading-6">
 					{evaluation.answer}
 				</pre>
@@ -136,23 +121,11 @@ export function RouteEvaluationReview({
 					? "cost unknown"
 					: formatCostUsd(evaluation.costUsd)}
 			</p>
-			<div className="flex gap-2">
-				<Button
-					variant={evaluation.passed ? "default" : "outline"}
-					disabled={pending || !evaluation.completed}
-					onClick={() => void save(true)}
-				>
-					Pass
-				</Button>
-				<Button
-					variant={evaluation.passed === false ? "default" : "outline"}
-					disabled={pending}
-					onClick={() => void save(false)}
-				>
-					Fail
-				</Button>
-			</div>
-			{error && <p className="text-destructive">{error}</p>}
+			<QualityReviewForm
+				key={evaluation.runId}
+				evaluation={evaluation}
+				nodeId={nodeId}
+			/>
 			{report.map((model) => (
 				<p key={model.model} className="text-xs text-muted-foreground">
 					{model.model} · {model.cases} distinct cases · {model.reviewed}/

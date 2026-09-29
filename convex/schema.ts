@@ -31,6 +31,9 @@ export default defineSchema({
 		generationCostUsd: v.optional(v.number()),
 		modelAttempts: v.number(),
 		passed: v.optional(v.boolean()),
+		review: v.optional(v.string()),
+		reviewerId: v.optional(v.id("users")),
+		reviewedAt: v.optional(v.number()),
 		expiresAt: v.number(),
 	})
 		.index("by_run", ["runId"])

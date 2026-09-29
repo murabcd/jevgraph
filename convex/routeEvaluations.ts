@@ -1,4 +1,10 @@
 import { ConvexError, v } from "convex/values";
+import { frozenCaseSchema } from "../src/lib/evaluation-case";
+import {
+	qualityReviewSchema,
+	reviewSources,
+	validateQualityReview,
+} from "../src/lib/quality-review";
 import {
 	EVIDENCE_TTL_MS,
 	MAX_EVALUATIONS,
@@ -6,15 +12,20 @@ import {
 	routeEvaluationSchema,
 	summarizeRouteEvidence,
 } from "../src/lib/route-evidence";
+import { workflowRoutesSchema } from "../src/lib/routing";
+import { runArtifactSchema } from "../src/lib/run-artifact";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import {
+	action,
 	internalMutation,
+	internalQuery,
 	type MutationCtx,
-	mutation,
+	type QueryCtx,
 	query,
 } from "./_generated/server";
 import { ownConversation, ownRun, ownWorkspace } from "./access";
+import { readRunInput } from "./runInputs";
 
 export async function recordRouteEvaluations(
 	ctx: MutationCtx,
@@ -76,6 +87,37 @@ export const evidence = query({
 	},
 });
 
+async function evaluationFor(
+	ctx: Pick<QueryCtx, "db">,
+	runId: Doc<"runs">["_id"],
+	nodeId: string,
+) {
+	const rows = await ctx.db
+		.query("routeEvaluations")
+		.withIndex("by_run", (q) => q.eq("runId", runId))
+		.take(100);
+	return rows.find(
+		(row) => row.nodeId === nodeId && row.expiresAt > Date.now(),
+	);
+}
+
+const followupValue = v.object({ id: v.string(), content: v.string() });
+async function followupFor(ctx: QueryCtx, run: Doc<"runs">) {
+	const messages = await ctx.db
+		.query("messages")
+		.withIndex("by_conversation", (q) =>
+			q
+				.eq("conversationId", run.conversationId)
+				.gte("_creationTime", run._creationTime),
+		)
+		.order("asc")
+		.take(4);
+	const message = messages.find(
+		(message) => message.role === "user" && message.runId !== run._id,
+	);
+	return message ? { id: message._id, content: message.content } : undefined;
+}
+
 export const latest = query({
 	args: {
 		conversationId: v.id("conversations"),
@@ -87,6 +129,11 @@ export const latest = query({
 		v.object({
 			runId: v.id("runs"),
 			criteria: v.string(),
+			input: v.string(),
+			routes: v.string(),
+			resultUrl: v.union(v.null(), v.string()),
+			review: v.optional(v.string()),
+			followup: v.optional(followupValue),
 			model: v.string(),
 			question: v.string(),
 			answer: v.string(),
@@ -114,13 +161,7 @@ export const latest = query({
 		if (!run) return null;
 		if (run.conversationId !== args.conversationId)
 			throw new ConvexError("Conversation unavailable");
-		const rows = await ctx.db
-			.query("routeEvaluations")
-			.withIndex("by_run", (q) => q.eq("runId", run._id))
-			.take(100);
-		const row = rows.find(
-			(row) => row.nodeId === args.nodeId && row.expiresAt > Date.now(),
-		);
+		const row = await evaluationFor(ctx, run._id, args.nodeId);
 		if (!row) return null;
 		const messages = await ctx.db
 			.query("messages")
@@ -147,6 +188,13 @@ export const latest = query({
 			),
 			runId: row.runId,
 			criteria: row.criteria,
+			input: JSON.stringify(await readRunInput(ctx, run._id)),
+			routes: run.routes,
+			resultUrl: run.resultFile
+				? await ctx.storage.getUrl(run.resultFile)
+				: null,
+			review: row.review,
+			followup: await followupFor(ctx, run),
 			model: row.model,
 			question: question.content,
 			answer: answer.content,
@@ -213,21 +261,105 @@ export const list = query({
 	},
 });
 
-export const review = mutation({
-	args: { runId: v.id("runs"), nodeId: v.string(), passed: v.boolean() },
+export const reviewInputs = internalQuery({
+	args: { runId: v.id("runs"), nodeId: v.string() },
+	returns: v.object({
+		input: v.string(),
+		routes: v.string(),
+		resultFile: v.optional(v.id("_storage")),
+		criteria: v.string(),
+		completed: v.boolean(),
+		review: v.optional(v.string()),
+		followup: v.optional(followupValue),
+	}),
+	handler: async (ctx, args) => {
+		const run = await ownRun(ctx, args.runId);
+		const row = await evaluationFor(ctx, run._id, args.nodeId);
+		if (!row) throw new ConvexError("Evaluation unavailable");
+		return {
+			input: JSON.stringify(await readRunInput(ctx, run._id)),
+			routes: run.routes,
+			resultFile: run.resultFile,
+			criteria: row.criteria,
+			completed: row.completed,
+			review: row.review,
+			followup: await followupFor(ctx, run),
+		};
+	},
+});
+
+export const review = action({
+	args: {
+		runId: v.id("runs"),
+		nodeId: v.string(),
+		review: v.string(),
+		expectedReview: v.union(v.null(), v.string()),
+	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
-		await ownRun(ctx, args.runId);
-		const rows = await ctx.db
-			.query("routeEvaluations")
-			.withIndex("by_run", (q) => q.eq("runId", args.runId))
-			.take(100);
-		const row = rows.find((row) => row.nodeId === args.nodeId);
-		if (!row || row.expiresAt <= Date.now())
-			throw new ConvexError("Evaluation unavailable");
-		if (!row.completed && args.passed)
+		const recorded = await ctx.runQuery(
+			internal.routeEvaluations.reviewInputs,
+			{ runId: args.runId, nodeId: args.nodeId },
+		);
+		if ((recorded.review ?? null) !== args.expectedReview)
+			throw new ConvexError("Review changed. Reload before saving.");
+		const review = qualityReviewSchema.parse(JSON.parse(args.review));
+		if (
+			!recorded.completed &&
+			review.criteria.every((criterion) => criterion.verdict === "pass")
+		)
 			throw new ConvexError("An unsuccessful route cannot pass quality review");
-		await ctx.db.patch(row._id, { passed: args.passed });
+		if (!recorded.resultFile)
+			throw new ConvexError("Recorded evidence unavailable");
+		const file = await ctx.storage.get(recorded.resultFile);
+		if (!file) throw new ConvexError("Recorded evidence unavailable");
+		const artifact = runArtifactSchema.parse(JSON.parse(await file.text()));
+		const input = frozenCaseSchema.parse(JSON.parse(recorded.input));
+		const passed = validateQualityReview(
+			review,
+			recorded.criteria,
+			artifact,
+			reviewSources(
+				input,
+				workflowRoutesSchema.parse(JSON.parse(recorded.routes)),
+				artifact,
+				recorded.followup,
+			),
+		);
+		await ctx.runMutation(internal.routeEvaluations.saveReview, {
+			runId: args.runId,
+			nodeId: args.nodeId,
+			review: JSON.stringify(review),
+			expectedReview: args.expectedReview,
+			passed,
+		});
+		return null;
+	},
+});
+
+export const saveReview = internalMutation({
+	args: {
+		runId: v.id("runs"),
+		nodeId: v.string(),
+		review: v.string(),
+		expectedReview: v.union(v.null(), v.string()),
+		passed: v.optional(v.boolean()),
+	},
+	returns: v.null(),
+	handler: async (ctx, args) => {
+		const run = await ownRun(ctx, args.runId);
+		const row = await evaluationFor(ctx, run._id, args.nodeId);
+		if (!row) throw new ConvexError("Evaluation unavailable");
+		if ((row.review ?? null) !== args.expectedReview)
+			throw new ConvexError("Review changed. Reload before saving.");
+		qualityReviewSchema.parse(JSON.parse(args.review));
+		const conversation = await ownConversation(ctx, run.conversationId);
+		await ctx.db.patch(row._id, {
+			review: args.review,
+			passed: args.passed,
+			reviewerId: conversation.owner,
+			reviewedAt: Date.now(),
+		});
 		return null;
 	},
 });

@@ -2,8 +2,9 @@ import { useMutation, useQuery } from "convex/react";
 import { useMemo } from "react";
 import useSWR from "swr";
 import type { ChatTurn } from "@/chat/types";
-import { artifactTrace, runArtifactSchema } from "@/lib/run-artifact";
+import { artifactTrace } from "@/lib/run-artifact";
 import { runFooterSchema } from "@/lib/run-footer";
+import { loadRunArtifact } from "@/storage/run-artifact";
 import type { Workspace } from "@/storage/workspace-gate";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -23,14 +24,7 @@ export function useSavedConversation(
 	});
 	const start = useMutation(api.conversations.start);
 	const open = useMutation(api.conversations.open);
-	const { data, error } = useSWR(
-		latest?.resultUrl ?? null,
-		async (url: string) => {
-			const response = await fetch(url);
-			if (!response.ok) throw new Error("Could not restore the run");
-			return runArtifactSchema.parse(await response.json());
-		},
-	);
+	const { data, error } = useSWR(latest?.resultUrl ?? null, loadRunArtifact);
 	const messages = useMemo(
 		() =>
 			turns?.map(

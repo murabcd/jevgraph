@@ -8,7 +8,15 @@ import { totalUsage } from "./usage.ts";
 export const EVIDENCE_TTL_MS = 30 * 86400000;
 export const MAX_EVALUATIONS = 256;
 export const qualityPolicySchema = z.strictObject({
-	criteria: z.string().trim().min(1).max(2000),
+	criteria: z
+		.string()
+		.trim()
+		.min(1)
+		.max(2000)
+		.refine(
+			(text) => text.split("\n").filter((line) => line.trim()).length <= 20,
+			"Use at most twenty review criteria",
+		),
 	minimumCases: z.number().int().min(5).max(100),
 	minimumPassRate: z.number().min(0.5).max(1),
 	maximumLatencyMs: z.number().int().min(100).max(120000),

@@ -39,7 +39,7 @@ export function ModelRoutingFields({
 									mode: "evaluate",
 									quality: {
 										criteria:
-											"Answer from the selected documents; preserve conditions, deadlines and exceptions; ask for missing order details; never invent order status or completed actions.",
+											"Answer from the selected documents.\nPreserve conditions, deadlines and exceptions.\nAsk for missing order details.\nNever invent order status or completed actions.",
 										minimumCases: 20,
 										minimumPassRate: 0.95,
 										maximumLatencyMs: 20000,
@@ -102,7 +102,7 @@ export function ModelRoutingFields({
 							htmlFor={`${id}-quality-criteria`}
 							className="text-xs text-muted-foreground"
 						>
-							Answer review criteria
+							Answer review criteria · one per line
 						</FieldLabel>
 						<InputGroup>
 							<InputGroupTextarea

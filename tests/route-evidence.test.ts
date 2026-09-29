@@ -3,6 +3,8 @@ import { api, internal } from "../convex/_generated/api";
 import { planModel } from "../server/model-planner";
 import { SessionMemory } from "../server/session-memory";
 import { executeWorkflow } from "../server/workflow";
+import { EVALUATION_VERSIONS } from "../src/lib/evaluation-version";
+import { reviewCriteria } from "../src/lib/quality-review";
 import {
 	type RouteEvaluation,
 	routeEvaluations,
@@ -260,8 +262,16 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 		runId: first.runId,
 		result: JSON.stringify({
 			status: "completed",
-			coverage: "unavailable",
-			providerEvidence: [],
+			coverage: "complete",
+			providerEvidence: result.calls.map((call) => ({
+				id: `exchange:${call.id}`,
+				callId: call.id,
+				endpoint: "https://fixture.example",
+				method: "POST",
+				request: { text: "{}", bytes: 2, complete: true },
+				response: { text: "{}", bytes: 2, complete: true },
+				state: "completed",
+			})),
 			result: { ...result, latencyMs: 500 },
 		}),
 	});
@@ -293,10 +303,11 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 		answer: "Final customer reply",
 	});
 	expect(previous?.passed).toBeUndefined();
-	await owner.mutation(api.routeEvaluations.review, {
+	await owner.action(api.routeEvaluations.review, {
 		runId: first.runId,
 		nodeId: "answer",
-		passed: true,
+		review: fixtureReview(true),
+		expectedReview: null,
 	});
 	expect(
 		await owner.query(api.routeEvaluations.latest, {
@@ -366,8 +377,16 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 		runId: run.runId,
 		result: JSON.stringify({
 			status: "completed",
-			coverage: "unavailable",
-			providerEvidence: [],
+			coverage: "complete",
+			providerEvidence: result.calls.map((call) => ({
+				id: `exchange:${call.id}`,
+				callId: call.id,
+				endpoint: "https://fixture.example",
+				method: "POST",
+				request: { text: "{}", bytes: 2, complete: true },
+				response: { text: "{}", bytes: 2, complete: true },
+				state: "completed",
+			})),
 			result: { ...result, latencyMs: 500 },
 		}),
 	});
@@ -376,10 +395,11 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 		nodeId: "answer",
 	});
 	expect(current?.passed).toBeUndefined();
-	await owner.mutation(api.routeEvaluations.review, {
+	await owner.action(api.routeEvaluations.review, {
 		runId: run.runId,
 		nodeId: "answer",
-		passed: true,
+		review: fixtureReview(true),
+		expectedReview: null,
 	});
 	const key = await routeEvidenceKey(routes, "answer");
 	expect(
@@ -402,10 +422,11 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 	).toEqual([]);
 	const other = await createConvexFixture(t);
 	await expect(
-		other.owner.mutation(api.routeEvaluations.review, {
+		other.owner.action(api.routeEvaluations.review, {
 			runId: run.runId,
 			nodeId: "answer",
-			passed: false,
+			review: fixtureReview(false),
+			expectedReview: null,
 		}),
 	).rejects.toThrow("Conversation unavailable");
 	const failed = await owner.mutation(api.runs.begin, {
@@ -445,10 +466,11 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 		}),
 	});
 	await expect(
-		owner.mutation(api.routeEvaluations.review, {
+		owner.action(api.routeEvaluations.review, {
 			runId: failed.runId,
 			nodeId: "answer",
-			passed: true,
+			review: fixtureReview(true),
+			expectedReview: null,
 		}),
 	).rejects.toThrow("cannot pass");
 	expect(
@@ -570,10 +592,11 @@ test("an abandoned evaluation lease records a failed unknown-cost complete-route
 	});
 	expect(evidence.meanCostUsd).toBeUndefined();
 	await expect(
-		owner.mutation(api.routeEvaluations.review, {
+		owner.action(api.routeEvaluations.review, {
 			runId: run.runId,
 			nodeId: "answer",
-			passed: true,
+			review: fixtureReview(true),
+			expectedReview: null,
 		}),
 	).rejects.toThrow("cannot pass");
 });
@@ -651,3 +674,19 @@ test("preparation economics quotes eligible candidates instead of an unqualified
 		"model",
 	]);
 });
+
+function fixtureReview(passed: boolean) {
+	return JSON.stringify({
+		version: EVALUATION_VERSIONS.evaluator,
+		criteria: reviewCriteria(quality.criteria).map((criterion) => ({
+			id: criterion.id,
+			verdict: passed ? "pass" : "fail",
+			reason: "Controlled fixture judgement",
+			evidence: [
+				{ id: "ref:1", sourceId: "document:policy", quote: "14 days" },
+			],
+		})),
+		task: { outcome: "unknown", reason: "Not measured", evidence: [] },
+		reaction: { outcome: "unknown", reason: "Not measured", evidence: [] },
+	});
+}

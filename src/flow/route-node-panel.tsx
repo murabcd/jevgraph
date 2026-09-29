@@ -84,7 +84,6 @@ function LastTurnPanel({
 									key={`${conversationId}:${id}`}
 									conversationId={conversationId}
 									nodeId={id}
-									output={data.output}
 								/>
 							)}
 						<NodeRunDetails

@@ -185,3 +185,5 @@ bun run build
 - [AI SDK TypeSafe provider](https://ai-sdk.dev/providers/ai-sdk-providers/typesafe-ai)
 - [AI SDK generating text](https://ai-sdk.dev/docs/ai-sdk-core/generating-text)
 - [Anthropic, Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)
+
+Evaluation mode records both successful and failed attempts. Each nonempty answer-criteria line is reviewed separately with an exact quote from recorded evidence; insufficient evidence prevents automatic model approval. Task outcome and later user reaction have separate labels, so a completed graph or a handoff does not imply a resolved customer request. Authenticated `/api/replay` reruns a settled owned case with frozen messages, Start values, documents, opt-in history and version identities, optionally varying one allowed model candidate.
