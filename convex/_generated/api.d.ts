@@ -14,6 +14,8 @@ import type * as conversations from "../conversations.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as results from "../results.js";
+import type * as retrieval from "../retrieval.js";
+import type * as routeEvaluations from "../routeEvaluations.js";
 import type * as runs from "../runs.js";
 import type * as summaries from "../summaries.js";
 import type * as workspaces from "../workspaces.js";
@@ -31,6 +33,8 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   http: typeof http;
   results: typeof results;
+  retrieval: typeof retrieval;
+  routeEvaluations: typeof routeEvaluations;
   runs: typeof runs;
   summaries: typeof summaries;
   workspaces: typeof workspaces;

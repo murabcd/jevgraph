@@ -2,18 +2,33 @@ import type {
 	ContextChunk,
 	ContextSelection,
 	ContextSummaries,
+	PreparationDecision,
 } from "../src/lib/context.ts";
-import { DEFAULT_OPENAI_MODEL } from "../src/lib/routing.ts";
+import { publishedRates } from "../src/lib/model-pricing.ts";
+import { DEFAULT_OPENAI_MODEL, JEV_MODEL_ID } from "../src/lib/routing.ts";
 import type { TokenUsage } from "../src/lib/usage.ts";
+import { estimateCost } from "../src/lib/usage.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import type { RelevanceResult } from "./context.ts";
+import {
+	contextAssessmentPacket,
+	SUMMARY_INSTRUCTIONS,
+	SUMMARY_MAX_OUTPUT,
+	summaryPrompt,
+} from "./context-providers.ts";
+import { estimateInputTokens } from "./model-planner.ts";
 import {
 	contentFingerprint,
 	type SessionMemory,
 	type SummaryStore,
 } from "./session-memory.ts";
 
-export type SummaryRequest = { nodeId: string; chunk: ContextChunk };
+export type SummaryRequest = {
+	nodeId: string;
+	chunk: ContextChunk;
+	query: string;
+	task: string;
+};
 export type SummaryResult = {
 	summaries: ContextSummaries;
 	model: string;
@@ -38,8 +53,47 @@ export type ContextOptimizer = (request: {
 	task: string;
 	chunks: ContextChunk[];
 	minimumConfidence: number;
+	economics?: { minimumReturn: number };
+	maxCharacters: number;
 	price?: (chunks: ContextChunk[]) => number;
-}) => Promise<AutomaticContextChoice[]>;
+}) => Promise<{
+	choices: AutomaticContextChoice[];
+	preparation?: PreparationDecision;
+}>;
+
+/** Cold forecast includes summary output ceilings and the batch adequacy packet. */
+export function estimatePreparationCost(
+	request: Parameters<ContextOptimizer>[0],
+): number | undefined {
+	let total = 0;
+	const sources = request.chunks.map((chunk) => {
+		if (chunk.content.length <= 1600)
+			return { id: chunk.id, full: chunk.content };
+		const tokens = estimateInputTokens(
+			SUMMARY_INSTRUCTIONS + summaryPrompt({ ...request, chunk }),
+		);
+		const cost = estimateCost(
+			{ inputTokens: tokens, outputTokens: SUMMARY_MAX_OUTPUT },
+			publishedRates("openai", DEFAULT_OPENAI_MODEL, tokens),
+		);
+		if (cost === undefined) total = NaN;
+		else total += cost;
+		return {
+			id: chunk.id,
+			full: chunk.content,
+			summaries: { short: "x".repeat(600), detailed: "x".repeat(2400) },
+		};
+	});
+	const packet = contextAssessmentPacket({ ...request, sources });
+	const tokens = estimateInputTokens(JSON.stringify(packet));
+	const assessment = estimateCost(
+		{ inputTokens: tokens, outputTokens: 0 },
+		publishedRates("jev", JEV_MODEL_ID, tokens),
+	);
+	return Number.isFinite(total) && assessment !== undefined
+		? total + assessment
+		: undefined;
+}
 
 export async function chooseContextRepresentations(
 	request: Parameters<ContextOptimizer>[0],
@@ -56,7 +110,48 @@ export async function chooseContextRepresentations(
 		assess: (request: ContextAssessmentRequest) => Promise<RelevanceResult>;
 		signal?: AbortSignal;
 	},
-): Promise<AutomaticContextChoice[]> {
+): ReturnType<ContextOptimizer> {
+	signal?.throwIfAborted();
+	let preparation: PreparationDecision | undefined;
+	if (request.economics) {
+		const estimatedCostUsd = estimatePreparationCost(request);
+		const full = request.price?.(request.chunks);
+		const empty = request.price?.([]);
+		const optimisticSavingsUsd =
+			full !== undefined &&
+			empty !== undefined &&
+			Number.isFinite(full) &&
+			Number.isFinite(empty)
+				? Math.max(0, full - empty)
+				: undefined;
+		const budgetRequired =
+			request.chunks.reduce((sum, chunk) => sum + chunk.content.length, 0) >
+			request.maxCharacters;
+		const status = budgetRequired
+			? "budget-required"
+			: estimatedCostUsd === undefined || optimisticSavingsUsd === undefined
+				? "unknown-price"
+				: optimisticSavingsUsd >=
+						estimatedCostUsd * request.economics.minimumReturn
+					? "prepare"
+					: "retain-full";
+		preparation = {
+			status,
+			estimatedCostUsd,
+			optimisticSavingsUsd,
+			minimumReturn: request.economics.minimumReturn,
+			estimation: "cold-utf8-estimate",
+		};
+		if (status === "retain-full" || status === "unknown-price")
+			return {
+				preparation,
+				choices: request.chunks.map((chunk) => ({
+					chunk,
+					included: true,
+					reason: "selected",
+				})),
+			};
+	}
 	const sources = await mapConcurrent(request.chunks, 2, async (chunk) => {
 		signal?.throwIfAborted();
 		if (chunk.content.length <= 1600)
@@ -64,10 +159,23 @@ export async function chooseContextRepresentations(
 		try {
 			const cached = await memory.summarize(
 				contentFingerprint(
-					`summaries:v1:${DEFAULT_OPENAI_MODEL}:none:${chunk.kind}:${chunk.content}`,
+					JSON.stringify([
+						"summaries:v2",
+						DEFAULT_OPENAI_MODEL,
+						"none",
+						chunk.kind,
+						chunk.content,
+						request.query,
+						request.task,
+					]),
 				),
 				async () => {
-					const result = await summarize({ nodeId: request.nodeId, chunk });
+					const result = await summarize({
+						nodeId: request.nodeId,
+						chunk,
+						query: request.query,
+						task: request.task,
+					});
 					signal?.throwIfAborted();
 					return result.summaries;
 				},
@@ -119,7 +227,8 @@ export async function chooseContextRepresentations(
 		if (
 			!choice.included ||
 			!summaries ||
-			!valid(probabilities[`${chunk.id}:useful`])
+			!valid(probabilities[`${chunk.id}:useful`]) ||
+			probabilities[`${chunk.id}:useful`] < request.minimumConfidence
 		)
 			continue;
 		const candidates: { chunk: ContextChunk; probability?: number }[] = [
@@ -161,5 +270,5 @@ export async function chooseContextRepresentations(
 		if (selected.chunk.representation !== chunk.representation)
 			choice.reason = "automatic";
 	}
-	return choices;
+	return { choices, preparation };
 }

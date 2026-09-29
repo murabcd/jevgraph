@@ -1,4 +1,5 @@
 import type { ContextDocument } from "../src/lib/context.ts";
+import { EMBEDDING_MODEL } from "../src/lib/retrieval.ts";
 import {
 	type ChatMessage,
 	DEFAULT_OPENAI_MODEL,
@@ -15,6 +16,7 @@ import {
 	type SummaryRequest,
 	type SummaryResult,
 } from "./automatic-context.ts";
+import { resolveInstructions } from "./conditional-instructions.ts";
 import {
 	type ContextFilter,
 	prepareContext,
@@ -22,9 +24,21 @@ import {
 } from "./context.ts";
 import { projectModelCost } from "./model-planner.ts";
 import type { ProviderLedger } from "./provider-ledger.ts";
+import type { ContextRetriever, RetrievalRequest } from "./retrieval.ts";
 import type { SessionMemory, SummaryStore } from "./session-memory.ts";
 
 export type ContextProviders = {
+	retrieval?: {
+		retrieve: ContextRetriever;
+		embed: (
+			nodeId: string,
+			...input: Parameters<RetrievalRequest["embed"]>
+		) => ReturnType<RetrievalRequest["embed"]>;
+		rerank: (
+			nodeId: string,
+			...input: Parameters<RetrievalRequest["rerank"]>
+		) => ReturnType<RetrievalRequest["rerank"]>;
+	};
 	filter?: ContextFilter;
 	automatic?: {
 		summarize: (request: SummaryRequest) => Promise<SummaryResult>;
@@ -33,7 +47,7 @@ export type ContextProviders = {
 };
 
 /** Wires context policy to priced, accounted providers outside the graph scheduler. */
-export function prepareNodeContext(
+export async function prepareNodeContext(
 	{
 		node,
 		callId,
@@ -65,24 +79,78 @@ export function prepareNodeContext(
 		signal?: AbortSignal;
 	},
 ) {
-	const { automatic, filter } = providers;
-	return prepareContext({
+	const { automatic, filter, retrieval } = providers;
+	const retrievalPolicy = node.context?.retrieval;
+	const selected = selectedVariables(variables, node.variables);
+	const effective = resolveInstructions({
+		base:
+			node.kind === "jev" ? node.question.instructions : (node.prompt ?? ""),
+		policy: node.context,
+		variables: selected,
+		inputs,
+	});
+	const task = [
+		effective.instructions,
+		Object.keys(selected).length
+			? `Selected Start values (data): ${JSON.stringify(selected)}`
+			: "",
+	]
+		.filter(Boolean)
+		.join("\n\n");
+	const prepared = await prepareContext({
 		nodeId: node.id,
-		task: node.kind === "jev" ? node.question.instructions : node.prompt,
+		task,
 		callId,
 		messages,
 		inputs,
 		documents,
 		policy: node.context,
 		signal,
+		retrieve:
+			retrieval && retrievalPolicy
+				? (request) =>
+						retrieval.retrieve({
+							...request,
+							policy: retrievalPolicy,
+							signal,
+							embed: (values) =>
+								ledger.run(
+									{
+										nodeId: node.id,
+										purpose: "embedding",
+										provider: "openai",
+										model: EMBEDDING_MODEL,
+									},
+									undefined,
+									ledger.nextId(),
+									() => retrieval.embed(node.id, values),
+								),
+							rerank: (request) =>
+								ledger.run(
+									{
+										nodeId: node.id,
+										purpose: "rerank",
+										provider: "jev",
+										model: JEV_MODEL_ID,
+									},
+									undefined,
+									ledger.nextId(),
+									() => retrieval.rerank(node.id, request),
+								),
+						})
+				: undefined,
 		price:
-			node.kind === "model" && node.routing
+			node.kind === "model" &&
+			(node.routing || node.context?.automatic?.economics)
 				? (context) =>
 						projectModelCost(
 							{
-								target: modelTarget(node),
+								target: {
+									...modelTarget(node),
+									prompt: effective.instructions,
+								},
 								context,
-								variables: selectedVariables(variables, node.variables),
+								variables: selected,
 							},
 							memory,
 							availableModels,
@@ -135,4 +203,12 @@ export function prepareNodeContext(
 					)
 			: undefined,
 	});
+	return {
+		...prepared,
+		instructions: effective.instructions,
+		trace: {
+			...prepared.trace,
+			instructions: effective.trace.length ? effective.trace : undefined,
+		},
+	};
 }

@@ -29,8 +29,11 @@ implemented yet.
 - Jev Choice, Noul, and Score evaluations for branching decisions
 - OpenAI and Gemini generation with prompts, examples, and reasoning controls per node
 - Parallel model paths, joined results, bounded review loops, and explicit backup models
-- Context selection per node, relevance filtering, and automatic full-text or summary selection
-- Automatic model selection based on projected cost and observed provider-cache usage
+- Context selection per node, relevance filtering, and query-aware full-text or summary selection
+- Convex hybrid passage retrieval with OpenAI embeddings and Jev reranking
+- Conditional instructions from selected Start values and accepted upstream Jev decisions
+- Model evaluation with owner reviews, quality/latency gates, and complete-route cost comparisons
+- Optional pre-call context preparation payback and observed provider-cache planning
 - Live execution paths, node timers, context inspection, token usage, and estimated costs
 - Realtime graph saves, chat history, completed run traces, and reusable context summaries in Convex
 
@@ -53,7 +56,7 @@ bun install
 cp .env.example .env.local
 ```
 
-Add the keys for the providers you use to `.env.local`:
+Add the keys for the providers you use to `.env.local`. Retrieval needs an OpenAI key for embeddings and a TypeSafe key for Jev reranking, even when Gemini generates the answer:
 
 ```dotenv
 TYPESAFE_API_KEY=your_jev_key
@@ -98,7 +101,18 @@ The app runs at [localhost:5173](http://localhost:5173/).
 The initial canvas contains Start and an unconfigured Jev node. Complete the
 Jev question and criteria before sending a message. Reference documents belong
 to Start; each downstream node selects its own documents, history, and earlier
-results. See [context](lat.md/context.md) and [routing](lat.md/routing.md).
+results. Enable **Retrieve relevant passages** in a node's Context settings to
+search its selected documents. **Search previous messages** separately enables
+retrieval from up to 200 saved messages in the current conversation. Candidate
+and passage limits bound search and Jev reranking. Indexes build on the first
+reached call and are reused when content and credential scope match.
+
+**Automatic context** prepares summaries for the current query and effective
+node instructions. **Conditional instructions** activate from selected Start
+values or accepted reached Jev outputs; their status appears in run inspection.
+Model settings also offer Evaluate selected model and Route using reviewed results. Define answer criteria, run distinct cases with each candidate, and mark answers Pass/Fail in last-turn inspection. Automatic routing requires reviewed quality, acceptable full-turn p95 latency, and complete costs; qualifying candidates must share the same test cases. Context settings can retain full sources when cold preparation cost exceeds optimistic savings.
+
+Use the [shop-support evaluation cases](evals/shop-support.md) for the initial demo comparison. These features use the existing node settings. See [context](lat.md/context.md) and [routing](lat.md/routing.md).
 
 ## Self-hosting
 
@@ -141,13 +155,16 @@ Jev evaluates Choice, Noul, and Score questions. GPT-6 Luna and Gemini 3.8 Flash
 generate replies through their direct AI SDK providers. API keys remain on the
 server.
 
-Cost totals include generation, decisions, context preparation, repeats, and
+Cost totals include generation, decisions, embeddings, reranking, context preparation, repeats, and
 backup attempts. Published rates provide estimates; node settings can override
 them. Missing usage is marked incomplete, and estimates are not provider bills.
 
 Automatic context selection can reuse summaries stored in Convex. Provider-cache
-hits depend on reported usage and expiring observations. These features do not
-provide semantic search or long-term conversation memory. See
+hits depend on reported usage and expiring observations. Summary reuse does not extend the history window. Passage retrieval supplies
+semantic and keyword search over explicitly selected sources; it does not
+establish persistent interview state or guarantee exhaustive recall. A workspace
+retains at most 512 indexed passages for thirty days, with bounded cleanup.
+Failed indexing/search is reported; uncertain Jev reranking retains search order. See
 [optimization](lat.md/optimization.md) and [persistence](lat.md/persistence.md).
 
 ## Contributing

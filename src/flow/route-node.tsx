@@ -82,7 +82,10 @@ function RouteNodeToolbar({
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="center" sideOffset={8} className="min-w-40">
 					<DropdownMenuGroup>
-						{(data.output || data.decision || data.timing) && (
+						{(data.output ||
+							data.decision ||
+							data.timing ||
+							(isModel && data.routing)) && (
 							<DropdownMenuItem onClick={() => data.onInspectNode?.(id)}>
 								<MessageSquareText /> Inspect last turn
 							</DropdownMenuItem>
@@ -321,7 +324,7 @@ function RouteCardHeader({ data }: { data: FlowNode["data"] }) {
 				kind={data.kind}
 				automatic={
 					(data.kind === "openai" || data.kind === "google") &&
-					Boolean(data.routing)
+					data.routing?.mode === "automatic"
 				}
 			/>
 			<div className="min-w-0">

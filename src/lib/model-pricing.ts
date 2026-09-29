@@ -24,6 +24,14 @@ const publishedPrices: readonly PublishedPricing[] = [
 	JEV_PUBLISHED_PRICING,
 	{
 		provider: "openai",
+		model: "text-embedding-3-small",
+		rates: { input: 0.02, output: 0 },
+		source:
+			"https://developers.openai.com/api/docs/models/text-embedding-3-small",
+		verifiedAt: "2026-09-29",
+	},
+	{
+		provider: "openai",
 		model: "gpt-6-luna",
 		rates: { input: 0.1, output: 0.5, cachedInput: 0.01, cacheWrite: 0.125 },
 		longContext: {

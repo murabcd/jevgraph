@@ -187,6 +187,13 @@ function validModelNode(
 	if (!node.routing)
 		return validModelReasoning(node.provider, node.model, node.reasoningEffort);
 	return (
+		(node.routing.mode !== "evaluate" ||
+			(node.routing.models.includes(node.model) &&
+				validModelReasoning(
+					node.provider,
+					node.model,
+					node.reasoningEffort,
+				))) &&
 		node.routing.expectedOutputTokens <=
 			(node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS) &&
 		(node.reasoningEffort === undefined ||
@@ -223,6 +230,37 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 	)
 		return false;
 	const availableVariables = new Set(start.fields.map((field) => field.name));
+	const fieldsByName = new Map(
+		start.fields.map((field) => [field.name, field]),
+	);
+	for (const node of nodes) {
+		if (node.kind === "input") continue;
+		for (const rule of node.context?.instructions ?? []) {
+			const condition = rule.condition;
+			if (condition.kind === "variable") {
+				const field = fieldsByName.get(condition.name);
+				if (
+					!field ||
+					!node.variables?.includes(condition.name) ||
+					typeof condition.value !== field.type
+				)
+					return false;
+			} else {
+				const source = byId.get(condition.nodeId);
+				if (
+					source?.kind !== "jev" ||
+					source.id === node.id ||
+					!questionOutputs(source.question).some(
+						(output) => output.id === condition.outputId,
+					) ||
+					node.context?.upstream === "none" ||
+					(node.context?.upstream === "selected" &&
+						!node.context.outputNodeIds.includes(source.id))
+				)
+					return false;
+			}
+		}
+	}
 	if (
 		nodes.some(
 			(node) =>
@@ -239,6 +277,9 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 	const normal = outgoingEdges.filter((edge) => !edge.repeat);
 	const backups = edges.filter((edge) => edge.sourceHandle === "fallback");
 	const backupIds = new Set(backups.map((edge) => edge.target));
+	const primaryByBackup = new Map(
+		backups.map((edge) => [edge.target, edge.source]),
+	);
 	if (
 		backups.some(
 			(edge) =>
@@ -308,32 +349,49 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 		return false;
 	const visiting = new Set<string>();
 	const visited = new Set<string>();
+	const successors = new Map<string, string[]>();
+	for (const edge of normal) {
+		const targets = successors.get(edge.source) ?? [];
+		targets.push(edge.target);
+		successors.set(edge.source, targets);
+	}
 	const visit = (id: string): boolean => {
 		if (visiting.has(id)) return false;
 		if (visited.has(id)) return true;
 		visiting.add(id);
-		for (const edge of normal.filter((entry) => entry.source === id)) {
-			if (!visit(edge.target)) return false;
+		for (const target of successors.get(id) ?? []) {
+			if (!visit(target)) return false;
 		}
 		visiting.delete(id);
 		visited.add(id);
 		return true;
 	};
 	if (!visit("input")) return false;
-	for (const edge of outgoingEdges.filter((candidate) => candidate.repeat)) {
-		const pending = [edge.target];
+	const descendants = new Map<string, Set<string>>();
+	const reachableFrom = (source: string): Set<string> => {
+		const cached = descendants.get(source);
+		if (cached) return cached;
+		const pending = [source];
 		const seen = new Set<string>();
-		while (pending.length > 0) {
-			const current = pending.pop();
-			if (!current || seen.has(current)) continue;
-			seen.add(current);
-			pending.push(
-				...normal
-					.filter((entry) => entry.source === current)
-					.map((entry) => entry.target),
-			);
+		while (pending.length) {
+			const id = pending.pop();
+			if (!id || seen.has(id)) continue;
+			seen.add(id);
+			pending.push(...(successors.get(id) ?? []));
 		}
-		if (!seen.has(edge.source)) return false;
+		descendants.set(source, seen);
+		return seen;
+	};
+	for (const node of nodes) {
+		if (node.kind === "input") continue;
+		for (const { condition } of node.context?.instructions ?? []) {
+			if (condition.kind !== "decision") continue;
+			const stage = primaryByBackup.get(node.id) ?? node.id;
+			if (!reachableFrom(condition.nodeId).has(stage)) return false;
+		}
+	}
+	for (const edge of outgoingEdges.filter((candidate) => candidate.repeat)) {
+		if (!reachableFrom(edge.target).has(edge.source)) return false;
 	}
 	return nodes.every((node) => visited.has(node.id) || backupIds.has(node.id));
 }
@@ -424,6 +482,7 @@ export const routeRequestSchema = z
 				for (const binding of node.context?.documents ?? []) {
 					if (
 						!node.context?.automatic &&
+						!node.context?.retrieval &&
 						binding.representation === "summary" &&
 						!documents.find(({ id }) => id === binding.id)?.summary
 					)
@@ -547,6 +606,7 @@ export function routesUseJev(routes: WorkflowRoutes): boolean {
 			node.kind === "jev" ||
 			(node.kind === "model" &&
 				(node.context?.relevance !== undefined ||
-					node.context?.automatic !== undefined)),
+					node.context?.automatic !== undefined ||
+					node.context?.retrieval !== undefined)),
 	);
 }

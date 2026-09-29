@@ -1,13 +1,16 @@
 import type { OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
 import { experimental_evaluate, streamText } from "ai";
 import { z } from "zod";
+import { contentHash } from "../src/lib/content-identity.ts";
 import type { ContextDocument } from "../src/lib/context.ts";
+import { resolveContextDocuments } from "../src/lib/context.ts";
 import {
 	type JevQuestion,
 	questionForJev,
 	resolveJevAnswer,
 } from "../src/lib/jev-question.ts";
 import { textModels } from "../src/lib/models.ts";
+import type { RouteEvidence } from "../src/lib/route-evidence.ts";
 import {
 	type ChatMessage,
 	JEV_MODEL_ID,
@@ -15,6 +18,7 @@ import {
 	MAX_REQUEST_BYTES,
 	modelReasoningEffort,
 	type RouteStreamEvent,
+	type RouteTrace,
 	type RoutingMetadata,
 	routeRequestSchema,
 	type WorkflowRoutes,
@@ -39,6 +43,8 @@ import {
 	languageModelUsage,
 	ProviderUsageError,
 } from "./provider-usage.ts";
+import { type ContextRetriever, createContextRetriever } from "./retrieval.ts";
+import { embedContext, rerankContext } from "./retrieval-providers.ts";
 import {
 	contentFingerprint,
 	type SessionMemory,
@@ -57,6 +63,8 @@ type RouteExecution = {
 	keys: ProviderKeys;
 	memory: SessionMemory;
 	summaryStore: SummaryStore;
+	retrieve: ContextRetriever;
+	evidenceFor: (key: string) => Promise<RouteEvidence[]>;
 	signal: AbortSignal;
 	emit: (event: RouteStreamEvent) => void;
 };
@@ -179,6 +187,8 @@ async function executeRoute(
 		keys,
 		memory,
 		summaryStore,
+		retrieve,
+		evidenceFor,
 		signal,
 		emit,
 	}: RouteExecution,
@@ -193,6 +203,7 @@ async function executeRoute(
 		documents,
 		memory,
 		summaryStore,
+		evidenceFor,
 		availableModels: new Set(
 			textModels
 				.filter((model) =>
@@ -203,6 +214,21 @@ async function executeRoute(
 				.map((model) => model.id),
 		),
 		contextProviders: {
+			retrieval: {
+				retrieve,
+				embed: (nodeId, values) =>
+					measureNode(
+						nodeId,
+						() => embedContext(values, { keys, signal, providerFetch }),
+						emit,
+					),
+				rerank: (nodeId, request) =>
+					measureNode(
+						nodeId,
+						() => rerankContext(request, { keys, signal, providerFetch }),
+						emit,
+					),
+			},
 			automatic: {
 				summarize: (request) =>
 					measureNode(
@@ -291,12 +317,6 @@ export async function handleApi(
 			);
 		const input = routeRequestSchema.parse(JSON.parse(bodyText));
 		const persistence = connect(token);
-		const saved = await persistence.begin({
-			conversationId: input.conversationId,
-			requestId: input.requestId,
-			question: input.messages[input.messages.length - 1].content,
-			routes: input.routes,
-		});
 		const credentialScope = contentFingerprint(
 			JSON.stringify([
 				keys.TYPESAFE_API_KEY,
@@ -304,6 +324,38 @@ export async function handleApi(
 				keys.GOOGLE_GENERATIVE_AI_API_KEY,
 			]),
 		);
+		const start = input.routes.nodes.find((node) => node.kind === "input");
+		const resolvedDocuments = resolveContextDocuments(
+			start?.kind === "input" ? (start.documents ?? []) : [],
+			input.documents,
+		);
+		const metadata = Object.fromEntries(
+			Object.entries(input.metadata ?? {}).sort(([a], [b]) =>
+				a.localeCompare(b),
+			),
+		);
+		const saved = await persistence.begin({
+			conversationId: input.conversationId,
+			requestId: input.requestId,
+			question: input.messages[input.messages.length - 1].content,
+			routes: {
+				...input.routes,
+				nodes: input.routes.nodes.map((node) =>
+					node.kind === "input" && input.documents
+						? { ...node, documents: resolvedDocuments }
+						: node,
+				),
+			},
+			evaluation: {
+				scope: credentialScope,
+				caseKey: await contentHash(
+					JSON.stringify({
+						messages: input.messages,
+						metadata,
+					}),
+				),
+			},
+		});
 		const encoder = new TextEncoder();
 		const cancellation = new AbortController();
 		const signal = AbortSignal.any([
@@ -313,9 +365,20 @@ export async function handleApi(
 		]);
 		let closed = false;
 		let partialText = "";
+		let latestTrace: RouteTrace = {
+			path: [],
+			traversedEdges: [],
+			jevSteps: [],
+			outputs: [],
+			calls: [],
+			contexts: [],
+			modelPlans: [],
+		};
+		const executionStarted = performance.now();
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const emit = (event: RouteStreamEvent) => {
+					if (event.type === "progress") latestTrace = event.trace;
 					if (event.type === "delta") partialText += event.text;
 					if (!closed)
 						controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
@@ -323,11 +386,24 @@ export async function handleApi(
 				void executeRoute(
 					{
 						messages: input.messages,
+						evidenceFor: (key) =>
+							persistence.routeEvidence(
+								saved.workspaceId,
+								credentialScope,
+								key,
+							),
+						retrieve: createContextRetriever(
+							persistence.retrievalStore(
+								saved.workspaceId,
+								saved.runId,
+								credentialScope,
+							),
+						),
 						summaryStore: persistence.summaryStore(
 							saved.workspaceId,
 							credentialScope,
 						),
-						metadata: input.metadata ?? {},
+						metadata,
 						documents: input.documents,
 						providerFetch,
 						keys,
@@ -353,7 +429,14 @@ export async function handleApi(
 						const message =
 							error instanceof Error ? error.message : "Chatflow failed";
 						await persistence
-							.fail(saved.runId, partialText, message, signal.aborted)
+							.fail(
+								saved.runId,
+								partialText,
+								message,
+								signal.aborted,
+								latestTrace,
+								Math.round(performance.now() - executionStarted),
+							)
 							// Lease expiry will release the run if the database is unavailable.
 							.catch(() => {});
 						emit({ type: "error", error: message });

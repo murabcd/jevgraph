@@ -1,8 +1,15 @@
 import { ConvexHttpClient } from "convex/browser";
+import { z } from "zod";
 import { api } from "../convex/_generated/api.js";
 import type { Id } from "../convex/_generated/dataModel";
 import type { ContextSummaries } from "../src/lib/context.ts";
-import type { RouteResult, WorkflowRoutes } from "../src/lib/routing.ts";
+import { routeEvidenceSchema } from "../src/lib/route-evidence.ts";
+import type {
+	RouteResult,
+	RouteTrace,
+	WorkflowRoutes,
+} from "../src/lib/routing.ts";
+import type { RetrievalStore } from "./retrieval.ts";
 import type { SummaryStore } from "./session-memory.ts";
 
 type PersistenceClient = Pick<
@@ -25,12 +32,14 @@ export class ConvexPersistence {
 		requestId: string;
 		question: string;
 		routes: WorkflowRoutes;
+		evaluation?: { scope: string; caseKey: string };
 	}) {
 		const started = await this.client.mutation(api.runs.begin, {
 			conversationId: input.conversationId,
 			requestId: input.requestId,
 			question: input.question,
 			routes: JSON.stringify(input.routes),
+			evaluation: input.evaluation,
 		});
 		if (!started.started)
 			throw new Error(
@@ -49,13 +58,35 @@ export class ConvexPersistence {
 		content: string,
 		error: string,
 		interrupted: boolean,
+		trace?: RouteTrace,
+		latencyMs?: number,
 	) {
 		await this.client.mutation(api.runs.fail, {
 			runId,
 			content,
 			error,
 			interrupted,
+			trace: trace ? JSON.stringify(trace) : undefined,
+			latencyMs,
 		});
+	}
+	async routeEvidence(
+		workspaceId: Id<"workspaces">,
+		scope: string,
+		key: string,
+	) {
+		return z
+			.array(routeEvidenceSchema)
+			.max(2)
+			.parse(
+				JSON.parse(
+					await this.client.query(api.routeEvaluations.evidence, {
+						workspaceId,
+						scope,
+						key,
+					}),
+				),
+			);
 	}
 	summaryStore(workspaceId: Id<"workspaces">, scope: string): SummaryStore {
 		return {
@@ -73,6 +104,30 @@ export class ConvexPersistence {
 					...value,
 				});
 			},
+		};
+	}
+	retrievalStore(
+		workspaceId: Id<"workspaces">,
+		runId: Id<"runs">,
+		scope: string,
+	): RetrievalStore {
+		const identity = { workspaceId, runId, scope };
+		return {
+			identity: `${workspaceId}:${scope}`,
+			history: (limit) =>
+				this.client.query(api.retrieval.history, { ...identity, limit }),
+			cached: (keys) =>
+				this.client.query(api.retrieval.cached, { ...identity, keys }),
+			put: async (key, source, chunks) => {
+				await this.client.mutation(api.retrieval.put, {
+					...identity,
+					key,
+					source,
+					chunks,
+				});
+			},
+			search: (request) =>
+				this.client.action(api.retrieval.search, { ...identity, ...request }),
 		};
 	}
 }

@@ -80,6 +80,7 @@ function App({ workspace }: { workspace: Workspace }) {
 				}}
 			>
 				<RoutingCanvas
+					conversationId={workspace.conversationId}
 					graph={graph}
 					result={chat.trace}
 					timings={chat.nodeTimings}

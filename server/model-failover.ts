@@ -20,13 +20,13 @@ export async function runWithOneFallback<T>(
 			error instanceof Error ? error.message : "Unknown model error";
 		if (!fallback || streamed || !shouldRetry())
 			throw new Error(
-				`${primary.routing ? "Automatic model" : primary.provider} failed: ${primaryError}`,
+				`${primary.routing?.mode === "automatic" ? "Automatic model" : primary.provider} failed: ${primaryError}`,
 				{
 					cause: error,
 				},
 			);
 		onFallback(
-			`${primary.routing ? "Automatic model" : primary.provider} failed: ${primaryError}`,
+			`${primary.routing?.mode === "automatic" ? "Automatic model" : primary.provider} failed: ${primaryError}`,
 		);
 		try {
 			const response = await run(fallback, onDelta);
@@ -37,7 +37,7 @@ export async function runWithOneFallback<T>(
 					? fallbackError.message
 					: "Unknown model error";
 			throw new Error(
-				`Both models failed. ${primary.routing ? "Automatic model" : primary.model}: ${primaryError}. ${fallback.routing ? "Automatic model" : fallback.model}: ${secondary}`,
+				`Both models failed. ${primary.routing?.mode === "automatic" ? "Automatic model" : primary.model}: ${primaryError}. ${fallback.routing?.mode === "automatic" ? "Automatic model" : fallback.model}: ${secondary}`,
 				{ cause: fallbackError },
 			);
 		}

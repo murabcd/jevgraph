@@ -1,6 +1,7 @@
 import { publishedRates } from "../src/lib/model-pricing.ts";
 import type { ModelPlan, ModelQuote } from "../src/lib/model-routing.ts";
 import { textModels } from "../src/lib/models.ts";
+import type { RouteEvidence } from "../src/lib/route-evidence.ts";
 import type { RouteTarget, RoutingMetadata } from "../src/lib/routing.ts";
 import { estimateCost, type TokenUsage } from "../src/lib/usage.ts";
 import type { ContextContent } from "./context.ts";
@@ -11,6 +12,7 @@ export type ModelPlanningRequest = {
 	target: RouteTarget;
 	context: ContextContent;
 	variables: RoutingMetadata;
+	evidence?: RouteEvidence[];
 };
 
 /** A labelled estimate, not a tokenizer or a provider usage report. */
@@ -140,7 +142,10 @@ function cheapestQuote(candidates: ModelQuote[]): ModelQuote | undefined {
 			continue;
 		if (
 			!selected ||
-			candidate.estimatedTotalUsd < (selected.estimatedTotalUsd ?? Infinity)
+			(candidate.estimatedCostPerPassUsd ?? candidate.estimatedTotalUsd) <
+				(selected.estimatedCostPerPassUsd ??
+					selected.estimatedTotalUsd ??
+					Infinity)
 		)
 			selected = candidate;
 	}
@@ -165,12 +170,67 @@ export function planModel(
 	callId: string,
 ) {
 	const candidates = quoteModels(request, memory, available);
-	const selected = cheapestQuote(candidates);
-	if (!selected) throw new Error("No available model has a known price");
+	const routing = request.target.routing;
+	if (!routing) throw new Error("Model routing settings required");
+	const evidenceByModel = new Map(
+		request.evidence?.map((item) => [item.model, item]),
+	);
+	if (routing.mode === "automatic") {
+		for (const quote of candidates) {
+			if (quote.excluded) continue;
+			const evidence = evidenceByModel.get(quote.model);
+			quote.evidence = evidence;
+			if (!evidence) quote.excluded = "missing-evidence";
+			else if (evidence.cases < routing.quality.minimumCases)
+				quote.excluded = "insufficient-cases";
+			else if (evidence.reviewed !== evidence.attempts)
+				quote.excluded = "unreviewed";
+			else if (
+				evidence.passRate < routing.quality.minimumPassRate ||
+				!evidence.passed
+			)
+				quote.excluded = "quality";
+			else if (evidence.p95LatencyMs > routing.quality.maximumLatencyMs)
+				quote.excluded = "latency";
+			else if (
+				evidence.meanCostUsd === undefined ||
+				evidence.meanGenerationCostUsd === undefined
+			)
+				quote.excluded = "incomplete-cost";
+			else {
+				// Reprice this node; measured overhead includes the rest of the complete route.
+				quote.estimatedRouteCostUsd =
+					Math.max(0, evidence.meanCostUsd - evidence.meanGenerationCostUsd) +
+					(quote.estimatedCostUsd ?? 0) * evidence.meanModelAttempts;
+				quote.estimatedCostPerPassUsd =
+					quote.estimatedRouteCostUsd / evidence.passRate;
+			}
+		}
+	}
+	const eligible = candidates.filter((quote) => !quote.excluded);
+	if (
+		routing.mode === "automatic" &&
+		new Set(eligible.map((quote) => quote.evidence?.caseDistribution)).size > 1
+	) {
+		for (const quote of eligible) quote.excluded = "different-cases";
+	}
+	const selected =
+		routing.mode === "evaluate"
+			? candidates.find(
+					(quote) => quote.model === request.target.model && !quote.excluded,
+				)
+			: cheapestQuote(candidates);
+	if (!selected)
+		throw new Error(
+			routing.mode === "evaluate"
+				? "The evaluation model must be selected and available"
+				: "No model meets the reviewed quality, latency, and cost requirements. Run evaluation mode and review its results.",
+		);
 	const plan: ModelPlan = {
 		nodeId: request.target.nodeId,
 		callId,
 		selectedModel: selected.model,
+		mode: routing.mode,
 		expectedRequests: request.target.routing?.expectedRequests ?? 1,
 		estimation: "utf8-estimate",
 		candidates,

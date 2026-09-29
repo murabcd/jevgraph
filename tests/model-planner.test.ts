@@ -10,8 +10,11 @@ import { modelPrompt } from "../server/model-prompt";
 import { SessionMemory } from "../server/session-memory";
 import type { ModelRouting } from "../src/lib/model-routing";
 import type { RouteTarget } from "../src/lib/routing";
+import { approvedEvidence, quality } from "./routing-evidence-fixture";
 
 const routing: ModelRouting = {
+	mode: "automatic",
+	quality,
 	models: ["gpt-6-luna", "gemini-3.8-flash"],
 	expectedOutputTokens: 1,
 	expectedRequests: 1,
@@ -39,7 +42,7 @@ const context: ContextContent = {
 		},
 	],
 };
-const request = { target, context, variables: {} };
+const request = { target, context, variables: {}, evidence: approvedEvidence };
 const available = new Set(["gpt-6-luna", "gemini-3.8-flash"]);
 
 test("cold routes use known prices without inventing an implicit cache hit", () => {
@@ -138,7 +141,7 @@ test("unavailable providers are excluded and custom rates apply only to their ow
 			.selectedModel,
 	).toBe("gemini-3.8-flash");
 	expect(() => planModel(request, memory, new Set(), "1")).toThrow(
-		"No available model",
+		"No model meets",
 	);
 	const custom = quoteModels(
 		{ ...request, target: { ...target, pricing: { input: 10, output: 10 } } },

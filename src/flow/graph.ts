@@ -323,7 +323,7 @@ export function restoreGraph(snapshot: GraphSnapshot): {
 	};
 }
 
-/** One-time import of the existing local canvas into the user's empty workspace. */
+/** Remove the node, its edges, and dependent context references. */
 export function removeGraphNode(
 	nodes: FlowNode[],
 	edges: Edge[],
@@ -343,6 +343,11 @@ export function removeGraphNode(
 									...node.data.context,
 									outputNodeIds: node.data.context.outputNodeIds.filter(
 										(id) => id !== nodeId,
+									),
+									instructions: node.data.context.instructions?.filter(
+										({ condition }) =>
+											condition.kind !== "decision" ||
+											condition.nodeId !== nodeId,
 									),
 								},
 							},

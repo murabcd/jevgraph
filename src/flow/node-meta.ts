@@ -29,7 +29,7 @@ export const nodeMeta = {
 export function nodeFooterValue(data: FlowNode["data"]) {
 	if (data.kind === "input") return "";
 	if (data.kind === "jev") return questionTypeLabels[data.question.type];
-	if (data.routing)
+	if (data.routing?.mode === "automatic")
 		return data.modelPlans?.at(-1)?.selectedModel ?? "Automatic";
 	return data.model;
 }
@@ -37,6 +37,6 @@ export function nodeFooterValue(data: FlowNode["data"]) {
 export function nodeTitle(data: FlowNode["data"]) {
 	if (data.kind === "jev") return "Jev";
 	if (data.kind === "input") return "Start";
-	if (data.routing) return "Auto";
+	if (data.routing?.mode === "automatic") return "Auto";
 	return data.kind === "google" ? "Gemini" : "OpenAI";
 }

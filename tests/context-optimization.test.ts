@@ -22,6 +22,7 @@ const request = {
 	task: "Помоги покупателю",
 	chunks: [source],
 	minimumConfidence: 0.9,
+	maxCharacters: 24000,
 };
 
 function services(probabilities: Record<string, number>) {
@@ -38,7 +39,9 @@ test("selects only an adequate representation and omits only confidently irrelev
 		[0.1, 0.99, "detailed"],
 		[0.1, 0.4, "full"],
 	] as const) {
-		const [choice] = await chooseContextRepresentations(
+		const {
+			choices: [choice],
+		} = await chooseContextRepresentations(
 			request,
 			services({
 				"document:delivery:useful": 0.99,
@@ -49,13 +52,17 @@ test("selects only an adequate representation and omits only confidently irrelev
 		expect(choice.included).toBe(true);
 		expect(choice.chunk.representation).toBe(expected);
 	}
-	const [irrelevant] = await chooseContextRepresentations(
+	const {
+		choices: [irrelevant],
+	} = await chooseContextRepresentations(
 		request,
 		services({ "document:delivery:useful": 0.01 }),
 	);
 	expect(irrelevant).toMatchObject({ included: false, reason: "irrelevant" });
 	for (const useful of [0.4, NaN, 2]) {
-		const [uncertain] = await chooseContextRepresentations(
+		const {
+			choices: [uncertain],
+		} = await chooseContextRepresentations(
 			request,
 			services({ "document:delivery:useful": useful }),
 		);
@@ -65,7 +72,9 @@ test("selects only an adequate representation and omits only confidently irrelev
 });
 
 test("cache-aware pricing may retain adequate full text even when both summaries are sufficient", async () => {
-	const [choice] = await chooseContextRepresentations(
+	const {
+		choices: [choice],
+	} = await chooseContextRepresentations(
 		{
 			...request,
 			price: (chunks) => (chunks[0].representation === "full" ? 1 : 2),
@@ -88,7 +97,7 @@ test("provider failure retains full source and cancellation propagates", async (
 		throw new Error("unavailable");
 	};
 	expect(
-		(await chooseContextRepresentations(request, failed))[0],
+		(await chooseContextRepresentations(request, failed)).choices[0],
 	).toMatchObject({
 		included: true,
 		reason: "unavailable",
@@ -182,8 +191,8 @@ test("summaries reuse content, change on source changes, expire, and isolate ses
 				},
 			},
 		);
-	expect((await run())[0].summaryCache).toBe("created");
-	expect((await run())[0].summaryCache).toBe("reused");
+	expect((await run()).choices[0].summaryCache).toBe("created");
+	expect((await run()).choices[0].summaryCache).toBe("reused");
 	await run({ ...source, content: `${source.content}Новые условия.` });
 	expect(generations).toBe(2);
 	now += 30 * 60 * 1000;
@@ -246,4 +255,94 @@ test("a fresh process reuses durable summaries without generating or charging ag
 	expect(
 		(await new SessionMemory().summarize("changed", create, store)).cache,
 	).toBe("created");
+});
+
+test("query-aware summaries reuse only matching query, task and source content", async () => {
+	const memory = new SessionMemory();
+	const sent: { query: string; task: string }[] = [];
+	const run = (query = request.query, task = request.task) =>
+		chooseContextRepresentations(
+			{ ...request, query, task },
+			{
+				...services({}),
+				memory,
+				summarize: async (input) => {
+					sent.push({ query: input.query, task: input.task });
+					return { summaries, model: "gpt-6-luna" };
+				},
+			},
+		);
+	await run();
+	await run();
+	await run("Когда доставка?");
+	await run(request.query, "Explain the exception for opened medicine.");
+	expect(sent).toEqual([
+		{ query: request.query, task: request.task },
+		{ query: "Когда доставка?", task: request.task },
+		{
+			query: request.query,
+			task: "Explain the exception for opened medicine.",
+		},
+	]);
+});
+
+test("payback policy skips paid preparation for cheap or unknown savings but preserves full selected sources", async () => {
+	for (const price of [undefined, () => 0.0001]) {
+		let calls = 0;
+		const { choices, preparation } = await chooseContextRepresentations(
+			{
+				...request,
+				economics: { minimumReturn: 1.1 },
+				maxCharacters: 24000,
+				price,
+			},
+			{
+				memory: new SessionMemory(),
+				summarize: async () => {
+					calls++;
+					return { summaries, model: "gpt-6-luna" };
+				},
+				assess: async () => {
+					calls++;
+					return { probabilities: {} };
+				},
+			},
+		);
+		expect(calls).toBe(0);
+		expect(choices[0].chunk.content).toBe(source.content);
+		expect(preparation?.status).toBe(price ? "retain-full" : "unknown-price");
+	}
+});
+
+test("payback preparation proceeds for sufficient savings or a required context budget and propagates cancellation", async () => {
+	for (const budget of [1000, 24000]) {
+		let calls = 0;
+		const { preparation } = await chooseContextRepresentations(
+			{
+				...request,
+				economics: { minimumReturn: 1.1 },
+				maxCharacters: budget,
+				price: (chunks) => (chunks.length ? 1 : 0),
+			},
+			{
+				...services({}),
+				summarize: async () => {
+					calls++;
+					return { summaries, model: "gpt-6-luna" };
+				},
+			},
+		);
+		expect(calls).toBe(1);
+		expect(preparation?.status).toBe(
+			budget === 1000 ? "budget-required" : "prepare",
+		);
+	}
+	const controller = new AbortController();
+	controller.abort();
+	await expect(
+		chooseContextRepresentations(
+			{ ...request, economics: { minimumReturn: 1.1 }, price: () => 0 },
+			{ ...services({}), signal: controller.signal },
+		),
+	).rejects.toThrow();
 });

@@ -9,6 +9,8 @@ const modules = {
 	"./runs.ts": () => import("../convex/runs"),
 	"./results.ts": () => import("../convex/results"),
 	"./summaries.ts": () => import("../convex/summaries"),
+	"./retrieval.ts": () => import("../convex/retrieval"),
+	"./routeEvaluations.ts": () => import("../convex/routeEvaluations"),
 };
 
 export async function createConvexFixture(

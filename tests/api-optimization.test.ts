@@ -5,6 +5,7 @@ import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import { readRouteStream } from "../src/lib/route-stream";
 import type { RouteResult } from "../src/lib/routing";
 import { createApiFixture } from "./api-fixture";
+import { quality } from "./routing-evidence-fixture";
 
 const summaries = {
 	short: "Доставка занимает 2 рабочих дня.",
@@ -55,11 +56,13 @@ test("real SDK adapters optimize Russian context, reuse summaries within a works
 							{
 								id: "answer",
 								kind: "model",
-								provider: "openai",
-								model: "gpt-6-luna",
+								provider: "google",
+								model: "gemini-3.8-flash",
 								reasoningEffort: "medium",
 								maxOutputTokens: 100,
 								routing: {
+									mode: "evaluate",
+									quality,
 									models: ["gemini-3.8-flash"],
 									expectedOutputTokens: 50,
 									expectedRequests: 1,
@@ -239,6 +242,8 @@ test("OpenAI SDK forwards explicit cache options and stable-prefix breakpoints, 
 								model: "gpt-6-luna",
 								reasoningEffort: "medium",
 								routing: {
+									mode: "evaluate",
+									quality,
 									models: ["gpt-6-luna"],
 									expectedOutputTokens: 50,
 									expectedRequests: 2,

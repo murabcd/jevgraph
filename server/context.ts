@@ -9,6 +9,7 @@ import {
 import type { ChatMessage, NodeOutput } from "../src/lib/routing.ts";
 import type { TokenUsage } from "../src/lib/usage.ts";
 import type { ContextOptimizer } from "./automatic-context.ts";
+import type { RetrievalResult } from "./retrieval.ts";
 import { formattedOutput } from "./upstream-context.ts";
 
 export type RelevanceResult = {
@@ -70,6 +71,7 @@ export async function prepareContext({
 	optimize,
 	price,
 	signal,
+	retrieve,
 }: {
 	nodeId: string;
 	task?: string;
@@ -82,6 +84,11 @@ export async function prepareContext({
 	optimize?: ContextOptimizer;
 	price?: (context: ContextContent) => number;
 	signal?: AbortSignal;
+	retrieve?: (request: {
+		query: string;
+		task: string;
+		documents: ContextDocument[];
+	}) => Promise<RetrievalResult>;
 }): Promise<PreparedContext> {
 	const current = messages.at(-1);
 	if (current?.role !== "user")
@@ -109,24 +116,39 @@ export async function prepareContext({
 	const documentBindings = new Map(
 		policy.documents.map((binding) => [binding.id, binding]),
 	);
-	const documentChunks = documents.map((document): ContextChunk => {
-		const binding = policy.automatic
-			? undefined
-			: documentBindings.get(document.id);
-		if (binding?.representation === "summary" && !document.summary)
-			throw new Error(`Document ${document.name} needs a summary`);
-		return {
-			id: `document:${document.id}`,
-			sourceId: document.id,
-			kind: "document",
-			label: document.name,
-			content:
-				binding?.representation === "summary"
-					? (document.summary ?? "")
-					: document.content,
-			representation: binding?.representation ?? "full",
-		};
-	});
+	if (policy.retrieval && !retrieve)
+		throw new Error("Retrieval is unavailable");
+	const retrieved =
+		policy.retrieval && retrieve
+			? await retrieve({
+					query: current.content,
+					task,
+					documents: documents.filter((document) =>
+						documentBindings.has(document.id),
+					),
+				})
+			: undefined;
+	signal?.throwIfAborted();
+	const documentChunks =
+		retrieved?.chunks ??
+		documents.map((document): ContextChunk => {
+			const binding = policy.automatic
+				? undefined
+				: documentBindings.get(document.id);
+			if (binding?.representation === "summary" && !document.summary)
+				throw new Error(`Document ${document.name} needs a summary`);
+			return {
+				id: `document:${document.id}`,
+				sourceId: document.id,
+				kind: "document",
+				label: document.name,
+				content:
+					binding?.representation === "summary"
+						? (document.summary ?? "")
+						: document.content,
+				representation: binding?.representation ?? "full",
+			};
+		});
 	const chunks = [...history, ...upstream, ...documentChunks];
 	const boundSources = {
 		message: new Set(
@@ -141,7 +163,10 @@ export async function prepareContext({
 					? policy.outputNodeIds
 					: [],
 		),
-		document: new Set(documentBindings.keys()),
+		document: new Set([
+			...documentBindings.keys(),
+			...(retrieved?.chunks.map((chunk) => chunk.sourceId) ?? []),
+		]),
 	};
 	const selections = new Map<string, ContextSelection>();
 	const select = (
@@ -179,6 +204,7 @@ export async function prepareContext({
 			else characters += chunk.content.length;
 		}
 	};
+	let preparation: NodeContextTrace["preparation"];
 	// Bound the source bodies sent for automatic assessment, before compression.
 	enforceBudget(policy.automatic ? 120000 : policy.maxCharacters);
 	if (policy.automatic) {
@@ -186,18 +212,21 @@ export async function prepareContext({
 			(chunk) => selections.get(chunk.id)?.included,
 		);
 		if (candidates.length && optimize) {
-			const choices = await optimize({
+			const optimized = await optimize({
 				nodeId,
 				task,
 				query: current.content,
 				chunks: candidates,
 				minimumConfidence: policy.automatic.minimumConfidence,
+				economics: policy.automatic.economics,
+				maxCharacters: policy.maxCharacters,
 				price: price
 					? (selected) => price(materializeContext(selected, messages, inputs))
 					: undefined,
 			});
+			preparation = optimized.preparation;
 			const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
-			for (const choice of choices) {
+			for (const choice of optimized.choices) {
 				const chunk = byId.get(choice.chunk.id);
 				if (!chunk) continue;
 				Object.assign(chunk, choice.chunk);
@@ -265,6 +294,8 @@ export async function prepareContext({
 			inputs,
 		),
 		trace: {
+			retrieval: retrieved?.trace,
+			preparation,
 			nodeId,
 			callId,
 			characters: chunks.reduce(

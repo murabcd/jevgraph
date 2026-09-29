@@ -7,6 +7,7 @@ import {
 	workflowRoutesSchema,
 } from "../src/lib/routing";
 import { estimateCost } from "../src/lib/usage";
+import { approvedEvidence, quality } from "./routing-evidence-fixture";
 
 const routes: WorkflowRoutes = {
 	kind: "workflow",
@@ -19,6 +20,8 @@ const routes: WorkflowRoutes = {
 			model: "gpt-6-luna",
 			reasoningEffort: "medium",
 			routing: {
+				mode: "automatic",
+				quality,
 				models: ["gemini-3.8-flash"],
 				expectedOutputTokens: 50,
 				expectedRequests: 1,
@@ -43,6 +46,7 @@ test.each([false, true])(
 		const attempts: string[] = [];
 		const selections: RouteSelectionResult[] = [];
 		const run = executeWorkflow({
+			evidenceFor: async () => approvedEvidence,
 			routes,
 			metadata: {},
 			messages: [{ role: "user", content: "Когда приедет заказ?" }],
@@ -104,7 +108,13 @@ test("reasoning and output expectations are validated against all allowed candid
 						model: "gemini-3.8-flash",
 						maxOutputTokens: 100,
 						reasoningEffort,
-						routing: { models, expectedOutputTokens, expectedRequests: 1 },
+						routing: {
+							mode: "automatic",
+							quality,
+							models,
+							expectedOutputTokens,
+							expectedRequests: 1,
+						},
 					}
 				: node,
 		),
@@ -134,6 +144,7 @@ test("automatic execution clears the previous model's custom rates and preserves
 	const before = structuredClone(configured);
 	const usage = { inputTokens: 100, outputTokens: 10 };
 	const result = await executeWorkflow({
+		evidenceFor: async () => approvedEvidence,
 		routes: configured,
 		metadata: {},
 		messages: [{ role: "user", content: "Когда приедет заказ?" }],

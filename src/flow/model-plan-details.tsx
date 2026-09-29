@@ -5,7 +5,8 @@ export function ModelPlanDetails({ plans }: { plans: ModelPlan[] }) {
 	return plans.map((plan) => (
 		<details key={plan.callId} className="rounded-lg border p-3 text-xs">
 			<summary className="cursor-pointer font-medium">
-				Model selection · {plan.selectedModel}
+				{plan.mode === "evaluate" ? "Evaluation" : "Reviewed routing"} ·{" "}
+				{plan.selectedModel}
 			</summary>
 			<div className="mt-3 grid gap-3">
 				<span className="text-muted-foreground">
@@ -18,11 +19,36 @@ export function ModelPlanDetails({ plans }: { plans: ModelPlan[] }) {
 							{quote.model}
 							{quote.model === plan.selectedModel ? " · selected" : ""}
 						</span>
+						{quote.evidence && (
+							<span className="text-muted-foreground">
+								{quote.evidence.cases} distinct cases ·{" "}
+								{Math.round(quote.evidence.passRate * 100)}% passed · p95{" "}
+								{Math.round(quote.evidence.p95LatencyMs)} ms
+							</span>
+						)}
+						{quote.estimatedRouteCostUsd !== undefined && (
+							<span className="text-muted-foreground">
+								Projected full turn:{" "}
+								{formatCostUsd(quote.estimatedRouteCostUsd)} · per passing
+								answer: {formatCostUsd(quote.estimatedCostPerPassUsd ?? 0)}
+							</span>
+						)}
 						{quote.excluded ? (
 							<span className="text-muted-foreground">
-								{quote.excluded === "unavailable"
-									? "Provider unavailable"
-									: "Price unavailable"}
+								{
+									{
+										unavailable: "Provider unavailable",
+										"unknown-price": "Price unavailable",
+										"missing-evidence": "No reviewed evidence",
+										"insufficient-cases": "Too few distinct cases",
+										unreviewed: "Answers awaiting review",
+										quality: "Pass rate below requirement",
+										latency: "Full-turn latency above limit",
+										"incomplete-cost": "Complete-route cost unknown",
+										"different-cases":
+											"Evaluate the same cases for every candidate",
+									}[quote.excluded]
+								}
 							</span>
 						) : (
 							<>

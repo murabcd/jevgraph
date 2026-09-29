@@ -20,6 +20,7 @@ import {
 	routesUseJev,
 } from "../src/lib/routing";
 import { configuredJevQuestion } from "./jev-question-fixture";
+import { quality } from "./routing-evidence-fixture";
 import { connectedWorkflowGraph } from "./workflow-graph";
 
 function roundTripGraph(nodes: FlowNode[], edges: Edge[]) {
@@ -78,6 +79,8 @@ describe("editable chatflow graph", () => {
 					maxOutputTokens: 100,
 					reasoningEffort: "none",
 					routing: {
+						mode: "automatic",
+						quality,
 						models: ["gpt-6-luna"],
 						expectedOutputTokens: 50,
 						expectedRequests: 2,
@@ -91,6 +94,7 @@ describe("editable chatflow graph", () => {
 							nodeId: "model",
 							callId: "1",
 							selectedModel: "gpt-6-luna",
+							mode: "automatic",
 							expectedRequests: 2,
 							estimation: "utf8-estimate",
 							candidates: [],

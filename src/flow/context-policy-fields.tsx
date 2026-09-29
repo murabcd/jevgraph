@@ -9,30 +9,56 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { ConditionalInstructionsFields } from "@/flow/conditional-instructions-fields";
 import { ContextDocumentBindingFields } from "@/flow/context-document-binding-fields";
 import { ContextRelevanceFields } from "@/flow/context-relevance-fields";
+import { ContextRetrievalFields } from "@/flow/context-retrieval-fields";
 import { SelectionRow } from "@/flow/selection-row";
-import type { ContextDocument, ContextPolicy } from "@/lib/context";
+import {
+	type ContextDocument,
+	type ContextPolicy,
+	retainBoundInstructions,
+} from "@/lib/context";
+import type { StartField } from "@/lib/routing";
 
-export type ContextSourceOption = { id: string; name: string };
+export type ContextSourceOption = {
+	id: string;
+	name: string;
+	outputs?: { id: string; label: string }[];
+};
 
 export function ContextPolicyFields({
 	id,
 	value,
-	onChange,
+	onChange: onPolicyChange,
 	sources,
 	documents,
+	fields,
 }: {
 	id: string;
 	value: ContextPolicy;
 	onChange: (policy: ContextPolicy) => void;
 	sources: ContextSourceOption[];
 	documents: ContextDocument[];
+	fields: StartField[];
 }) {
 	const selectedOutputs = new Set(value.outputNodeIds);
+	const onChange = (policy: ContextPolicy) =>
+		onPolicyChange(
+			retainBoundInstructions(
+				policy,
+				fields.map(({ name }) => name),
+				sources.map(({ id }) => id),
+			),
+		);
 	return (
 		<FieldGroup className="gap-4">
 			<span className="text-sm font-medium">Context</span>
+			<ContextRetrievalFields
+				id={id}
+				value={value.retrieval}
+				onChange={(retrieval) => onChange({ ...value, retrieval })}
+			/>
 			<SelectionRow
 				selected={Boolean(value.automatic)}
 				onSelectedChange={(selected) =>
@@ -49,33 +75,85 @@ export function ContextPolicyFields({
 				</span>
 			</SelectionRow>
 			{value.automatic && (
-				<Field>
-					<FieldLabel
-						htmlFor={`${id}-adequacy`}
-						className="text-xs text-muted-foreground"
-					>
-						Minimum adequacy probability (%)
-					</FieldLabel>
-					<Input
-						id={`${id}-adequacy`}
-						inputMode="decimal"
-						value={
-							Number.isFinite(value.automatic.minimumConfidence)
-								? String(value.automatic.minimumConfidence * 100)
-								: ""
-						}
-						onChange={(event) =>
+				<>
+					<Field>
+						<FieldLabel
+							htmlFor={`${id}-adequacy`}
+							className="text-xs text-muted-foreground"
+						>
+							Minimum adequacy probability (%)
+						</FieldLabel>
+						<Input
+							id={`${id}-adequacy`}
+							inputMode="decimal"
+							value={
+								Number.isFinite(value.automatic.minimumConfidence)
+									? String(value.automatic.minimumConfidence * 100)
+									: ""
+							}
+							onChange={(event) =>
+								onChange({
+									...value,
+									automatic: {
+										...value.automatic,
+										minimumConfidence: event.target.value.trim()
+											? Number(event.target.value) / 100
+											: NaN,
+									},
+								})
+							}
+						/>
+					</Field>
+					<SelectionRow
+						selected={Boolean(value.automatic.economics)}
+						onSelectedChange={(selected) =>
 							onChange({
 								...value,
 								automatic: {
-									minimumConfidence: event.target.value.trim()
-										? Number(event.target.value) / 100
-										: NaN,
+									...value.automatic,
+									minimumConfidence: value.automatic?.minimumConfidence ?? 0.9,
+									economics: selected ? { minimumReturn: 1.1 } : undefined,
 								},
 							})
 						}
-					/>
-				</Field>
+					>
+						Prepare when projected savings cover cost
+					</SelectionRow>
+					{value.automatic.economics && (
+						<Field>
+							<FieldLabel
+								htmlFor={`${id}-preparation-return`}
+								className="text-xs text-muted-foreground"
+							>
+								Minimum savings / preparation cost
+							</FieldLabel>
+							<Input
+								id={`${id}-preparation-return`}
+								inputMode="decimal"
+								value={
+									Number.isFinite(value.automatic.economics.minimumReturn)
+										? String(value.automatic.economics.minimumReturn)
+										: ""
+								}
+								onChange={(event) =>
+									onChange({
+										...value,
+										automatic: {
+											...value.automatic,
+											minimumConfidence:
+												value.automatic?.minimumConfidence ?? 0.9,
+											economics: {
+												minimumReturn: event.target.value.trim()
+													? Number(event.target.value)
+													: NaN,
+											},
+										},
+									})
+								}
+							/>
+						</Field>
+					)}
+				</>
 			)}
 			<Field>
 				<FieldLabel
@@ -216,7 +294,7 @@ export function ContextPolicyFields({
 				id={id}
 				documents={documents}
 				value={value.documents}
-				automatic={Boolean(value.automatic)}
+				automatic={Boolean(value.automatic || value.retrieval)}
 				onChange={(documents) => onChange({ ...value, documents })}
 			/>
 			{!value.automatic && (
@@ -226,6 +304,17 @@ export function ContextPolicyFields({
 					onChange={(relevance) => onChange({ ...value, relevance })}
 				/>
 			)}
+			<ConditionalInstructionsFields
+				id={id}
+				value={value.instructions ?? []}
+				fields={fields}
+				sources={sources.filter(
+					(source) =>
+						value.upstream === "all" ||
+						(value.upstream === "selected" && selectedOutputs.has(source.id)),
+				)}
+				onChange={(instructions) => onChange({ ...value, instructions })}
+			/>
 		</FieldGroup>
 	);
 }

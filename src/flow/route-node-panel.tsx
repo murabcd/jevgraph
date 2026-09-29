@@ -11,16 +11,19 @@ import { JevQuestionEditor } from "@/flow/jev-question-editor";
 import { NodeRunDetails } from "@/flow/node-run-details";
 import { NodeTimerLabel } from "@/flow/node-timer-label";
 import { PromptEditor } from "@/flow/prompt-editor";
+import { RouteEvaluationReview } from "@/flow/route-evaluation-review";
 import { StartEditor } from "@/flow/start-editor";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
 import type { ContextDocument } from "@/lib/context";
 import type { StartField } from "@/lib/routing";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type EditorActions = Pick<
 	ReturnType<typeof useRoutingGraph>,
 	"onModelSettingsChange" | "onQuestionChange" | "onStartFieldsChange"
 >;
 type PanelProps = {
+	conversationId: Id<"conversations">;
 	id: string;
 	data: FlowNode["data"];
 	title: string;
@@ -37,10 +40,15 @@ type EditProps = Omit<PanelProps, "view"> & {
 };
 
 function LastTurnPanel({
+	id,
+	conversationId,
 	data,
 	title,
 	onOpenChange,
-}: Pick<EditProps, "data" | "title" | "onOpenChange">) {
+}: Pick<
+	EditProps,
+	"id" | "conversationId" | "data" | "title" | "onOpenChange"
+>) {
 	return (
 		<Sheet
 			modal={false}
@@ -65,17 +73,26 @@ function LastTurnPanel({
 						{data.decision && (
 							<p className="mb-4 text-sm">Jev decision: {data.decision}</p>
 						)}
+						{data.output && (
+							<pre className="whitespace-pre-wrap wrap-break-word font-sans text-sm leading-6">
+								{data.output}
+							</pre>
+						)}
+						{(data.kind === "openai" || data.kind === "google") &&
+							data.routing && (
+								<RouteEvaluationReview
+									key={`${conversationId}:${id}`}
+									conversationId={conversationId}
+									nodeId={id}
+									output={data.output}
+								/>
+							)}
 						<NodeRunDetails
 							contexts={data.contexts}
 							modelPlans={data.modelPlans}
 							calls={data.calls}
 							decision={data.decisionDetails}
 						/>
-						{data.output && (
-							<pre className="whitespace-pre-wrap wrap-break-word font-sans text-sm leading-6">
-								{data.output}
-							</pre>
-						)}
 					</div>
 				</ScrollArea>
 			</SheetContent>

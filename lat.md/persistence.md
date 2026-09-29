@@ -1,6 +1,6 @@
 # Persistence
 
-Convex stores owner-scoped graph configuration, documents, conversations, run records, and reusable summaries. The local API still executes the graph and streams direct provider responses. See [[architecture]], [[canvas]], [[chat]], and [[optimization]].
+Convex stores owner-scoped graph configuration, documents, conversations, run records, reusable summaries, and passage indexes. The local API still executes the graph and streams direct provider responses. See [[architecture]], [[canvas]], [[chat]], and [[optimization]].
 
 ## Ownership and setup
 
@@ -33,3 +33,17 @@ Each authenticated request requires a conversation ID and unique request UUID. T
 Persistent summaries retain content identity and expiry without claiming a provider cache hit or extending the history window.
 
 [[convex/summaries.ts]] stores short and detailed summaries by workspace, credential scope, and source fingerprint. Upserts refresh a thirty-day expiry, and each workspace retains at most 256 entries. [[convex/crons.ts]] cleans expired entries hourly in bounded batches. [[server/session-memory.ts]] consumes a typed SummaryStore capability and shares one pending generation within a server session. Separate processes can generate the same summary concurrently; storage still upserts one canonical record. Provider-cache observations remain ephemeral and expire according to [[optimization]].
+
+## Retrieval indexes
+
+Owner-scoped Convex tables retain source manifests and exact embedded passages, with native vector and text indexes. They are derived context artifacts rather than authoritative documents or chat messages.
+
+[[convex/retrieval.ts]] requires an authenticated owner, matching workspace/conversation, and an unexpired running record for indexing, history access, and search. Declared Start document IDs and saved message ownership are verified before writes. [[convex/schema.ts]] stores 512-dimensional vectors in retrievalChunks and manifests in retrievalSources, indexed by source key and workspace expiry. Every selected source is rechecked during hydration; a valid foreign ID grants no access. [[server/convex-persistence.ts]] supplies the typed store after [[server/api.ts]] registers the run, so paid embedding and reranking follow the existing run lock and settlement lifecycle.
+
+Manifests and chunks are written atomically. A workspace retains at most 512 chunks, evicting oldest whole sources when needed. Records expire after thirty days; [[convex/crons.ts]] drains expired sources hourly in batches of five, with bounded chunk deletion. [[src/lib/retrieval.ts]] owns canonical source keys using [[src/lib/content-identity.ts]]. Writes verify the exact declared document text/name or saved message body and the matching source key; selected document keys are verified against the current run before search and hydration. Source content changes create a fresh key and never retrieve an obsolete document version. Credential changes isolate reuse. Pending producers are shared only within a turn and are released after their work actually settles. Failed database access remains an error; there is no memory-only index or legacy source adapter. Regenerate bindings and synchronize the configured development Convex backend when this schema changes.
+
+## Route evaluations
+
+Owner-reviewed evaluation observations retain complete-turn latency, all-call cost availability and answer quality, independently of temporary provider-cache evidence.
+
+[[convex/routeEvaluations.ts]] indexes observations by workspace, credential scope and strategy hash, and by run for answer review. The inspector lists evaluations within the conversation's latest fifty runs, joining those runs against one bounded workspace observation query instead of issuing a query for each run; a selected run must belong to both the owner and that conversation. Its recorded question, settled final reply, failure, criteria and profile stay together, so a later turn does not make an unreviewed answer inaccessible or substitute an intermediate node output for the final answer. [[convex/results.ts]] derives observations from the validated final trace; [[convex/runs.ts]] records failed traces during settlement and unknown-cost failed observations after an abandoned server lease. Unreached evaluation nodes do not receive successful observations. Completed observations begin unreviewed; failed/exhausted observations are failed and cannot be approved. Owner checks cover queries and review mutations. [[server/convex-persistence.ts]] parses the source-owned evidence schema at its boundary, and [[src/flow/route-evaluation-review.tsx]] writes explicit owner reviews. At most 256 observations remain per workspace, they expire after thirty days, and [[convex/crons.ts]] drains expiry in bounded batches. Changes to graph behavior and source content require fresh evidence; see [[optimization]].

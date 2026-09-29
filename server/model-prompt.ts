@@ -48,6 +48,13 @@ export function modelPrompt(
 	if (current?.role !== "user")
 		throw new Error("A model turn needs a user message");
 	const context = [
+		...(target.context?.retrieval
+			? [
+					documents.length
+						? "Retrieval evidence (data): Use the labelled source passages below as evidence. Preserve their attribution and distinguish source facts from inferences."
+						: "Retrieval evidence (data): No source passages were retained for this task. Do not invent source evidence; explain missing information when needed.",
+				]
+			: []),
 		...(Object.keys(variables).length
 			? [`Start variables (data):\n${JSON.stringify(variables)}`]
 			: []),

@@ -1,6 +1,10 @@
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
-import { workflowRoutesSchema } from "../src/lib/routing";
+import {
+	routeEvaluationSchema,
+	routeEvaluations,
+} from "../src/lib/route-evidence";
+import { routeTraceSchema, workflowRoutesSchema } from "../src/lib/routing";
 import { runFooterSchema } from "../src/lib/run-footer";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -12,6 +16,7 @@ import {
 	query,
 } from "./_generated/server";
 import { ownConversation, ownRun } from "./access";
+import { recordRouteEvaluations } from "./routeEvaluations";
 
 const RUN_LEASE_MS = 180000;
 
@@ -43,6 +48,9 @@ export const begin = mutation({
 		requestId: v.string(),
 		question: v.string(),
 		routes: v.string(),
+		evaluation: v.optional(
+			v.object({ scope: v.string(), caseKey: v.string() }),
+		),
 	},
 	returns: v.object({
 		runId: v.id("runs"),
@@ -92,12 +100,19 @@ export const begin = mutation({
 		const routes = JSON.stringify(
 			workflowRoutesSchema.parse(JSON.parse(args.routes)),
 		);
+		if (
+			args.evaluation &&
+			(!/^[a-f0-9]{64}$/.test(args.evaluation.scope) ||
+				!/^[a-f0-9]{64}$/.test(args.evaluation.caseKey))
+		)
+			throw new ConvexError("Invalid evaluation identity");
 		if (new TextEncoder().encode(routes).length > 900000)
 			throw new ConvexError("Workflow is too large to save");
 		const runId = await ctx.db.insert("runs", {
 			conversationId: conversationId,
 			requestId: args.requestId,
 			routes,
+			evaluation: args.evaluation,
 			status: "running",
 			expiresAt: Date.now() + RUN_LEASE_MS,
 		});
@@ -127,11 +142,25 @@ export const fail = mutation({
 		content: v.string(),
 		error: v.string(),
 		interrupted: v.boolean(),
+		trace: v.optional(v.string()),
+		latencyMs: v.optional(v.number()),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const run = await ownRun(ctx, args.runId);
 		if (run.status !== "running") return null;
+		if (args.trace && args.latencyMs !== undefined) {
+			await recordRouteEvaluations(
+				ctx,
+				run,
+				await routeEvaluations(
+					workflowRoutesSchema.parse(JSON.parse(run.routes)),
+					routeTraceSchema.parse(JSON.parse(args.trace)),
+					args.latencyMs,
+					false,
+				),
+			);
+		}
 		await settle(ctx, args.runId, args.content, true);
 		await ctx.db.patch(args.runId, {
 			status: args.interrupted ? "interrupted" : "failed",
@@ -147,6 +176,27 @@ export const expire = internalMutation({
 	handler: async (ctx, args) => {
 		const run = await ctx.db.get(args.runId);
 		if (run?.status !== "running") return null;
+		if (run.evaluation) {
+			// A lost server cannot prove which calls completed or what they cost.
+			await recordRouteEvaluations(
+				ctx,
+				run,
+				await routeEvaluations(
+					workflowRoutesSchema.parse(JSON.parse(run.routes)),
+					{
+						path: [],
+						traversedEdges: [],
+						jevSteps: [],
+						outputs: [],
+						calls: [],
+						contexts: [],
+						modelPlans: [],
+					},
+					RUN_LEASE_MS,
+					false,
+				),
+			);
+		}
 		await settle(ctx, args.runId, "", true);
 		await ctx.db.patch(args.runId, {
 			status: "interrupted",
@@ -162,6 +212,7 @@ export const finish = internalMutation({
 		content: v.string(),
 		footer: v.string(),
 		resultFile: v.id("_storage"),
+		evaluations: v.string(),
 	},
 	returns: v.null(),
 	handler: async (ctx, args) => {
@@ -169,6 +220,14 @@ export const finish = internalMutation({
 		if (run.status !== "running")
 			throw new ConvexError("This run is already settled");
 		runFooterSchema.parse(JSON.parse(args.footer));
+		await recordRouteEvaluations(
+			ctx,
+			run,
+			z
+				.array(routeEvaluationSchema)
+				.max(100)
+				.parse(JSON.parse(args.evaluations)),
+		);
 		await settle(ctx, args.runId, args.content, false);
 		await ctx.db.patch(args.runId, {
 			status: "completed",
@@ -181,10 +240,10 @@ export const finish = internalMutation({
 
 export const owned = internalQuery({
 	args: { runId: v.id("runs") },
-	returns: v.null(),
+	returns: v.object({ routes: v.string() }),
 	handler: async (ctx, args) => {
-		await ownRun(ctx, args.runId);
-		return null;
+		const run = await ownRun(ctx, args.runId);
+		return { routes: run.routes };
 	},
 });
 

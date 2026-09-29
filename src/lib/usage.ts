@@ -31,7 +31,14 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 export const providerCallSchema = z.strictObject({
 	id: z.string(),
 	nodeId: z.string(),
-	purpose: z.enum(["model", "decision", "context", "summary"]),
+	purpose: z.enum([
+		"model",
+		"decision",
+		"context",
+		"summary",
+		"embedding",
+		"rerank",
+	]),
 	provider: z.enum(["openai", "google", "jev"]),
 	model: z.string(),
 	status: z.enum(["completed", "failed"]),

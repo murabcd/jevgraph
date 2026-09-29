@@ -41,6 +41,7 @@ import {
 	type ContextPolicy,
 	contextPolicySchema,
 	DEFAULT_CONTEXT_POLICY,
+	retainBoundInstructions,
 } from "@/lib/context";
 import {
 	configuredJevQuestionSchema,
@@ -351,6 +352,7 @@ export function JevQuestionEditor({
 	);
 	const [repeatDraft, setRepeatDraft] = useState(maxRepeats);
 	const [variablesDraft, setVariablesDraft] = useState(variables);
+	const selectedVariableNames = new Set(variablesDraft);
 	const [error, setError] = useState("");
 	const [contextDraft, setContextDraft] = useState(
 		context ?? DEFAULT_CONTEXT_POLICY,
@@ -483,7 +485,16 @@ export function JevQuestionEditor({
 						<StartVariableBinding
 							fields={fields}
 							selected={variablesDraft}
-							onChange={setVariablesDraft}
+							onChange={(variables) => {
+								setVariablesDraft(variables);
+								setContextDraft((policy) =>
+									retainBoundInstructions(
+										policy,
+										variables,
+										contextSources.map(({ id }) => id),
+									),
+								);
+							}}
 						/>
 						{draft.type === "choice" && (
 							<ChoiceFields question={draft} onChange={setDraft} />
@@ -586,6 +597,9 @@ export function JevQuestionEditor({
 							</Field>
 						)}
 						<ContextPolicyFields
+							fields={fields.filter((field) =>
+								selectedVariableNames.has(field.name),
+							)}
 							id="jev"
 							value={contextDraft}
 							onChange={setContextDraft}

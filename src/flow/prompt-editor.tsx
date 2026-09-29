@@ -45,6 +45,7 @@ import {
 	type ContextPolicy,
 	contextPolicySchema,
 	DEFAULT_CONTEXT_POLICY,
+	retainBoundInstructions,
 } from "@/lib/context";
 import { publishedPricing } from "@/lib/model-pricing";
 import {
@@ -108,6 +109,7 @@ export function PromptEditor({
 	);
 	const [draftModel, setDraftModel] = useState(modelId);
 	const [variablesDraft, setVariablesDraft] = useState(variables);
+	const selectedVariableNames = new Set(variablesDraft);
 	const [outputTokensDraft, setOutputTokensDraft] = useState(
 		String(maxOutputTokens),
 	);
@@ -204,6 +206,7 @@ export function PromptEditor({
 						<ModelRoutingFields
 							id={id}
 							value={routingDraft}
+							modelId={selectedModel?.id ?? "gpt-6-luna"}
 							maxOutputTokens={Number(outputTokensDraft)}
 							onChange={(routing) => {
 								setRoutingDraft(routing);
@@ -241,7 +244,16 @@ export function PromptEditor({
 						<StartVariableBinding
 							fields={fields}
 							selected={variablesDraft}
-							onChange={setVariablesDraft}
+							onChange={(variables) => {
+								setVariablesDraft(variables);
+								setContextDraft((policy) =>
+									retainBoundInstructions(
+										policy,
+										variables,
+										contextSources.map(({ id }) => id),
+									),
+								);
+							}}
 						/>
 						<Field>
 							<FieldLabel
@@ -266,6 +278,9 @@ export function PromptEditor({
 							onMessagesChange={setMessagesDraft}
 						/>
 						<ContextPolicyFields
+							fields={fields.filter((field) =>
+								selectedVariableNames.has(field.name),
+							)}
 							id={id}
 							value={contextDraft}
 							onChange={setContextDraft}
@@ -332,10 +347,12 @@ export function PromptEditor({
 							if (
 								!parsedRouting.success ||
 								(parsedRouting.data &&
-									parsedRouting.data.expectedOutputTokens > parsed.data)
+									(parsedRouting.data.expectedOutputTokens > parsed.data ||
+										(parsedRouting.data.mode === "evaluate" &&
+											!parsedRouting.data.models.includes(draftModel))))
 							) {
 								setError(
-									"Choose at least one model, expected output within the output limit, and 1–20 requests.",
+									"Check selected models, review criteria, 5–100 distinct cases, 50–100% pass rate, latency 100–120,000 ms, expected output within the output limit, and 1–20 requests. Evaluation requires the selected model in the allowed list.",
 								);
 								return;
 							}

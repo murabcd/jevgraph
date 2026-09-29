@@ -11,7 +11,9 @@ import {
 import { Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MAX_GRAPH_NODES } from "@/lib/graph-snapshot";
+import { questionOutputs } from "@/lib/jev-question";
 import type { NodeTimer } from "@/lib/node-timer";
+import type { Id } from "../../convex/_generated/dataModel";
 import "@xyflow/react/dist/style.css";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
@@ -52,6 +54,7 @@ import type { RouteTrace } from "@/lib/routing";
 const nodeTypes = { route: RouteNode, "node-picker": NodeConnectionPicker };
 
 type RoutingCanvasProps = {
+	conversationId: Id<"conversations">;
 	graph: ReturnType<typeof useRoutingGraph>;
 	result: RouteTrace | null;
 	timings: Record<string, NodeTimer>;
@@ -63,6 +66,7 @@ type RoutingCanvasProps = {
 };
 
 export function RoutingCanvas({
+	conversationId,
 	graph,
 	result,
 	timings,
@@ -242,6 +246,7 @@ export function RoutingCanvas({
 			{panelNode?.type === "route" && activePanel && (
 				<RouteNodePanel
 					key={panelNode.id}
+					conversationId={conversationId}
 					id={panelNode.id}
 					data={panelNode.data}
 					title={nodeTitle(panelNode.data)}
@@ -264,6 +269,10 @@ export function RoutingCanvas({
 						.map((node) => ({
 							id: node.id,
 							name: `${nodeTitle(node.data)} · ${node.id}`,
+							outputs:
+								node.data.kind === "jev"
+									? questionOutputs(node.data.question)
+									: undefined,
 						}))}
 					onClose={() => setPanel(null)}
 					actions={graph}

@@ -114,6 +114,15 @@ export function useRoutingGraph(workspace: Workspace) {
 											documents: node.data.context.documents.filter(({ id }) =>
 												documentIds.has(id),
 											),
+											instructions: node.data.context.instructions?.filter(
+												({ condition }) =>
+													condition.kind !== "variable" ||
+													fields.some(
+														(field) =>
+															field.name === condition.name &&
+															field.type === typeof condition.value,
+													),
+											),
 										}
 									: undefined,
 								variables: node.data.variables?.filter((name) =>
@@ -134,6 +143,9 @@ export function useRoutingGraph(workspace: Workspace) {
 			const currentQuestion = nodes.find((node) => node.id === nodeId)?.data
 				.question;
 			if (!currentQuestion) return;
+			const outputIds = new Set(
+				questionOutputs(nextQuestion).map(({ id }) => id),
+			);
 			setNodes((current) =>
 				current.map((node) =>
 					node.id === nodeId && node.data.kind === "jev"
@@ -149,7 +161,23 @@ export function useRoutingGraph(workspace: Workspace) {
 										: undefined,
 								},
 							}
-						: node,
+						: node.data.kind !== "input" && node.data.context
+							? {
+									...node,
+									data: {
+										...node.data,
+										context: {
+											...node.data.context,
+											instructions: node.data.context.instructions?.filter(
+												({ condition }) =>
+													condition.kind !== "decision" ||
+													condition.nodeId !== nodeId ||
+													outputIds.has(condition.outputId),
+											),
+										},
+									},
+								}
+							: node,
 				),
 			);
 			setGraphEdges((current) =>

@@ -7,6 +7,10 @@ import { type JevQuestion, questionOutputs } from "../src/lib/jev-question.ts";
 import type { CacheMode, ModelPlan } from "../src/lib/model-routing.ts";
 import { textModels } from "../src/lib/models.ts";
 import {
+	type RouteEvidence,
+	routeEvidenceKey,
+} from "../src/lib/route-evidence.ts";
+import {
 	type ChatMessage,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	JEV_MODEL_ID,
@@ -30,8 +34,8 @@ import { runWithOneFallback } from "./model-failover.ts";
 import {
 	type ModelPlanningRequest,
 	observeModelCache,
-	planModel,
 } from "./model-planner.ts";
+import { prepareModelExecution } from "./model-preparation.ts";
 import { type ContextProviders, prepareNodeContext } from "./node-context.ts";
 import { ProviderLedger } from "./provider-ledger.ts";
 import { SessionMemory, type SummaryStore } from "./session-memory.ts";
@@ -85,6 +89,7 @@ type Execution = {
 	contextProviders?: ContextProviders;
 	memory?: SessionMemory;
 	summaryStore?: SummaryStore;
+	evidenceFor?: (key: string) => Promise<RouteEvidence[]>;
 	availableModels?: ReadonlySet<string>;
 	evaluate: (
 		nodeId: string,
@@ -173,6 +178,7 @@ export async function executeWorkflow({
 	contextProviders,
 	memory = new SessionMemory(),
 	summaryStore,
+	evidenceFor,
 	availableModels = new Set(textModels.map((model) => model.id)),
 	evaluate,
 	runModel,
@@ -202,6 +208,7 @@ export async function executeWorkflow({
 	const calls = ledger.calls;
 	const contexts: NodeContextTrace[] = [];
 	const modelPlans: ModelPlan[] = [];
+	const evidenceByNode = new Map<string, Promise<RouteEvidence[]>>();
 	const revisions = new Map<string, number>();
 	let exhausted: Terminal | undefined;
 	const terminals: Terminal[] = [];
@@ -324,7 +331,10 @@ export async function executeWorkflow({
 							() =>
 								evaluate(
 									id,
-									node.question,
+									{
+										...node.question,
+										instructions: context.instructions,
+									},
 									workflowRoutingState(
 										context.messages,
 										selectedVariables(startVariables, node.variables),
@@ -442,27 +452,40 @@ export async function executeWorkflow({
 						const actual = byId.get(model.nodeId);
 						if (actual?.kind !== "model")
 							throw new Error("Model node is missing");
-						const context = await contextFor(actual, inputs, callId);
-						const variables = selectedVariables(
-							startVariables,
-							model.variables,
-						);
-						let quote: ModelPlan["candidates"][number] | undefined;
-						if (model.routing) {
-							const planned = planModel(
-								{ target: model, context, variables },
-								memory,
-								availableModels,
-								callId,
-							);
-							planned.plan.preparationCostUsd = ledger.preparationCost(
-								model.nodeId,
-							);
-							modelPlans.push(planned.plan);
-							quote = planned.quote;
-							model = planned.target;
-							onProgress(trace());
+						let evidence: RouteEvidence[] = [];
+						if (actual.routing?.mode === "automatic" && evidenceFor) {
+							const pending =
+								evidenceByNode.get(actual.id) ??
+								routeEvidenceKey(routes, actual.id, documents).then(
+									evidenceFor,
+								);
+							evidenceByNode.set(actual.id, pending);
+							evidence = await pending;
 						}
+						const prepared = await prepareModelExecution(
+							{
+								node: actual,
+								callId,
+								messages,
+								inputs,
+								documents,
+								variables: startVariables,
+								evidence,
+							},
+							{
+								memory,
+								summaryStore,
+								availableModels,
+								ledger,
+								providers: contextProviders,
+								signal,
+							},
+						);
+						const { context, variables, quote } = prepared;
+						contexts.push(context.trace);
+						if (prepared.plan) modelPlans.push(prepared.plan);
+						model = prepared.target;
+						onProgress(trace());
 						usedTarget = model;
 						if (canStream) {
 							const route = selection(model);

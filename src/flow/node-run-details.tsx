@@ -75,6 +75,53 @@ export function NodeRunDetails({
 						characters
 					</summary>
 					<div className="mt-3 grid gap-3">
+						{context.preparation && (
+							<p className="text-muted-foreground">
+								Preparation: {context.preparation.status} · cold estimate{" "}
+								{context.preparation.estimatedCostUsd === undefined
+									? "unknown"
+									: formatCostUsd(context.preparation.estimatedCostUsd)}{" "}
+								· optimistic savings{" "}
+								{context.preparation.optimisticSavingsUsd === undefined
+									? "unknown"
+									: formatCostUsd(context.preparation.optimisticSavingsUsd)}
+							</p>
+						)}
+						{context.instructions?.map((instruction) => (
+							<p key={instruction.id}>
+								{instruction.name} ·{" "}
+								{instruction.active ? "active" : "inactive"}
+							</p>
+						))}
+						{context.retrieval && (
+							<div className="grid gap-2">
+								<p className="font-medium">
+									Retrieval · {context.retrieval.sources} sources · reranking{" "}
+									{context.retrieval.reranking}
+								</p>
+								{context.retrieval.historyLimited && (
+									<p className="text-muted-foreground">
+										History search reached its configured limit.
+									</p>
+								)}
+								{context.retrieval.error && (
+									<p className="text-destructive">{context.retrieval.error}</p>
+								)}
+								{context.retrieval.candidates.map((candidate) => (
+									<p key={candidate.id} className="text-muted-foreground">
+										{candidate.label} · {candidate.start}–{candidate.end} · rank{" "}
+										{candidate.rank}
+										{candidate.grade === undefined
+											? ""
+											: ` · grade ${candidate.grade.toFixed(2)}`}
+										{candidate.confidence === undefined
+											? ""
+											: ` · confidence ${Math.round(candidate.confidence * 100)}%`}{" "}
+										· {candidate.selected ? "selected" : "omitted"}
+									</p>
+								))}
+							</div>
+						)}
 						{context.chunks.length === 0 && (
 							<p className="text-muted-foreground">Current query only.</p>
 						)}
