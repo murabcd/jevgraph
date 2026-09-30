@@ -334,13 +334,12 @@ export async function handleApi(
 		const input = replay
 			? await resolveReplay(persistence, replay)
 			: routeRequestSchema.parse(JSON.parse(bodyText));
-		const credentialScope = contentFingerprint(
-			JSON.stringify([
-				keys.TYPESAFE_API_KEY,
-				keys.OPENAI_API_KEY,
-				keys.GOOGLE_GENERATIVE_AI_API_KEY,
-			]),
-		);
+		const credentials = [
+			keys.TYPESAFE_API_KEY,
+			keys.OPENAI_API_KEY,
+			keys.GOOGLE_GENERATIVE_AI_API_KEY,
+		];
+		const credentialScope = contentFingerprint(JSON.stringify(credentials));
 		const start = input.routes.nodes.find((node) => node.kind === "input");
 		const resolvedDocuments = resolveContextDocuments(
 			start?.kind === "input" ? (start.documents ?? []) : [],
@@ -391,9 +390,7 @@ export async function handleApi(
 		};
 		const executionStarted = performance.now();
 		const providerEvidence = new ProviderEvidence(
-			Object.values(keys).filter(
-				(value): value is string => value !== undefined,
-			),
+			credentials.filter((value): value is string => value !== undefined),
 		);
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {

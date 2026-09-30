@@ -117,8 +117,15 @@ test("the real TypeSafe SDK batches relevance and reports all evaluation usage t
 	expect(JSON.stringify(artifact)).not.toContain("test-key");
 });
 
-test("the real Gemini SDK preserves cached and reasoning token details in workflow accounting", async () => {
+test("environment values preserve node identities, timing and accounting through the Gemini SDK", async () => {
 	const fixture = await createApiFixture();
+	const nodeId = "b25420ec-c2bc-4f82-a0a8-9de442e8eff6";
+	const keys = {
+		GOOGLE_GENERATIVE_AI_API_KEY: "test-key",
+		MallocNanoZone: "0",
+		SHLVL: "1",
+		XPC_SERVICE_NAME: "0",
+	};
 	const response = await handleApi(
 		new Request("http://localhost/api/route", {
 			method: "POST",
@@ -131,19 +138,19 @@ test("the real Gemini SDK preserves cached and reasoning token details in workfl
 					nodes: [
 						{ id: "input", kind: "input", fields: [] },
 						{
-							id: "answer",
+							id: nodeId,
 							kind: "model",
 							provider: "google",
 							model: "gemini-3.8-flash",
 							maxOutputTokens: 100,
 						},
 					],
-					edges: [{ id: "entry", source: "input", target: "answer" }],
+					edges: [{ id: `input-${nodeId}`, source: "input", target: nodeId }],
 				},
 			}),
 		}),
 		{
-			keys: { GOOGLE_GENERATIVE_AI_API_KEY: "test-key" },
+			keys,
 			connect: fixture.connect,
 			providerFetch: async () =>
 				new Response(
@@ -153,9 +160,17 @@ test("the real Gemini SDK preserves cached and reasoning token details in workfl
 		},
 	);
 	let result: RouteResult | undefined;
+	const timers: string[] = [];
 	await readRouteStream(response, (event) => {
+		if (event.type === "node-start") timers.push(event.nodeId);
+		if (event.type === "timing") timers.push(event.timing.nodeId);
 		if (event.type === "done") result = event.route;
 	});
+	expect(timers).toEqual(["input", nodeId, nodeId]);
+	expect(result?.nodeId).toBe(nodeId);
+	expect(result?.path).toEqual([{ nodeId: "input" }, { nodeId }]);
+	expect(result?.traversedEdges[0].id).toBe(`input-${nodeId}`);
+	expect(result?.calls[0].nodeId).toBe(nodeId);
 	expect(result?.text).toBe("Hello");
 	expect(result?.usage).toMatchObject({
 		inputTokens: 100,
@@ -167,6 +182,16 @@ test("the real Gemini SDK preserves cached and reasoning token details in workfl
 	});
 	expect(result?.calls).toHaveLength(1);
 	expect(result?.usage.estimatedCostUsd).toBeCloseTo(0.00014175, 10);
+	const artifact = await fixture.t.run(async (ctx) => {
+		const run = await ctx.db.query("runs").first();
+		if (!run?.resultFile) throw new Error("Artifact missing");
+		const file = await ctx.storage.get(run.resultFile);
+		if (!file) throw new Error("Artifact bytes missing");
+		return runArtifactSchema.parse(JSON.parse(await file.text()));
+	});
+	expect(artifact.status === "completed" && artifact.result).toEqual(result);
+	expect(artifact.coverage).toBe("complete");
+	expect(artifact.providerEvidence[0].endpoint).toContain("gemini-3.8-flash");
 });
 
 test("Luna Max reaches the Responses API and uses published cache read/write rates", async () => {
