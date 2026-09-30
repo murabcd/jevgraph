@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useMemo } from "react";
 import useSWR from "swr";
 import type { ChatTurn } from "@/chat/types";
+import { settledNodeTimers } from "@/lib/node-timer";
 import { artifactTrace } from "@/lib/run-artifact";
 import { loadRunArtifact } from "@/lib/run-artifact-load";
 import { runFooterSchema } from "@/lib/run-footer";
@@ -25,6 +26,11 @@ export function useSavedConversation(
 	const start = useMutation(api.conversations.start);
 	const open = useMutation(api.conversations.open);
 	const { data, error } = useSWR(latest?.resultUrl ?? null, loadRunArtifact);
+	const trace = useMemo(
+		() => (latest?.routes === routeKey && data ? artifactTrace(data) : null),
+		[latest?.routes, routeKey, data],
+	);
+	const nodeTimings = useMemo(() => settledNodeTimers(trace), [trace]);
 	const messages = useMemo(
 		() =>
 			turns?.map(
@@ -42,7 +48,8 @@ export function useSavedConversation(
 			latest?.routes === routeKey && data?.status === "completed"
 				? data.result
 				: null,
-		trace: latest?.routes === routeKey && data ? artifactTrace(data) : null,
+		trace,
+		nodeTimings,
 		error: error instanceof Error ? error.message : (latest?.error ?? ""),
 		history: history ?? [],
 		start: () => start({ workspaceId: workspace.id }),

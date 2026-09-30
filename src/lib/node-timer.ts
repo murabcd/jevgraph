@@ -1,4 +1,4 @@
-import type { NodeTiming, RouteStreamEvent } from "./routing.ts";
+import type { NodeTiming, RouteStreamEvent, RouteTrace } from "./routing.ts";
 
 export type NodeTimer = Omit<NodeTiming, "status"> & {
 	status: NodeTiming["status"] | "running" | "interrupted";
@@ -19,6 +19,30 @@ export function nodeTimerDuration(timer: NodeTimer, now: number): number {
 			? Math.max(0, now - timer.startedAt)
 			: 0)
 	);
+}
+
+/** Settled durations use the persisted provider ledger, never browser clocks. */
+export function settledNodeTimers(
+	trace: RouteTrace | null,
+): Record<string, NodeTimer> {
+	const timers: Record<string, NodeTimer> = {};
+	if (trace?.path.some((step) => step.nodeId === "input"))
+		timers.input = {
+			nodeId: "input",
+			durationMs: 0,
+			attempts: 1,
+			status: "completed",
+		};
+	for (const call of trace?.calls ?? []) {
+		const current = timers[call.nodeId];
+		timers[call.nodeId] = {
+			nodeId: call.nodeId,
+			durationMs: (current?.durationMs ?? 0) + call.durationMs,
+			attempts: (current?.attempts ?? 0) + 1,
+			status: call.status,
+		};
+	}
+	return timers;
 }
 
 export function applyNodeTimerEvent(

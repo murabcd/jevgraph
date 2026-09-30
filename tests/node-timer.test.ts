@@ -3,7 +3,60 @@ import {
 	applyNodeTimerEvent,
 	interruptNodeTimers,
 	nodeTimerDuration,
+	settledNodeTimers,
 } from "../src/lib/node-timer";
+import { routeTraceSchema } from "../src/lib/routing";
+import { emptyRouteTrace } from "../src/lib/run-artifact";
+import type { ProviderCall } from "../src/lib/usage";
+
+test("settled clocks restore preparation, repeated generation and failed backups from saved evidence", () => {
+	const call = (
+		nodeId: string,
+		purpose: ProviderCall["purpose"],
+		durationMs: number,
+		status: ProviderCall["status"] = "completed",
+	): ProviderCall => ({
+		id: crypto.randomUUID(),
+		nodeId,
+		purpose,
+		durationMs,
+		status,
+		provider: "openai",
+		model: "gpt-6-luna",
+	});
+	const trace = {
+		...emptyRouteTrace(),
+		path: [{ nodeId: "input" }, { nodeId: "primary" }, { nodeId: "backup" }],
+		calls: [
+			call("primary", "embedding", 50),
+			call("primary", "model", 900),
+			call("primary", "model", 300, "failed"),
+			call("backup", "model", 600, "failed"),
+		],
+	};
+	const restored = settledNodeTimers(
+		routeTraceSchema.parse(JSON.parse(JSON.stringify(trace))),
+	);
+	expect(restored).toEqual({
+		input: { nodeId: "input", durationMs: 0, attempts: 1, status: "completed" },
+		primary: {
+			nodeId: "primary",
+			durationMs: 1250,
+			attempts: 3,
+			status: "failed",
+		},
+		backup: {
+			nodeId: "backup",
+			durationMs: 600,
+			attempts: 1,
+			status: "failed",
+		},
+	});
+	expect(nodeTimerDuration(restored.primary, 100000)).toBe(1250);
+	expect(restored.unreached).toBeUndefined();
+	expect(settledNodeTimers(null)).toEqual({});
+	expect(settledNodeTimers(emptyRouteTrace())).toEqual({});
+});
 
 test("live time settles to server time without double-counting repeat attempts", () => {
 	const start = { type: "node-start", nodeId: "model" } as const;

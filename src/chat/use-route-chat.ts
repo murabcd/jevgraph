@@ -6,6 +6,7 @@ import {
 	applyNodeTimerEvent,
 	interruptNodeTimers,
 	type NodeTimer,
+	settledNodeTimers,
 } from "@/lib/node-timer";
 import { readRouteStream } from "@/lib/route-stream";
 import type {
@@ -143,6 +144,7 @@ export function useRouteChat(
 				if (event.type === "done") {
 					setResult(event.route);
 					setTrace(event.route);
+					setNodeTimings(settledNodeTimers(event.route));
 					setMessages((previous) =>
 						previous.map((message) =>
 							message.id === assistantId
@@ -235,7 +237,7 @@ export function useRouteChat(
 		messages,
 		result: hasLiveResult ? result : saved.result,
 		trace: hasLiveResult ? trace : saved.trace,
-		nodeTimings: hasLiveResult ? nodeTimings : {},
+		nodeTimings: hasLiveResult ? nodeTimings : saved.nodeTimings,
 		error:
 			(liveConversationId === workspace.conversationId ? error : "") ||
 			saved.error,
