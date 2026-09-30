@@ -18,12 +18,12 @@ const { positionals, values } = parseArgs({
 	args: process.argv.slice(2),
 	allowPositionals: true,
 	options: {
-		dataset: { type: "string", default: "evals/shop-support.json" },
+		dataset: { type: "string" },
 		input: { type: "string" },
 		out: { type: "string" },
 		labels: { type: "string" },
 		split: { type: "string", default: "test" },
-		candidates: { type: "string", default: "gpt-6-luna,gemini-3.8-flash" },
+		candidates: { type: "string" },
 		repeats: { type: "string", default: "1" },
 		live: { type: "boolean", default: false },
 		help: { type: "boolean", default: false },
@@ -56,10 +56,12 @@ function connection() {
 async function main() {
 	if (values.help) {
 		console.log(
-			"bun run eval [validate | run --live --out FILE | collect --input FILE --out FILE | labels --input FILE --out FILE | sources --input FILE --out FILE | report --input FILE [--labels FILE] [--out FILE]] [--dataset FILE] [--split dev|test|all] [--candidates IDS] [--repeats 1..3]",
+			"bun run eval [validate | run --live --out FILE | collect --input FILE --out FILE | labels --input FILE --out FILE | sources --input FILE --out FILE | report --input FILE [--labels FILE] [--out FILE]] --dataset FILE [--split dev|test|all] [--candidates IDS] [--repeats COUNT]. Candidates default to the dataset's configured evaluation models.",
 		);
 		return;
 	}
+	if (!values.dataset)
+		throw new Error("Select an evaluation suite with --dataset FILE");
 	const dataset = await loadEvaluationDataset(values.dataset);
 	const command = positionals[0] ?? "validate";
 	if (command === "validate") {
@@ -84,11 +86,16 @@ async function main() {
 			throw new Error(
 				"Run requires explicit --live and a new --out file; it makes paid provider calls",
 			);
+		const node = dataset.graph.nodes.find(
+			(node) => node.id === dataset.evaluationNodeId,
+		);
+		if (node?.kind !== "model" || !node.routing)
+			throw new Error("Evaluated node unavailable");
 		const run = evaluationRunSchema.parse({
 			datasetKey: await datasetKey(dataset),
 			startedAt: new Date().toISOString(),
 			split: values.split,
-			candidates: values.candidates.split(","),
+			candidates: values.candidates?.split(",") ?? node.routing.models,
 			repeats: Number(values.repeats),
 			trials: [],
 		});

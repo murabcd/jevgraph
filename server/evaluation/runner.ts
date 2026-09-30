@@ -8,8 +8,13 @@ import { datasetKey, type EvaluationDataset } from "./dataset.ts";
 import {
 	type EvaluationRun,
 	type EvaluationTrial,
+	evaluationTrialSchema,
 	MAX_EVALUATION_FILE_BYTES,
+	MAX_EVALUATION_TRIALS,
 } from "./trial.ts";
+
+const errorLimit =
+	evaluationTrialSchema.shape.error.unwrap().maxLength ?? undefined;
 
 export async function saveEvaluationRun(path: string, run: EvaluationRun) {
 	const text = JSON.stringify(run, null, 2);
@@ -73,8 +78,13 @@ export async function runEvaluation(
 	const cases = dataset.cases.filter(
 		(item) => run.split === "all" || item.split === run.split,
 	);
-	if (cases.length * run.candidates.length * run.repeats > 100)
-		throw new Error("An evaluation may plan at most 100 trials");
+	if (
+		cases.length * run.candidates.length * run.repeats >
+		MAX_EVALUATION_TRIALS
+	)
+		throw new Error(
+			`An evaluation may plan at most ${MAX_EVALUATION_TRIALS} trials`,
+		);
 	for (const item of cases) {
 		const conversationId = await client.mutation(api.conversations.start, {
 			workspaceId: workspace.id,
@@ -135,7 +145,7 @@ export async function runEvaluation(
 					}
 					await readRouteStream(response, (event) => {
 						if (event.type === "error")
-							trial.error = event.error.slice(0, 2000);
+							trial.error = event.error.slice(0, errorLimit);
 					});
 					trial = await collectTrial(
 						persistence,
@@ -147,7 +157,7 @@ export async function runEvaluation(
 					if (!original) registrationFailed = true;
 					trial.error = (
 						error instanceof Error ? error.message : "Evaluation failed"
-					).slice(0, 2000);
+					).slice(0, errorLimit);
 				}
 				run.trials.push(trial);
 				await saveEvaluationRun(out, run);

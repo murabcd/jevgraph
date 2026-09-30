@@ -7,7 +7,11 @@ import {
 } from "../../src/lib/quality-review.ts";
 import { EVIDENCE_TTL_MS } from "../../src/lib/route-evidence.ts";
 import type { EvaluationDataset } from "./dataset.ts";
-import type { EvaluationRun } from "./trial.ts";
+import {
+	type EvaluationRun,
+	evaluationTrialSchema,
+	MAX_EVALUATION_TRIALS,
+} from "./trial.ts";
 
 export const localLabelsSchema = z.strictObject({
 	reviewer: z.string().trim().min(1).max(94),
@@ -17,11 +21,11 @@ export const localLabelsSchema = z.strictObject({
 			z.strictObject({
 				caseId: z.string(),
 				candidate: z.string(),
-				repetition: z.number().int().min(1).max(3),
+				repetition: evaluationTrialSchema.shape.repetition,
 				review: qualityReviewSchema,
 			}),
 		)
-		.max(100),
+		.max(MAX_EVALUATION_TRIALS),
 });
 
 export function labelTemplate(

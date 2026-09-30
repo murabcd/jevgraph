@@ -14,21 +14,21 @@ A suite fixes input cases, policy, expected decisions and provenance; effective 
 
 Live trials require an owned session and explicit paid execution; private checkpoints preserve every attempted case.
 
-[[server/evaluation/cli.ts]] exposes bun run eval. Validation and offline reports do not connect to providers. Live run requires explicit --live, an initialized owner workspace, VITE_CONVEX_URL, EVAL_CONVEX_TOKEN for that workspace's authenticated browser session, and a running local API (EVAL_API_URL defaults to localhost:5173). Supply the token through the environment or an ignored private local env file, never command arguments. The CLI does not create another identity or a database-free execution mode. Never share tokens or the captured request bodies publicly.
+[[server/evaluation/cli.ts]] exposes bun run eval. Every command requires --dataset FILE; the CLI has no implicit demo suite or model list. Live candidates come from the configured evaluation node's routing.models; --candidates may select an allowed subset in an explicit order. [[server/evaluation/trial.ts]] reuses [[src/lib/model-routing.ts]] for candidate validation and owns the shared repetition, trial-count and retained-error bounds consumed by execution and local labels. Validation and offline reports do not connect to providers. Live run requires explicit --live, an initialized owner workspace, VITE_CONVEX_URL, EVAL_CONVEX_TOKEN for that workspace's authenticated browser session, and a running local API (EVAL_API_URL defaults to localhost:5173). Supply the token through the environment or an ignored private local env file, never command arguments. The CLI does not create another identity or a database-free execution mode. Never share tokens or the captured request bodies publicly.
 
 [[server/evaluation/runner.ts]] starts a fresh conversation per case, uses POST /api/route once and POST /api/replay for subsequent candidates/repetitions, retaining the original frozen inputs despite later messages. It executes sequentially under the normal active-run lock and two-minute deadline, with at most one hundred planned trials and one to three repetitions. Registration failure skips remaining paired trials for that case rather than guessing replacement inputs. Each attempt checkpoints its registered run, error and available evidence. A transport or collection failure stays unknown and can be inspected later; no implicit retry spends provider calls. The supplied benchmark graph never overwrites the editor graph.
 
 [[convex/runs.ts]] exposes an owner-authorized settled-run inspector. [[server/convex-persistence.ts]] parses stored inputs, graph and reviews once at its boundary. [[src/lib/run-artifact-load.ts]] bounds browser and CLI artifact downloads to eight million bytes, validates UTF-8 and artifact structure, times out after thirty seconds and cancels incomplete reads. Local files are limited to 64 MB, created without overwrite with mode 0600 and replaced atomically during checkpoints. The gitignored eval-results directory contains sensitive owner evidence. Oversized checkpoints fail explicitly; settled artifacts remain in Convex.
 
 ```sh
-bun run eval validate
-bun run eval run --live --split dev --out eval-results/dev.json
-bun run eval run --live --split test --out eval-results/test.json
-bun run eval collect --input eval-results/test.json --out eval-results/collected.json
-bun run eval sources --input eval-results/collected.json --out eval-results/sources.json
-bun run eval labels --input eval-results/collected.json --out eval-results/labels.json
+bun run eval validate --dataset evals/shop-support.json
+bun run eval run --live --dataset evals/shop-support.json --split dev --out eval-results/dev.json
+bun run eval run --live --dataset evals/shop-support.json --split test --out eval-results/test.json
+bun run eval collect --dataset evals/shop-support.json --input eval-results/test.json --out eval-results/collected.json
+bun run eval sources --dataset evals/shop-support.json --input eval-results/collected.json --out eval-results/sources.json
+bun run eval labels --dataset evals/shop-support.json --input eval-results/collected.json --out eval-results/labels.json
 # A human fills labels.json using case expectations and exact source quotes.
-bun run eval report --input eval-results/collected.json --labels eval-results/labels.json --out eval-results/report.json
+bun run eval report --dataset evals/shop-support.json --input eval-results/collected.json --labels eval-results/labels.json --out eval-results/report.json
 ```
 
 ## Human review and reporting
