@@ -58,17 +58,40 @@ test("decision confidence is tested against correctness and reports missing deci
 			{ caseId: "b", correct: true },
 		],
 		4,
+		[0.87, 0.13, 0.9, 0.87],
 	);
 	expect(report.accuracy).toBeCloseTo(2 / 3);
 	expect(report.meanSquaredConfidenceError).toBeCloseTo(0.41);
 	expect(report.expectedCalibrationError).toBeCloseTo(0.4);
 	expect(report.missingDecisions).toBe(1);
+	expect(report.thresholds.map((row) => row.threshold)).toEqual([
+		0.13, 0.87, 0.9,
+	]);
 	expect(report.thresholds.find((row) => row.threshold === 0.9)).toMatchObject({
 		decisions: 2,
 		distinctCases: 1,
 		coverage: 0.5,
 		errorRate: 0.5,
 	});
+});
+
+test("confidence reports use configured Jev thresholds and omit rows when no thresholds are configured", async () => {
+	const { dataset, run, now } = await evaluationFixture();
+	const configure = (nodes: typeof dataset.graph.nodes) =>
+		nodes.map((node) =>
+			node.kind === "jev" ? { ...node, confidenceThreshold: 0.83 } : node,
+		);
+	dataset.graph.nodes = configure(dataset.graph.nodes);
+	for (const trial of run.trials)
+		if (trial.record)
+			trial.record.routes.nodes = configure(trial.record.routes.nodes);
+	run.datasetKey = await datasetKey(dataset);
+	const report = await evaluationReport(dataset, run, now);
+	for (const model of report.models)
+		expect(model.decisions.thresholds.map((row) => row.threshold)).toEqual([
+			0.83,
+		]);
+	expect(confidenceReport([], 0, []).thresholds).toEqual([]);
 });
 
 test("complete paired reports require pre-approved labels, bounded policy evidence and independent outcomes", async () => {

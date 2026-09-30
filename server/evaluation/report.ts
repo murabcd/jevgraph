@@ -8,6 +8,7 @@ import {
 	validateQualityReview,
 } from "../../src/lib/quality-review.ts";
 import { routeEvidenceKey } from "../../src/lib/route-evidence.ts";
+import { DEFAULT_JEV_CONFIDENCE_THRESHOLD } from "../../src/lib/routing.ts";
 import { artifactTrace } from "../../src/lib/run-artifact.ts";
 import { totalUsage } from "../../src/lib/usage.ts";
 import {
@@ -27,6 +28,7 @@ type DecisionObservation = {
 export function confidenceReport(
 	observations: DecisionObservation[],
 	expected: number,
+	configuredThresholds: readonly number[],
 ) {
 	const known = observations.filter(
 		(item): item is DecisionObservation & { confidence: number } =>
@@ -73,18 +75,20 @@ export function confidenceReport(
 				) / known.length
 			: null,
 		bins,
-		thresholds: [0.5, 0.6, 0.7, 0.8, 0.9, 0.95].map((threshold) => {
-			const accepted = known.filter((item) => item.confidence >= threshold);
-			return {
-				threshold,
-				decisions: accepted.length,
-				distinctCases: new Set(accepted.map((item) => item.caseId)).size,
-				coverage: expected ? accepted.length / expected : 0,
-				errorRate: accepted.length
-					? accepted.filter((item) => !item.correct).length / accepted.length
-					: null,
-			};
-		}),
+		thresholds: [...new Set(configuredThresholds)]
+			.sort((a, b) => a - b)
+			.map((threshold) => {
+				const accepted = known.filter((item) => item.confidence >= threshold);
+				return {
+					threshold,
+					decisions: accepted.length,
+					distinctCases: new Set(accepted.map((item) => item.caseId)).size,
+					coverage: expected ? accepted.length / expected : 0,
+					errorRate: accepted.length
+						? accepted.filter((item) => !item.correct).length / accepted.length
+						: null,
+				};
+			}),
 	};
 }
 
@@ -192,6 +196,11 @@ export async function evaluationReport(
 	const labelsApprovedBeforeRun =
 		dataset.labels.status === "owner-approved" &&
 		Date.parse(dataset.labels.reviewedAt) <= Date.parse(run.startedAt);
+	const thresholds = dataset.graph.nodes.flatMap((node) =>
+		node.kind === "jev"
+			? [node.confidenceThreshold ?? DEFAULT_JEV_CONFIDENCE_THRESHOLD]
+			: [],
+	);
 	const models = run.candidates.map((candidate) => {
 		const observations: DecisionObservation[] = [];
 		const rows = cases.flatMap((item) =>
@@ -311,6 +320,7 @@ export async function evaluationReport(
 				observations,
 				cases.reduce((sum, item) => sum + item.decisions.length, 0) *
 					run.repeats,
+				thresholds,
 			),
 		};
 	});
