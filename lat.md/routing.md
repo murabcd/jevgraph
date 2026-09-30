@@ -30,6 +30,8 @@ A connected backup is an alternative result for its primary stage and does not c
 
 [server/model-failover.ts](../server/model-failover.ts) tries a connected backup Model once when the primary fails before producing text. The backup connection alone enables this behavior. It never retries after a partial stream or after request cancellation. This is an intentional runtime failure policy, not a compatibility path.
 
+Generation succeeds only when the SDK reports a normal `stop` finish reason and nonempty text. A token limit, content filter, tool call, provider error, or missing terminal reason fails the attempt, preserving partial text and reported usage. In particular, the installed Gemini SDK can ignore an in-band error object and finish with `other`; reaching transport EOF alone must never approve that response. This rule applies equally to terminal and intermediate Model nodes, so an incomplete draft cannot reach downstream success paths. [[src/lib/evaluation-version.ts]] versions this completion policy; older runs remain inspectable but cannot supply current routing evidence or replay inputs.
+
 ## Stream and observation
 
 The API streams progress, text, timings, and the final route to chat and canvas.

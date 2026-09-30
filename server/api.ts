@@ -175,6 +175,11 @@ async function runModel(
 			}
 			if (part.type === "finish-step") usage = languageModelUsage(part.usage);
 		}
+		const finishReason = await result.finishReason;
+		if (finishReason !== "stop")
+			throw new Error(
+				`The model stream ended without a normal stop (${finishReason})`,
+			);
 		if (!text.trim()) throw new Error("The model returned no text");
 		return { text, model: modelId, usage };
 	} catch (error) {
