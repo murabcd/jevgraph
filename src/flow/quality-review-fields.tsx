@@ -8,7 +8,11 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import type { QualityReview, ReviewSource } from "@/lib/quality-review";
+import {
+	QUALITY_REVIEW_LIMITS,
+	type QualityReview,
+	type ReviewSource,
+} from "@/lib/quality-review";
 
 type Judgement = Pick<QualityReview["task"], "reason" | "evidence">;
 
@@ -68,7 +72,7 @@ export function QualityReviewFields({
 					<InputGroupTextarea
 						id={`${id}-reason`}
 						value={value.reason}
-						maxLength={2000}
+						maxLength={QUALITY_REVIEW_LIMITS.reason}
 						onChange={(event) =>
 							onChange({ ...value, reason: event.target.value })
 						}
@@ -102,7 +106,7 @@ export function QualityReviewFields({
 							<InputGroupTextarea
 								id={`${id}-quote-${index}`}
 								value={ref.quote}
-								maxLength={2000}
+								maxLength={QUALITY_REVIEW_LIMITS.quote}
 								onChange={(event) =>
 									update(index, { ...ref, quote: event.target.value })
 								}
@@ -129,7 +133,7 @@ export function QualityReviewFields({
 				<Button
 					variant="outline"
 					size="sm"
-					disabled={value.evidence.length >= 8}
+					disabled={value.evidence.length >= QUALITY_REVIEW_LIMITS.evidence}
 					onClick={() =>
 						onChange({
 							...value,

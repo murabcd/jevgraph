@@ -1,9 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
-import { EVALUATION_VERSIONS } from "../../src/lib/evaluation-version.ts";
 import {
+	createQualityReview,
 	qualityReviewSchema,
-	reviewCriteria,
 	reviewSources,
 } from "../../src/lib/quality-review.ts";
 import { EVIDENCE_TTL_MS } from "../../src/lib/route-evidence.ts";
@@ -44,23 +43,7 @@ export function labelTemplate(
 					caseId: trial.caseId,
 					candidate: trial.candidate,
 					repetition: trial.repetition,
-					review: {
-						version: EVALUATION_VERSIONS.evaluator,
-						criteria: reviewCriteria(node.routing.quality.criteria).map(
-							(criterion) => ({
-								id: criterion.id,
-								verdict: "insufficient-evidence",
-								reason: "Not assessed",
-								evidence: [],
-							}),
-						),
-						task: { outcome: "unknown", reason: "Not assessed", evidence: [] },
-						reaction: {
-							outcome: "unknown",
-							reason: "No assessed later user message",
-							evidence: [],
-						},
-					},
+					review: createQualityReview(node.routing.quality.criteria),
 				};
 			}),
 	};

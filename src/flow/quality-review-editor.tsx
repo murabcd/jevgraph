@@ -5,8 +5,8 @@ import {
 	OutcomeReviewFields,
 	QualityReviewFields,
 } from "@/flow/quality-review-fields";
-import { EVALUATION_VERSIONS } from "@/lib/evaluation-version";
 import {
+	createQualityReview,
 	type QualityReview,
 	qualityReviewSchema,
 	type ReviewSource,
@@ -37,21 +37,7 @@ export function QualityReviewEditor({
 	const [value, setValue] = useState<QualityReview>(() =>
 		savedReview
 			? qualityReviewSchema.parse(JSON.parse(savedReview))
-			: {
-					version: EVALUATION_VERSIONS.evaluator,
-					criteria: criteria.map((criterion) => ({
-						id: criterion.id,
-						verdict: "insufficient-evidence",
-						reason: "Not assessed",
-						evidence: [],
-					})),
-					task: { outcome: "unknown", reason: "Not assessed", evidence: [] },
-					reaction: {
-						outcome: "unknown",
-						reason: "No assessed later user message",
-						evidence: [],
-					},
-				},
+			: createQualityReview(configuredCriteria),
 	);
 	const [expectedReview, setExpectedReview] = useState(savedReview ?? null);
 	const [pending, setPending] = useState(false);
@@ -102,7 +88,7 @@ export function QualityReviewEditor({
 					<div key={criterion.id} className="grid gap-3 rounded-lg border p-3">
 						<p className="font-medium">{criterion.text}</p>
 						<div className="flex flex-wrap gap-2">
-							{(["pass", "fail", "insufficient-evidence"] as const).map(
+							{qualityReviewSchema.shape.criteria.element.shape.verdict.options.map(
 								(verdict) => (
 									<Button
 										key={verdict}
@@ -120,11 +106,8 @@ export function QualityReviewEditor({
 											})
 										}
 									>
-										{verdict === "insufficient-evidence"
-											? "Insufficient evidence"
-											: verdict === "pass"
-												? "Pass"
-												: "Fail"}
+										{verdict[0].toUpperCase() +
+											verdict.slice(1).replaceAll("-", " ")}
 									</Button>
 								),
 							)}

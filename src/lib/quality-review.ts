@@ -4,6 +4,12 @@ import { EVALUATION_VERSIONS } from "./evaluation-version.ts";
 import type { WorkflowRoutes } from "./routing.ts";
 import { artifactTrace, type RunArtifact } from "./run-artifact.ts";
 
+export const QUALITY_REVIEW_LIMITS = {
+	reason: 2000,
+	quote: 2000,
+	evidence: 8,
+} as const;
+
 export function reviewCriteria(criteria: string) {
 	return criteria
 		.split("\n")
@@ -14,13 +20,13 @@ export function reviewCriteria(criteria: string) {
 const evidenceRefSchema = z.strictObject({
 	id: z.string().min(1).max(100),
 	sourceId: z.string().min(1).max(250),
-	quote: z.string().trim().min(1).max(2000),
+	quote: z.string().trim().min(1).max(QUALITY_REVIEW_LIMITS.quote),
 });
 const judgementSchema = z.strictObject({
-	reason: z.string().trim().min(1).max(2000),
+	reason: z.string().trim().min(1).max(QUALITY_REVIEW_LIMITS.reason),
 	evidence: z
 		.array(evidenceRefSchema)
-		.max(8)
+		.max(QUALITY_REVIEW_LIMITS.evidence)
 		.refine(
 			(refs) => new Set(refs.map((ref) => ref.id)).size === refs.length,
 			"Evidence identities must be unique",
@@ -46,6 +52,24 @@ export const qualityReviewSchema = z.strictObject({
 });
 export type QualityReview = z.infer<typeof qualityReviewSchema>;
 export type ReviewSource = { id: string; label: string; text: string };
+
+export function createQualityReview(criteria: string): QualityReview {
+	return {
+		version: EVALUATION_VERSIONS.evaluator,
+		criteria: reviewCriteria(criteria).map((criterion) => ({
+			id: criterion.id,
+			verdict: "insufficient-evidence",
+			reason: "Not assessed",
+			evidence: [],
+		})),
+		task: { outcome: "unknown", reason: "Not assessed", evidence: [] },
+		reaction: {
+			outcome: "unknown",
+			reason: "No assessed later user message",
+			evidence: [],
+		},
+	};
+}
 
 export function reviewSources(
 	input: FrozenCase,
