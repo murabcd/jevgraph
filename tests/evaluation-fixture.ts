@@ -2,7 +2,6 @@ import {
 	datasetKey,
 	evaluationCaseInput,
 	evaluationDatasetSchema,
-	loadEvaluationDataset,
 } from "../server/evaluation/dataset";
 import {
 	type EvaluationTrial,
@@ -15,8 +14,120 @@ import { reviewCriteria } from "../src/lib/quality-review";
 import { EVIDENCE_TTL_MS } from "../src/lib/route-evidence";
 import { runArtifactSchema } from "../src/lib/run-artifact";
 
+export function evaluationDatasetFixture() {
+	return evaluationDatasetSchema.parse({
+		version: "controlled:1",
+		provenance: "Controlled inputs for evaluation contract tests.",
+		labels: { status: "seed" },
+		evaluationNodeId: "answer",
+		graph: {
+			kind: "workflow",
+			nodes: [
+				{
+					id: "input",
+					kind: "input",
+					fields: [
+						{
+							name: "priority",
+							type: "string",
+							required: true,
+							defaultValue: "standard",
+						},
+					],
+					documents: [],
+				},
+				{
+					id: "intent",
+					kind: "jev",
+					question: {
+						type: "choice",
+						instructions: "Select the configured fixture branch.",
+						options: [
+							{
+								id: "accept",
+								label: "Accept",
+								description: "Accepted request.",
+							},
+							{
+								id: "clarify",
+								label: "Clarify",
+								description: "Request needs clarification.",
+							},
+						],
+					},
+					confidenceThreshold: 0.7,
+					fallbackOutputId: "clarify",
+					variables: ["priority"],
+					context: {
+						historyMessages: 10,
+						maxCharacters: 24000,
+						upstream: "all",
+						outputNodeIds: [],
+						documents: [],
+					},
+				},
+				{
+					id: "answer",
+					kind: "model",
+					provider: "openai",
+					model: "gpt-6-luna",
+					prompt: "Return the controlled fixture answer.",
+					variables: ["priority"],
+					maxOutputTokens: 1400,
+					reasoningEffort: "low",
+					context: {
+						historyMessages: 10,
+						maxCharacters: 24000,
+						upstream: "all",
+						outputNodeIds: [],
+						documents: [],
+					},
+					routing: {
+						mode: "evaluate",
+						models: ["gpt-6-luna", "gemini-3.8-flash"],
+						quality: {
+							criteria: "Answer meets the configured expectation.",
+							minimumCases: 5,
+							minimumPassRate: 0.95,
+							maximumLatencyMs: 20000,
+						},
+						expectedOutputTokens: 256,
+						expectedRequests: 1,
+					},
+				},
+			],
+			edges: [
+				{ id: "entry", source: "input", target: "intent" },
+				{
+					id: "accepted",
+					source: "intent",
+					sourceHandle: "accept",
+					target: "answer",
+				},
+				{
+					id: "clarification",
+					source: "intent",
+					sourceHandle: "clarify",
+					target: "answer",
+				},
+			],
+		},
+		cases: Array.from({ length: 6 }, (_, index) => ({
+			id: `case:${index}`,
+			label: `Controlled case ${index}`,
+			split: index === 0 ? "dev" : "test",
+			messages: [{ role: "user", content: `Fixture request ${index}` }],
+			metadata: { priority: "standard" },
+			expectations: ["Controlled fixture answer"],
+			decisions: [
+				{ nodeId: "intent", branch: index === 5 ? "clarify" : "accept" },
+			],
+		})),
+	});
+}
+
 export async function evaluationFixture() {
-	const seed = await loadEvaluationDataset("evals/shop-support.json");
+	const seed = evaluationDatasetFixture();
 	const now = Date.now();
 	const dataset = evaluationDatasetSchema.parse({
 		...seed,
@@ -24,23 +135,6 @@ export async function evaluationFixture() {
 			status: "owner-approved",
 			reviewer: "controlled test fixture",
 			reviewedAt: new Date(now - 1000).toISOString(),
-		},
-		cases: seed.cases
-			.slice(0, 6)
-			.map((item, i) => ({ ...item, split: i === 0 ? "dev" : "test" })),
-		graph: {
-			...seed.graph,
-			nodes: seed.graph.nodes.map((node) =>
-				node.kind === "model" && node.routing
-					? {
-							...node,
-							routing: {
-								...node.routing,
-								quality: { ...node.routing.quality, minimumCases: 5 },
-							},
-						}
-					: node,
-			),
 		},
 	});
 	const run = evaluationRunSchema.parse({

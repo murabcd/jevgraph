@@ -8,7 +8,6 @@ import { ConvexPersistence } from "../server/convex-persistence";
 import {
 	datasetKey,
 	evaluationDatasetSchema,
-	loadEvaluationDataset,
 } from "../server/evaluation/dataset";
 import { collectTrial, runEvaluation } from "../server/evaluation/runner";
 import {
@@ -20,9 +19,10 @@ import { EVALUATION_VERSIONS } from "../src/lib/evaluation-version";
 import { qualityReviewSchema, reviewCriteria } from "../src/lib/quality-review";
 import { loadRunArtifact } from "../src/lib/run-artifact-load";
 import { createApiFixture } from "./api-fixture";
+import { evaluationDatasetFixture } from "./evaluation-fixture";
 
 async function plan() {
-	const seed = await loadEvaluationDataset("evals/shop-support.json");
+	const seed = evaluationDatasetFixture();
 	const dataset = evaluationDatasetSchema.parse({
 		...seed,
 		cases: seed.cases.slice(0, 2),
@@ -45,8 +45,8 @@ function providerResponse(url: RequestInfo | URL) {
 			answers: {
 				task: {
 					type: "choice",
-					choice: "Возврат",
-					probabilities: { Возврат: 0.99, Доставка: 0.005, Уточнение: 0.005 },
+					choice: "Accept",
+					probabilities: { Accept: 0.99, Clarify: 0.01 },
 				},
 			},
 			usage: { input_tokens: 20, output_tokens: 0 },
@@ -163,7 +163,7 @@ test("runner uses required owned persistence, real SDK fixtures and replay for p
 			await frozenCaseKey(replay.input),
 		);
 		expect(first.routes.nodes).not.toEqual(replay.routes.nodes);
-		expect(first.input.metadata).toEqual({ customer_tier: "regular" });
+		expect(first.input.metadata).toEqual({ priority: "standard" });
 		expect(first.input.history.sources).toEqual([]);
 		expect((await stat(out)).mode & 0o777).toBe(0o600);
 		expect(await loadEvaluationRun(out)).toEqual(run);

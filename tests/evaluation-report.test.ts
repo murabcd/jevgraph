@@ -6,7 +6,6 @@ import { z } from "zod";
 import {
 	datasetKey,
 	evaluationDatasetSchema,
-	loadEvaluationDataset,
 } from "../server/evaluation/dataset";
 import { applyLocalLabels, labelTemplate } from "../server/evaluation/labels";
 import {
@@ -15,12 +14,14 @@ import {
 } from "../server/evaluation/report";
 import { EVALUATION_VERSIONS } from "../src/lib/evaluation-version";
 import { artifactTrace } from "../src/lib/run-artifact";
-import { evaluationFixture } from "./evaluation-fixture";
+import {
+	evaluationDatasetFixture,
+	evaluationFixture,
+} from "./evaluation-fixture";
 
 test("dataset prevents default-value duplicates across splits and pins installed provider SDKs", async () => {
-	const seed = await loadEvaluationDataset("evals/shop-support.json");
+	const seed = evaluationDatasetFixture();
 	expect(seed.labels.status).toBe("seed");
-	expect(seed.cases.filter((item) => item.split === "test")).toHaveLength(8);
 	expect(() =>
 		evaluationDatasetSchema.parse({
 			...seed,
@@ -180,8 +181,8 @@ test("a high-confidence wrong decision fails route quality; provenance and crede
 	const record = run.trials[0].record;
 	if (!record?.artifact) throw new Error("Fixture missing");
 	const decision = artifactTrace(record.artifact).jevSteps[0];
-	decision.branch = "delivery";
-	decision.selectedBranch = "delivery";
+	decision.branch = "clarify";
+	decision.selectedBranch = "clarify";
 	const report = await evaluationReport(dataset, run, now);
 	expect(report.models[0].passingAnswers).toBe(5);
 	expect(report.models[0].passingRoutes).toBe(4);

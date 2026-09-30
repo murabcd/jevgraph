@@ -2,11 +2,9 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	evaluationDatasetSchema,
-	loadEvaluationDataset,
-} from "../server/evaluation/dataset";
+import { evaluationDatasetSchema } from "../server/evaluation/dataset";
 import { textModels } from "../src/lib/models";
+import { evaluationDatasetFixture } from "./evaluation-fixture";
 
 async function cli(args: string[]) {
 	const subprocess = Bun.spawn(
@@ -34,7 +32,7 @@ test("evaluation CLI requires an explicit suite and has no implicit demo dataset
 });
 
 test("evaluation CLI uses each suite's selected candidate and rejects disallowed overrides before connecting", async () => {
-	const seed = await loadEvaluationDataset("evals/shop-support.json");
+	const seed = evaluationDatasetFixture();
 	const dir = await mkdtemp(join(tmpdir(), "jev-eval-cli-"));
 	try {
 		for (const model of textModels) {
