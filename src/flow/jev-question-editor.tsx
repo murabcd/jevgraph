@@ -130,27 +130,25 @@ export function JevQuestionEditor({
 						{draft.map((question) => (
 							<section
 								key={question.id}
-								className="grid gap-4"
+								className="relative grid gap-4"
 								aria-label={question.name}
 							>
-								<div className="flex items-center justify-between">
-									<span className="text-sm font-medium">{question.name}</span>
-									{draft.length > 1 && (
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-sm"
-											aria-label={`Remove ${question.name}`}
-											onClick={() =>
-												setDraft((items) =>
-													items.filter(({ id }) => id !== question.id),
-												)
-											}
-										>
-											<X />
-										</Button>
-									)}
-								</div>
+								{draft.length > 1 && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-sm"
+										className="absolute -top-1 right-0"
+										aria-label={`Remove ${question.name}`}
+										onClick={() =>
+											setDraft((items) =>
+												items.filter(({ id }) => id !== question.id),
+											)
+										}
+									>
+										<X />
+									</Button>
+								)}
 								<JevQuestionFields
 									question={question}
 									onChange={(value) =>

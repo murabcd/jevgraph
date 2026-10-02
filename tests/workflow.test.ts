@@ -162,7 +162,7 @@ test("an unconnected Jev answer fails rather than inventing a label", async () =
 				latencyMs: 10,
 			}),
 		}).result,
-	).rejects.toThrow("could not choose a reliable answer");
+	).rejects.toThrow("Jev couldn’t determine a reliable answer for “Question”.");
 });
 
 test("Jev uses its configured confidence threshold and fallback output", async () => {

@@ -46,7 +46,7 @@ export function resolveJevBatch({
 		const branch = accepted ? answer.branch : question.fallbackOutputId;
 		if (!branch)
 			throw new Error(
-				`Jev ${nodeId} could not choose a reliable answer for ${question.name}${error ? `: ${error}` : ""}`,
+				`Jev couldn’t determine a reliable answer for “${question.name}”${error ? `: ${error}` : "."}`,
 			);
 		const edge = outgoing.get(branch);
 		const exhausted =

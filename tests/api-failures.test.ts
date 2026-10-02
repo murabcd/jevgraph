@@ -170,7 +170,9 @@ test("Russian HTTP flow stops when Jev fails without a configured fallback", asy
 	);
 	expect(requests).toBe(1);
 	expect(result).toBeUndefined();
-	expect(error).toContain("could not choose a reliable answer");
+	expect(error).toStartWith(
+		"Jev couldn’t determine a reliable answer for “Question”: ",
+	);
 	expect(events.some((event) => event.type === "delta")).toBe(false);
 });
 
