@@ -10,24 +10,26 @@ import {
 	type NodePickerNode,
 } from "@/flow/node-connection-picker";
 import type { useRoutingGraph } from "@/flow/use-routing-graph";
-import { questionOutputs } from "@/lib/jev-question";
+import { batchOutputs } from "@/lib/jev-question";
 import type { NodeTimer } from "@/lib/node-timer";
 import type { RouteTrace } from "@/lib/routing";
 
 export type CanvasNode = FlowNode | NodePickerNode;
 
 function nodeDecision(node: FlowNode, trace: RouteTrace | null) {
-	const step = trace?.jevSteps.findLast(
-		(decision) => decision.nodeId === node.id,
+	const output = trace?.outputs.findLast(
+		(item) => item.sourceNodeId === node.id,
 	);
-	if (!step) return undefined;
-	const branch = step.branch;
-	const label = node.data.question
-		? (questionOutputs(node.data.question).find(
-				(output) => output.id === branch,
-			)?.label ?? branch)
-		: branch;
-	return `${label} · ${step.status === "exhausted" ? "review incomplete" : step.status === "uncertain" ? "uncertain" : step.error ? "Jev unavailable" : `${Math.round((step.confidence ?? 0) * 100)}%`}`;
+	if (output?.kind !== "jev" || !node.data.questions) return undefined;
+	const labels = new Map(
+		batchOutputs(node.data.questions).map(({ id, label }) => [id, label]),
+	);
+	return output.decisions
+		.map(
+			(step) =>
+				`${labels.get(step.branch) ?? step.branch} · ${step.status === "exhausted" ? "review incomplete" : step.status === "uncertain" ? "uncertain" : step.error ? "Jev unavailable" : `${Math.round((step.confidence ?? 0) * 100)}%`}`,
+		)
+		.join("; ");
 }
 
 export function useCanvasPresentation({
@@ -92,7 +94,7 @@ export function useCanvasPresentation({
 				step: stepLabels.get(node.id),
 				timing: timings[node.id],
 				decision: nodeDecision(node, trace),
-				decisionDetails: trace?.jevSteps.findLast(
+				decisionDetails: trace?.jevSteps.filter(
 					(step) => step.nodeId === node.id,
 				),
 				contexts: trace?.contexts.filter(

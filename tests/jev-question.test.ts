@@ -35,8 +35,8 @@ describe("Jev question modes", () => {
 			).toBe(true);
 		}
 		expect(questionOutputs(defaultJevQuestion("choice"))).toEqual([
-			{ id: "choice-1", label: "Choice 1" },
-			{ id: "choice-2", label: "Choice 2" },
+			{ id: "question/choice-1", label: "Choice 1" },
+			{ id: "question/choice-2", label: "Choice 2" },
 		]);
 	});
 
@@ -46,7 +46,7 @@ describe("Jev question modes", () => {
 		question.options[0].label = "Cheap";
 		expect(
 			resolveJevAnswer(question, { type: "choice", choice: "Cheap" }, 0.9),
-		).toMatchObject({ branch: "choice-1", confidence: 0.9 });
+		).toMatchObject({ branch: "question/choice-1", confidence: 0.9 });
 		expect(() =>
 			resolveJevAnswer(question, { type: "choice", choice: "Unknown" }, 0.9),
 		).toThrow("unknown choice");
@@ -60,14 +60,14 @@ describe("Jev question modes", () => {
 				{ type: "boolean", probability: 0.2 },
 				undefined,
 			),
-		).toMatchObject({ branch: "no", confidence: 0.8 });
+		).toMatchObject({ branch: "question/no", confidence: 0.8 });
 		expect(
 			resolveJevAnswer(
 				question,
 				{ type: "boolean", probability: 0.9 },
 				undefined,
 			),
-		).toMatchObject({ branch: "yes", confidence: 0.9 });
+		).toMatchObject({ branch: "question/yes", confidence: 0.9 });
 		expect(() =>
 			resolveJevAnswer(
 				question,
@@ -80,19 +80,19 @@ describe("Jev question modes", () => {
 	test("routes Score to the nearest numbered level", () => {
 		const question = configuredJevQuestion("score");
 		expect(questionOutputs(question)).toEqual([
-			{ id: "score-0", label: "Level 0" },
-			{ id: "score-1", label: "Level 1" },
-			{ id: "score-2", label: "Level 2" },
+			{ id: "question/score-0", label: "Level 0" },
+			{ id: "question/score-1", label: "Level 1" },
+			{ id: "question/score-2", label: "Level 2" },
 		]);
 		expect(
 			resolveJevAnswer(question, { type: "score", score: 0.49 }, 0.8).branch,
-		).toBe("score-0");
+		).toBe("question/score-0");
 		expect(
 			resolveJevAnswer(question, { type: "score", score: 0.5 }, 0.8).branch,
-		).toBe("score-1");
+		).toBe("question/score-1");
 		expect(
 			resolveJevAnswer(question, { type: "score", score: 1.5 }, 0.8).branch,
-		).toBe("score-2");
+		).toBe("question/score-2");
 		expect(() =>
 			resolveJevAnswer(question, { type: "score", score: 3 }, 0.8),
 		).toThrow("outside the rubric");

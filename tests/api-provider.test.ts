@@ -34,7 +34,7 @@ test("the real TypeSafe SDK batches relevance and reports all evaluation usage t
 						{
 							id: "judge",
 							kind: "jev",
-							question: configuredJevQuestion("noul"),
+							questions: [configuredJevQuestion("noul")],
 							context: {
 								...DEFAULT_CONTEXT_POLICY,
 								relevance: {

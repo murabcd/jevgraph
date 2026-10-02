@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { executeWorkflow, workflowRoutingState } from "../server/workflow";
 import { routesFromGraph } from "../src/flow/graph";
 import {
-	type JevDecision,
+	type JevEvaluation,
 	type RouteTarget,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
@@ -14,12 +14,17 @@ const example = connectedWorkflowGraph();
 const connected = routesFromGraph(example.nodes, example.edges);
 if (!connected) throw new Error("Fixture must compile as a chatflow");
 
-function answer(branch: "yes" | "no"): JevDecision {
+function answer(branch: "yes" | "no"): JevEvaluation {
 	return {
-		type: "noul",
-		branch,
-		value: branch,
-		confidence: 0.95,
+		answers: [
+			{
+				questionId: "question",
+				type: "noul",
+				branch: `question/${branch}`,
+				value: branch,
+				confidence: 0.95,
+			},
+		],
 		model: "jev-latest",
 		latencyMs: 1,
 	};
@@ -28,7 +33,7 @@ function answer(branch: "yes" | "no"): JevDecision {
 function run(
 	routes: WorkflowRoutes,
 	options: {
-		decide?: (nodeId: string, state: string) => Promise<JevDecision>;
+		decide?: (nodeId: string, state: string) => Promise<JevEvaluation>;
 		model?: (target: RouteTarget, context: string) => Promise<string>;
 		signal?: AbortSignal;
 	} = {},
@@ -88,7 +93,7 @@ test("an unconnected Jev choice returns its label without a model call", async (
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "judge", kind: "jev", question: configuredJevQuestion() },
+			{ id: "judge", kind: "jev", questions: [configuredJevQuestion()] },
 			{ id: "next", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
@@ -96,7 +101,7 @@ test("an unconnected Jev choice returns its label without a model call", async (
 			{
 				id: "choice-1",
 				source: "judge",
-				sourceHandle: "choice-1",
+				sourceHandle: "question/choice-1",
 				target: "next",
 			},
 		],
@@ -104,10 +109,15 @@ test("an unconnected Jev choice returns its label without a model call", async (
 	expect(workflowRoutesSchema.safeParse(routes).success).toBe(true);
 	const execution = run(routes, {
 		decide: async () => ({
-			type: "choice",
-			branch: "choice-2",
-			value: "choice-2",
-			confidence: 0.92,
+			answers: [
+				{
+					questionId: "question",
+					type: "choice",
+					branch: "question/choice-2",
+					value: "choice-2",
+					confidence: 0.92,
+				},
+			],
 			model: "jev-latest",
 			latencyMs: 10,
 			usage: { inputTokens: 93, outputTokens: 0 },
@@ -132,17 +142,22 @@ test("an unconnected Jev answer fails rather than inventing a label", async () =
 		kind: "workflow",
 		nodes: [
 			{ id: "input", kind: "input", fields: [] },
-			{ id: "judge", kind: "jev", question: configuredJevQuestion() },
+			{ id: "judge", kind: "jev", questions: [configuredJevQuestion()] },
 		],
 		edges: [{ id: "entry", source: "input", target: "judge" }],
 	};
 	await expect(
 		run(routes, {
 			decide: async () => ({
-				type: "choice",
-				branch: "choice-2",
-				value: "choice-2",
-				confidence: 0.2,
+				answers: [
+					{
+						questionId: "question",
+						type: "choice",
+						branch: "question/choice-2",
+						value: "choice-2",
+						confidence: 0.2,
+					},
+				],
 				model: "jev-latest",
 				latencyMs: 10,
 			}),
@@ -158,9 +173,13 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 			{
 				id: "judge",
 				kind: "jev",
-				question: configuredJevQuestion(),
-				confidenceThreshold: 0.9,
-				fallbackOutputId: "choice-1",
+				questions: [
+					{
+						...configuredJevQuestion(),
+						confidenceThreshold: 0.9,
+						fallbackOutputId: "question/choice-1",
+					},
+				],
 			},
 			{
 				id: "first-model",
@@ -174,7 +193,7 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 			{
 				id: "choice-1",
 				source: "judge",
-				sourceHandle: "choice-1",
+				sourceHandle: "question/choice-1",
 				target: "first-model",
 			},
 		],
@@ -185,10 +204,15 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 		metadata: {},
 		evaluate: async () => {
 			return {
-				type: "choice",
-				branch: "choice-2",
-				value: "choice-2",
-				confidence: 0.8,
+				answers: [
+					{
+						questionId: "question",
+						type: "choice",
+						branch: "question/choice-2",
+						value: "choice-2",
+						confidence: 0.8,
+					},
+				],
 				model: "jev-latest",
 				latencyMs: 1,
 			};
@@ -203,7 +227,7 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 	});
 	const result = await execution;
 	expect(result.nodeId).toBe("first-model");
-	expect(result.jevSteps[0]?.branch).toBe("choice-1");
+	expect(result.jevSteps[0]?.branch).toBe("question/choice-1");
 });
 
 test("Jev can return a configured fallback label when its provider fails", async () => {
@@ -214,8 +238,9 @@ test("Jev can return a configured fallback label when its provider fails", async
 			{
 				id: "judge",
 				kind: "jev",
-				question: configuredJevQuestion(),
-				fallbackOutputId: "choice-2",
+				questions: [
+					{ ...configuredJevQuestion(), fallbackOutputId: "question/choice-2" },
+				],
 			},
 		],
 		edges: [{ id: "entry", source: "input", target: "judge" }],
@@ -231,7 +256,7 @@ test("Jev can return a configured fallback label when its provider fails", async
 	expect(result.text).toBe("Choice 2");
 	expect(result.provider).toBe("jev");
 	expect(result.jevSteps[0]).toMatchObject({
-		branch: "choice-2",
+		branch: "question/choice-2",
 		error: "Jev unavailable",
 	});
 });
@@ -290,7 +315,7 @@ test("Start values reach only the nodes that select them", async () => {
 			{
 				id: "judge",
 				kind: "jev",
-				question: configuredJevQuestion("noul"),
+				questions: [configuredJevQuestion("noul")],
 				variables: ["plan"],
 			},
 			{
@@ -309,8 +334,13 @@ test("Start values reach only the nodes that select them", async () => {
 		],
 		edges: [
 			{ id: "entry", source: "input", target: "judge" },
-			{ id: "yes", source: "judge", sourceHandle: "yes", target: "yes" },
-			{ id: "no", source: "judge", sourceHandle: "no", target: "no" },
+			{
+				id: "yes",
+				source: "judge",
+				sourceHandle: "question/yes",
+				target: "yes",
+			},
+			{ id: "no", source: "judge", sourceHandle: "question/no", target: "no" },
 		],
 	};
 	let state = "";
@@ -348,7 +378,7 @@ test("a model can feed its output to Jev and another model", async () => {
 				model: "gpt-6-luna",
 				prompt: "Draft",
 			},
-			{ id: "gate", kind: "jev", question: configuredJevQuestion("noul") },
+			{ id: "gate", kind: "jev", questions: [configuredJevQuestion("noul")] },
 			{
 				id: "final",
 				kind: "model",
@@ -360,8 +390,18 @@ test("a model can feed its output to Jev and another model", async () => {
 		edges: [
 			{ id: "entry", source: "input", target: "draft" },
 			{ id: "continue", source: "draft", sourceHandle: "next", target: "gate" },
-			{ id: "yes", source: "gate", sourceHandle: "yes", target: "final" },
-			{ id: "no", source: "gate", sourceHandle: "no", target: "final" },
+			{
+				id: "yes",
+				source: "gate",
+				sourceHandle: "question/yes",
+				target: "final",
+			},
+			{
+				id: "no",
+				source: "gate",
+				sourceHandle: "question/no",
+				target: "final",
+			},
 		],
 	};
 	const states: string[] = [];
@@ -378,7 +418,7 @@ test("a model can feed its output to Jev and another model", async () => {
 	});
 	const result = await execution.result;
 	expect(states[0]).toContain("[draft · revision 1] Draft text");
-	expect(inputs).toEqual(["draft: ", "final: Draft text Decision: Yes"]);
+	expect(inputs).toEqual(["draft: ", "final: Draft text Yes"]);
 	expect(execution.deltas).toEqual(["Final text"]);
 	expect(result.outputs.map((output) => output.nodeId)).toEqual([
 		"draft",
@@ -399,7 +439,7 @@ test("parallel model results join before Jev evaluates them", async () => {
 				provider: "google",
 				model: "gemini-3.8-flash",
 			},
-			{ id: "judge", kind: "jev", question: configuredJevQuestion("noul") },
+			{ id: "judge", kind: "jev", questions: [configuredJevQuestion("noul")] },
 			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
@@ -407,8 +447,18 @@ test("parallel model results join before Jev evaluates them", async () => {
 			{ id: "b", source: "input", target: "second" },
 			{ id: "c", source: "first", sourceHandle: "next", target: "judge" },
 			{ id: "d", source: "second", sourceHandle: "next", target: "judge" },
-			{ id: "e", source: "judge", sourceHandle: "yes", target: "final" },
-			{ id: "f", source: "judge", sourceHandle: "no", target: "final" },
+			{
+				id: "e",
+				source: "judge",
+				sourceHandle: "question/yes",
+				target: "final",
+			},
+			{
+				id: "f",
+				source: "judge",
+				sourceHandle: "question/no",
+				target: "final",
+			},
 		],
 	};
 	let concurrent = 0;
@@ -505,7 +555,7 @@ test("a Jev feedback branch stops without approval when its repeat budget is exh
 			{
 				id: "judge",
 				kind: "jev",
-				question: configuredJevQuestion("noul"),
+				questions: [configuredJevQuestion("noul")],
 				maxRepeats: 2,
 			},
 			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
@@ -516,11 +566,16 @@ test("a Jev feedback branch stops without approval when its repeat budget is exh
 			{
 				id: "retry",
 				source: "judge",
-				sourceHandle: "no",
+				sourceHandle: "question/no",
 				target: "draft",
 				repeat: true,
 			},
-			{ id: "done", source: "judge", sourceHandle: "yes", target: "final" },
+			{
+				id: "done",
+				source: "judge",
+				sourceHandle: "question/yes",
+				target: "final",
+			},
 		],
 	};
 	workflowRoutesSchema.parse(routes);
@@ -543,9 +598,9 @@ test("a Jev feedback branch stops without approval when its repeat budget is exh
 	expect(result.outcome).toBe("repeat-exhausted");
 	expect(result.path.some((step) => step.nodeId === "final")).toBe(false);
 	expect(result.jevSteps.map((step) => step.branch)).toEqual([
-		"no",
-		"no",
-		"no",
+		"question/no",
+		"question/no",
+		"question/no",
 	]);
 	expect(result.jevSteps.at(-1)?.status).toBe("exhausted");
 	expect(result.traversedEdges.filter((edge) => edge.repeat)).toHaveLength(2);
@@ -563,7 +618,7 @@ test("a parallel join waits for a repeating branch before running the final mode
 				provider: "google",
 				model: "gemini-3.8-flash",
 			},
-			{ id: "judge", kind: "jev", question: configuredJevQuestion("noul") },
+			{ id: "judge", kind: "jev", questions: [configuredJevQuestion("noul")] },
 			{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 		],
 		edges: [
@@ -573,11 +628,16 @@ test("a parallel join waits for a repeating branch before running the final mode
 			{
 				id: "retry",
 				source: "judge",
-				sourceHandle: "no",
+				sourceHandle: "question/no",
 				target: "draft",
 				repeat: true,
 			},
-			{ id: "done", source: "judge", sourceHandle: "yes", target: "final" },
+			{
+				id: "done",
+				source: "judge",
+				sourceHandle: "question/yes",
+				target: "final",
+			},
 			{
 				id: "context-join",
 				source: "context",

@@ -40,7 +40,7 @@ import {
 import type { FlowNode, NodeKind } from "@/flow/graph";
 import { nodeFooterValue, nodeMeta, nodeTitle } from "@/flow/node-meta";
 import { NodeTimerLabel } from "@/flow/node-timer-label";
-import { questionOutputs } from "@/lib/jev-question";
+import { batchOutputs } from "@/lib/jev-question";
 import type { NodeTimer } from "@/lib/node-timer";
 import { cn } from "@/lib/utils";
 
@@ -205,7 +205,7 @@ function JevOutputRows({
 	outputs,
 	usedBranches,
 }: {
-	outputs: ReturnType<typeof questionOutputs>;
+	outputs: ReturnType<typeof batchOutputs>;
 	usedBranches?: ReadonlySet<string>;
 }) {
 	return (
@@ -226,7 +226,7 @@ function JevOutputRows({
 						type="source"
 						id={output.id}
 						position={Position.Right}
-						title="Connect to continue; leave unconnected to return this answer in chat"
+						title="Connect to continue; unconnected answers remain available as data"
 					/>
 				</div>
 			))}
@@ -342,7 +342,7 @@ function RouteCardOutputs({
 	outputs,
 }: {
 	data: FlowNode["data"];
-	outputs: ReturnType<typeof questionOutputs>;
+	outputs: ReturnType<typeof batchOutputs>;
 }) {
 	if (data.kind === "jev") {
 		return <JevOutputRows outputs={outputs} usedBranches={data.usedBranches} />;
@@ -383,7 +383,7 @@ function RouteNodeCard({
 }: {
 	data: FlowNode["data"];
 	selected: boolean;
-	outputs: ReturnType<typeof questionOutputs>;
+	outputs: ReturnType<typeof batchOutputs>;
 }) {
 	return (
 		<Card
@@ -403,7 +403,7 @@ function RouteNodeCard({
 
 export function RouteNode({ id, data, selected }: NodeProps<FlowNode>) {
 	const updateNodeInternals = useUpdateNodeInternals();
-	const outputs = data.kind === "jev" ? questionOutputs(data.question) : [];
+	const outputs = data.kind === "jev" ? batchOutputs(data.questions) : [];
 	const outputIds = outputs.map(({ id }) => id).join("|");
 	useEffect(() => {
 		if (outputIds) updateNodeInternals(id);

@@ -18,6 +18,9 @@ const keys = {
 	GOOGLE_GENERATIVE_AI_API_KEY: "test-key",
 };
 const question: JevQuestion = {
+	id: "question",
+	name: "Question",
+	confidenceThreshold: 0.7,
 	type: "choice",
 	instructions: "Определи тему обращения пользователя.",
 	options: [
@@ -41,9 +44,13 @@ function jevRoutes(fallback = true): WorkflowRoutes {
 			{
 				id: "judge",
 				kind: "jev",
-				question,
-				confidenceThreshold: 0.9,
-				...(fallback ? { fallbackOutputId: "operator" } : {}),
+				questions: [
+					{
+						...question,
+						confidenceThreshold: 0.9,
+						...(fallback ? { fallbackOutputId: "question/operator" } : {}),
+					},
+				],
 			},
 		],
 		edges: [{ id: "entry", source: "input", target: "judge" }],
@@ -141,7 +148,7 @@ test("Russian HTTP flow returns the configured label after Jev 503 with one fail
 	expect(requests).toBe(1);
 	expect(result?.text).toBe("Оператор");
 	expect(result?.jevSteps[0]).toMatchObject({
-		branch: "operator",
+		branch: "question/operator",
 		status: "provider-error",
 	});
 	expect(result?.calls[0]?.status).toBe("failed");
@@ -172,7 +179,7 @@ test("Russian HTTP flow preserves the original uncertain choice while taking its
 		Response.json({
 			model: "jev-1.13.0",
 			answers: {
-				task: {
+				question: {
 					type: "choice",
 					choice: "Доставка",
 					probabilities: { Доставка: 0.55, Оператор: 0.45 },
@@ -184,8 +191,8 @@ test("Russian HTTP flow preserves the original uncertain choice while taking its
 	);
 	expect(result?.text).toBe("Оператор");
 	expect(result?.jevSteps[0]).toMatchObject({
-		branch: "operator",
-		selectedBranch: "delivery",
+		branch: "question/operator",
+		selectedBranch: "question/delivery",
 		status: "uncertain",
 		value: "Доставка",
 		confidence: 0.55,
@@ -221,7 +228,7 @@ test("Russian HTTP flow retains its document when relevance fails and accounts f
 		return Response.json({
 			model: "jev-1.13.0",
 			answers: {
-				task: {
+				question: {
 					type: "choice",
 					choice: "Доставка",
 					probabilities: { Доставка: 0.99, Оператор: 0.01 },

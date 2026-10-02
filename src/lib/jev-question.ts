@@ -4,6 +4,20 @@ import type {
 } from "ai";
 import { z } from "zod";
 
+export const DEFAULT_JEV_CONFIDENCE_THRESHOLD = 0.7;
+export const confidenceThresholdSchema = z.number().finite().min(0).max(1);
+export const MAX_JEV_QUESTIONS = 16;
+const questionIdentity = {
+	id: z
+		.string()
+		.min(1)
+		.max(40)
+		.regex(/^[a-zA-Z0-9_-]+$/),
+	name: z.string().trim().min(1).max(80),
+	confidenceThreshold: confidenceThresholdSchema,
+	fallbackOutputId: z.string().min(1).max(200).optional(),
+};
+
 const probabilitiesSchema = z.record(
 	z.string(),
 	z.number().finite().min(0).max(1),
@@ -11,6 +25,7 @@ const probabilitiesSchema = z.record(
 
 function questionSchema(text: z.ZodString) {
 	const choiceQuestionSchema = z.object({
+		...questionIdentity,
 		type: z.literal("choice"),
 		instructions: text,
 		options: z
@@ -32,12 +47,14 @@ function questionSchema(text: z.ZodString) {
 			),
 	});
 	const noulQuestionSchema = z.object({
+		...questionIdentity,
 		type: z.literal("noul"),
 		instructions: text,
 		yesDescription: text,
 		noDescription: text,
 	});
 	const scoreQuestionSchema = z.object({
+		...questionIdentity,
 		type: z.literal("score"),
 		instructions: text,
 		levels: z
@@ -61,6 +78,36 @@ export const jevQuestionSchema = questionSchema(z.string().trim().max(500));
 export const configuredJevQuestionSchema = questionSchema(
 	z.string().trim().min(1).max(500),
 );
+export const jevQuestionsSchema = questionBatchSchema(jevQuestionSchema);
+export const configuredJevQuestionsSchema = questionBatchSchema(
+	configuredJevQuestionSchema,
+);
+function questionBatchSchema(question: typeof jevQuestionSchema) {
+	return z
+		.array(question)
+		.min(1)
+		.max(MAX_JEV_QUESTIONS)
+		.superRefine((questions, ctx) => {
+			if (
+				new Set(questions.map(({ id }) => id)).size !== questions.length ||
+				new Set(questions.map(({ name }) => name)).size !== questions.length
+			)
+				ctx.addIssue({
+					code: "custom",
+					message: "Question IDs and names must be unique",
+				});
+			for (const item of questions) {
+				if (
+					item.fallbackOutputId &&
+					!questionOutputs(item).some(({ id }) => id === item.fallbackOutputId)
+				)
+					ctx.addIssue({
+						code: "custom",
+						message: `Invalid fallback for ${item.name}`,
+					});
+			}
+		});
+}
 export type JevQuestion = z.infer<typeof jevQuestionSchema>;
 export type JevQuestionType = JevQuestion["type"];
 
@@ -74,8 +121,14 @@ export const questionTypeLabels = {
 export function defaultJevQuestion(
 	type: JevQuestionType = "choice",
 ): JevQuestion {
+	const identity = {
+		id: "question",
+		name: "Question",
+		confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+	};
 	if (type === "noul") {
 		return {
+			...identity,
 			type,
 			instructions: "",
 			yesDescription: "",
@@ -84,6 +137,7 @@ export function defaultJevQuestion(
 	}
 	if (type === "score") {
 		return {
+			...identity,
 			type,
 			instructions: "",
 			levels: [
@@ -94,6 +148,7 @@ export function defaultJevQuestion(
 		};
 	}
 	return {
+		...identity,
 		type: "choice",
 		instructions: "",
 		options: [
@@ -111,20 +166,55 @@ export function defaultJevQuestion(
 	};
 }
 
+/** Output identity survives edits within a question type, never a type change. */
+export function stableQuestionOutputIds(
+	previous: JevQuestion[],
+	next: JevQuestion[],
+) {
+	const types = new Map(
+		previous.map((question) => [question.id, question.type]),
+	);
+	return new Set(
+		batchOutputs(
+			next.filter(
+				(question) =>
+					!types.has(question.id) || types.get(question.id) === question.type,
+			),
+		).map(({ id }) => id),
+	);
+}
+
+export function questionOutputId(questionId: string, outputId: string) {
+	return `${questionId}/${outputId}`;
+}
 export function questionOutputs(question: JevQuestion) {
-	if (question.type === "choice") {
-		return question.options.map(({ id, label }) => ({ id, label }));
-	}
-	if (question.type === "noul") {
-		return [
-			{ id: "no", label: "No" },
-			{ id: "yes", label: "Yes" },
-		];
-	}
-	return question.levels.map((level, index) => ({
-		id: level.id,
-		label: `Level ${index}`,
+	const outputs =
+		question.type === "choice"
+			? question.options.map(({ id, label }) => ({ id, label }))
+			: question.type === "noul"
+				? [
+						{ id: "no", label: "No" },
+						{ id: "yes", label: "Yes" },
+					]
+				: question.levels.map((level, index) => ({
+						id: level.id,
+						label: `Level ${index}`,
+					}));
+	return outputs.map(({ id, label }) => ({
+		id: questionOutputId(question.id, id),
+		label,
 	}));
+}
+export function batchOutputs(questions: JevQuestion[]) {
+	return questions.flatMap((question) =>
+		questionOutputs(question).map((output) => ({
+			...output,
+			label:
+				questions.length === 1
+					? output.label
+					: `${question.name} · ${output.label}`,
+		})),
+	);
 }
 
 export function questionForJev(
@@ -207,5 +297,12 @@ export function resolveJevAnswer(
 		if (!parsed.success) throw new Error("Jev returned invalid probabilities");
 		probabilities = parsed.data;
 	}
-	return { branch, value, probabilities, confidence };
+	return {
+		questionId: question.id,
+		type: question.type,
+		branch: questionOutputId(question.id, branch),
+		value,
+		probabilities,
+		confidence,
+	};
 }

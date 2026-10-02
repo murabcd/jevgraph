@@ -28,7 +28,10 @@ export const nodeMeta = {
 
 export function nodeFooterValue(data: FlowNode["data"]) {
 	if (data.kind === "input") return "";
-	if (data.kind === "jev") return questionTypeLabels[data.question.type];
+	if (data.kind === "jev")
+		return data.questions.length === 1
+			? questionTypeLabels[data.questions[0].type]
+			: `${data.questions.length} questions`;
 	if (data.routing?.mode === "automatic")
 		return data.modelPlans?.at(-1)?.selectedModel ?? "Automatic";
 	return data.model;

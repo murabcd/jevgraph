@@ -11,7 +11,7 @@ import {
 import { Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MAX_GRAPH_NODES } from "@/lib/graph-snapshot";
-import { questionOutputs } from "@/lib/jev-question";
+import { batchOutputs } from "@/lib/jev-question";
 import type { NodeTimer } from "@/lib/node-timer";
 import type { Id } from "../../convex/_generated/dataModel";
 import "@xyflow/react/dist/style.css";
@@ -271,7 +271,7 @@ export function RoutingCanvas({
 							name: `${nodeTitle(node.data)} · ${node.id}`,
 							outputs:
 								node.data.kind === "jev"
-									? questionOutputs(node.data.question)
+									? batchOutputs(node.data.questions)
 									: undefined,
 						}))}
 					onClose={() => setPanel(null)}

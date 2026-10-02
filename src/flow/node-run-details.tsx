@@ -11,24 +11,24 @@ const EMPTY_PLANS: ModelPlan[] = [];
 export function NodeRunDetails({
 	contexts = EMPTY_CONTEXTS,
 	calls = EMPTY_CALLS,
-	decision,
+	decisions,
 	modelPlans = EMPTY_PLANS,
 }: {
 	contexts?: NodeContextTrace[];
 	calls?: ProviderCall[];
-	decision?: WorkflowDecision;
+	decisions?: WorkflowDecision[];
 	modelPlans?: ModelPlan[];
 }) {
 	return (
 		<div className="grid gap-4">
 			<ModelPlanDetails plans={modelPlans} />
-			{decision && (
+			{decisions && (
 				<details className="rounded-lg border p-3 text-xs">
 					<summary className="cursor-pointer font-medium">
-						Structured decision · {decision.status}
+						Structured decisions
 					</summary>
 					<pre className="mt-3 overflow-x-auto whitespace-pre-wrap">
-						{JSON.stringify(decision, null, 2)}
+						{JSON.stringify(decisions, null, 2)}
 					</pre>
 				</details>
 			)}

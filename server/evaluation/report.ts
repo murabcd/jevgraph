@@ -8,7 +8,7 @@ import {
 	validateQualityReview,
 } from "../../src/lib/quality-review.ts";
 import { routeEvidenceKey } from "../../src/lib/route-evidence.ts";
-import { DEFAULT_JEV_CONFIDENCE_THRESHOLD } from "../../src/lib/routing.ts";
+
 import { artifactTrace } from "../../src/lib/run-artifact.ts";
 import { totalUsage } from "../../src/lib/usage.ts";
 import { mapConcurrent } from "../concurrency.ts";
@@ -207,7 +207,7 @@ export async function evaluationReport(
 		Date.parse(dataset.labels.reviewedAt) <= Date.parse(run.startedAt);
 	const thresholds = dataset.graph.nodes.flatMap((node) =>
 		node.kind === "jev"
-			? [node.confidenceThreshold ?? DEFAULT_JEV_CONFIDENCE_THRESHOLD]
+			? node.questions.map(({ confidenceThreshold }) => confidenceThreshold)
 			: [],
 	);
 	const models = run.candidates.map((candidate) => {

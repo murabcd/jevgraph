@@ -39,24 +39,32 @@ export function evaluationDatasetFixture() {
 				{
 					id: "intent",
 					kind: "jev",
-					question: {
-						type: "choice",
-						instructions: "Select the configured fixture branch.",
-						options: [
-							{
-								id: "accept",
-								label: "Accept",
-								description: "Accepted request.",
+					questions: [
+						{
+							...{
+								id: "question",
+								name: "Question",
+								confidenceThreshold: 0.7,
+								type: "choice",
+								instructions: "Select the configured fixture branch.",
+								options: [
+									{
+										id: "accept",
+										label: "Accept",
+										description: "Accepted request.",
+									},
+									{
+										id: "clarify",
+										label: "Clarify",
+										description: "Request needs clarification.",
+									},
+								],
 							},
-							{
-								id: "clarify",
-								label: "Clarify",
-								description: "Request needs clarification.",
-							},
-						],
-					},
-					confidenceThreshold: 0.7,
-					fallbackOutputId: "clarify",
+							confidenceThreshold: 0.7,
+							fallbackOutputId: "question/clarify",
+						},
+					],
+
 					variables: ["priority"],
 					context: {
 						historyMessages: 10,
@@ -101,13 +109,13 @@ export function evaluationDatasetFixture() {
 				{
 					id: "accepted",
 					source: "intent",
-					sourceHandle: "accept",
+					sourceHandle: "question/accept",
 					target: "answer",
 				},
 				{
 					id: "clarification",
 					source: "intent",
-					sourceHandle: "clarify",
+					sourceHandle: "question/clarify",
 					target: "answer",
 				},
 			],
@@ -120,7 +128,10 @@ export function evaluationDatasetFixture() {
 			metadata: { priority: "standard" },
 			expectations: ["Controlled fixture answer"],
 			decisions: [
-				{ nodeId: "intent", branch: index === 5 ? "clarify" : "accept" },
+				{
+					nodeId: "intent",
+					branch: index === 5 ? "question/clarify" : "question/accept",
+				},
 			],
 		})),
 	});
@@ -166,10 +177,15 @@ export async function evaluationFixture() {
 				messages: input.messages,
 				metadata: input.metadata,
 				evaluate: async () => ({
-					type: "choice",
-					branch: item.decisions[0].branch,
-					value: item.decisions[0].branch,
-					confidence: 0.9,
+					answers: [
+						{
+							questionId: "question",
+							type: "choice",
+							branch: item.decisions[0].branch,
+							value: item.decisions[0].branch,
+							confidence: 0.9,
+						},
+					],
 					latencyMs: 1,
 					model: "jev-1.13.0",
 					usage: { inputTokens: 20, outputTokens: 0 },

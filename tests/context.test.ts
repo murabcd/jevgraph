@@ -195,7 +195,7 @@ describe("node-specific context", () => {
 				{
 					id: "judge",
 					kind: "jev",
-					question: configuredJevQuestion(),
+					questions: [configuredJevQuestion()],
 					context: {
 						...DEFAULT_CONTEXT_POLICY,
 						documents: [{ id: "style", representation: "summary" }],
@@ -222,15 +222,18 @@ describe("node-specific context", () => {
 			revision: 1,
 			kind: "jev",
 			text: "Decision: Yes",
-			decision: {
-				nodeId: "judge",
-				branch: "yes",
-				selectedBranch: "no",
-				status: "uncertain",
-				value: 0.4,
-				confidence: 0.6,
-				probabilities: { yes: 0.4, no: 0.6 },
-			},
+			decisions: [
+				{
+					questionId: "question",
+					nodeId: "judge",
+					branch: "question/yes",
+					selectedBranch: "question/no",
+					status: "uncertain",
+					value: 0.4,
+					confidence: 0.6,
+					probabilities: { yes: 0.4, no: 0.6 },
+				},
+			],
 		};
 		const context = await prepareContext({
 			nodeId: "answer",
@@ -247,7 +250,9 @@ describe("node-specific context", () => {
 			context.documents,
 		);
 		expect(prompt.messages.at(-1)?.content).toContain('"status":"uncertain"');
-		expect(prompt.messages.at(-1)?.content).toContain('"selectedBranch":"no"');
+		expect(prompt.messages.at(-1)?.content).toContain(
+			'"selectedBranch":"question/no"',
+		);
 		expect(prompt.messages.at(-1)?.content).toContain('"yes":0.4');
 	});
 });

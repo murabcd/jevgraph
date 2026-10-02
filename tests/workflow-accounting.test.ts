@@ -23,7 +23,7 @@ test.each([true, false])(
 				{
 					id: "judge",
 					kind: "jev",
-					question: configuredJevQuestion("noul"),
+					questions: [configuredJevQuestion("noul")],
 					pricing: rates,
 					context: {
 						...DEFAULT_CONTEXT_POLICY,
@@ -53,11 +53,16 @@ test.each([true, false])(
 				{
 					id: "retry",
 					source: "judge",
-					sourceHandle: "no",
+					sourceHandle: "question/no",
 					target: "draft",
 					repeat: true,
 				},
-				{ id: "finish", source: "judge", sourceHandle: "yes", target: "final" },
+				{
+					id: "finish",
+					source: "judge",
+					sourceHandle: "question/yes",
+					target: "final",
+				},
 			],
 		};
 		let drafts = 0;
@@ -72,14 +77,19 @@ test.each([true, false])(
 				}),
 			},
 			evaluate: async () => ({
-				type: "noul",
-				branch: drafts > 1 ? "yes" : "no",
-				value: drafts > 1 ? 0.95 : 0.05,
-				confidence: 0.95,
-				probabilities: {
-					yes: drafts > 1 ? 0.95 : 0.05,
-					no: drafts > 1 ? 0.05 : 0.95,
-				},
+				answers: [
+					{
+						questionId: "question",
+						type: "noul",
+						branch: `question/${drafts > 1 ? "yes" : "no"}`,
+						value: drafts > 1 ? 0.95 : 0.05,
+						confidence: 0.95,
+						probabilities: {
+							yes: drafts > 1 ? 0.95 : 0.05,
+							no: drafts > 1 ? 0.05 : 0.95,
+						},
+					},
+				],
 				model: "jev-latest",
 				latencyMs: 1,
 				usage: { inputTokens: 20, outputTokens: 0 },
@@ -116,7 +126,7 @@ test.each([true, false])(
 		).toEqual([1, 2]);
 		expect(result.jevSteps.at(-1)).toMatchObject({
 			status: "accepted",
-			selectedBranch: "yes",
+			selectedBranch: "question/yes",
 			value: 0.95,
 			probabilities: { yes: 0.95, no: 0.05 },
 		});

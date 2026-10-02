@@ -90,7 +90,7 @@ function LastTurnPanel({
 							contexts={data.contexts}
 							modelPlans={data.modelPlans}
 							calls={data.calls}
-							decision={data.decisionDetails}
+							decisions={data.decisionDetails}
 						/>
 					</div>
 				</ScrollArea>
@@ -114,9 +114,7 @@ function JevPanel({
 	return (
 		<JevQuestionEditor
 			title={title}
-			question={data.question}
-			confidenceThreshold={data.confidenceThreshold}
-			fallbackOutputId={data.fallbackOutputId}
+			questions={data.questions}
 			fields={startFields}
 			variables={data.variables ?? []}
 			context={data.context}

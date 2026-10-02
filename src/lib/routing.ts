@@ -6,8 +6,11 @@ import {
 	resolveContextDocuments,
 } from "./context.ts";
 import {
-	configuredJevQuestionSchema,
-	questionOutputs,
+	batchOutputs,
+	confidenceThresholdSchema,
+	configuredJevQuestionsSchema,
+	MAX_JEV_QUESTIONS,
+	type resolveJevAnswer,
 } from "./jev-question.ts";
 import {
 	modelPlanSchema,
@@ -35,7 +38,6 @@ export type KeyStatus = { jev: boolean; openai: boolean; google: boolean };
 export const JEV_MODEL_ID = "jev-latest";
 export const DEFAULT_OPENAI_MODEL = "gpt-6-luna";
 export const DEFAULT_GOOGLE_MODEL = "gemini-3.8-flash";
-export const DEFAULT_JEV_CONFIDENCE_THRESHOLD = 0.7;
 export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 1400;
 export const MAX_PROMPT_LENGTH = 12000;
 export const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -48,7 +50,6 @@ export const modelPromptMessagesSchema = z
 	.array(modelPromptMessageSchema)
 	.max(MAX_MODEL_PROMPT_MESSAGES);
 export type ModelPromptMessage = z.infer<typeof modelPromptMessageSchema>;
-export const confidenceThresholdSchema = z.number().min(0).max(1);
 export const maxOutputTokensSchema = z.number().int().min(1).max(8192);
 export const reasoningEffortSchema = z.enum(reasoningEfforts);
 
@@ -147,9 +148,7 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 	z.strictObject({
 		id: nodeIdSchema,
 		kind: z.literal("jev"),
-		question: configuredJevQuestionSchema,
-		confidenceThreshold: confidenceThresholdSchema.optional(),
-		fallbackOutputId: z.string().min(1).max(100).optional(),
+		questions: configuredJevQuestionsSchema,
 		variables: variableNamesSchema.optional(),
 		maxRepeats: z.number().int().min(1).max(5).optional(),
 		context: contextPolicySchema.optional(),
@@ -250,7 +249,7 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 				if (
 					source?.kind !== "jev" ||
 					source.id === node.id ||
-					!questionOutputs(source.question).some(
+					!batchOutputs(source.questions).some(
 						(output) => output.id === condition.outputId,
 					) ||
 					node.context?.upstream === "none" ||
@@ -312,12 +311,11 @@ function validWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): boolean {
 			if (outgoing.length === 0 || outgoing.some((edge) => edge.sourceHandle))
 				return false;
 		} else if (node.kind === "jev") {
-			const outputs = questionOutputs(node.question);
+			const outputs = batchOutputs(node.questions);
 			if (
-				(node.fallbackOutputId !== undefined &&
-					!outputs.some((output) => output.id === node.fallbackOutputId)) ||
 				(outgoing.some((edge) => edge.repeat) &&
-					outgoing.filter((edge) => !edge.repeat).length !== 1) ||
+					(node.questions.length !== 1 ||
+						outgoing.filter((edge) => !edge.repeat).length !== 1)) ||
 				outputs.some(
 					(output) =>
 						outgoing.filter((edge) => edge.sourceHandle === output.id).length >
@@ -499,12 +497,8 @@ export const routeRequestSchema = z
 		}
 	});
 
-export type JevDecision = {
-	type: "choice" | "noul" | "score";
-	branch: string;
-	value: string | number;
-	confidence: number;
-	probabilities?: Record<string, number>;
+export type JevEvaluation = {
+	answers: ReturnType<typeof resolveJevAnswer>[];
 	model: string;
 	latencyMs: number;
 	usage?: TokenUsage;
@@ -520,6 +514,7 @@ export const nodeTimingSchema = z.strictObject({
 export type NodeTiming = z.infer<typeof nodeTimingSchema>;
 export const workflowDecisionSchema = z.strictObject({
 	nodeId: z.string(),
+	questionId: z.string(),
 	branch: z.string(),
 	status: z.enum(["accepted", "uncertain", "provider-error", "exhausted"]),
 	selectedBranch: z.string().optional(),
@@ -529,14 +524,20 @@ export const workflowDecisionSchema = z.strictObject({
 	error: z.string().optional(),
 });
 export type WorkflowDecision = z.infer<typeof workflowDecisionSchema>;
-export const nodeOutputSchema = z.strictObject({
+const outputIdentity = {
 	nodeId: z.string(),
 	sourceNodeId: z.string(),
-	kind: z.enum(["jev", "model"]),
 	text: z.string(),
 	revision: z.number().int().min(1),
-	decision: workflowDecisionSchema.optional(),
-});
+};
+export const nodeOutputSchema = z.discriminatedUnion("kind", [
+	z.strictObject({ ...outputIdentity, kind: z.literal("model") }),
+	z.strictObject({
+		...outputIdentity,
+		kind: z.literal("jev"),
+		decisions: z.array(workflowDecisionSchema).min(1).max(MAX_JEV_QUESTIONS),
+	}),
+]);
 export type NodeOutput = z.infer<typeof nodeOutputSchema>;
 export const routeTraceSchema = z.strictObject({
 	path: z.array(

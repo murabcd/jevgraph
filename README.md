@@ -42,7 +42,7 @@ JevGraph uses [OpenAI](https://openai.com/) and [Google](https://ai.google.dev/)
 
 - OpenAI model (`gpt-6-luna`): Text generation with configurable reasoning effort
 - Google model (`gemini-3.8-flash`): Text generation with Low, Medium, and High reasoning settings
-- Jev model (`jev-latest`): Choice, Noul, and Score evaluations for graph decisions
+- Jev model (`jev-latest`): 1–16 named Choice, Noul, and Score questions per reached node, evaluated together with independent confidence thresholds and question-scoped routing outputs
 
 ## Deploy Your Own
 

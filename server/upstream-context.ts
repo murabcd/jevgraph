@@ -1,7 +1,7 @@
 import type { NodeOutput } from "../src/lib/routing.ts";
 
 export function formattedOutput(output: NodeOutput): string {
-	return `[${output.nodeId} · revision ${output.revision}] ${output.decision ? JSON.stringify(output.decision) : output.text}`;
+	return `[${output.nodeId} · revision ${output.revision}] ${output.kind === "jev" ? JSON.stringify(output.decisions) : output.text}`;
 }
 
 export function formattedUpstreamOutputs(inputs: NodeOutput[]): string {

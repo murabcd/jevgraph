@@ -1,9 +1,6 @@
 import type { Edge } from "@xyflow/react";
 import type { FlowNode } from "../src/flow/graph";
-import {
-	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
-	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
-} from "../src/lib/routing";
+import { DEFAULT_MODEL_MAX_OUTPUT_TOKENS } from "../src/lib/routing";
 import { configuredJevQuestion } from "./jev-question-fixture";
 
 export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
@@ -22,8 +19,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				data: {
 					kind: "jev",
 					active: false,
-					question: configuredJevQuestion("noul"),
-					confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+					questions: [configuredJevQuestion("noul")],
 				},
 			},
 			{
@@ -33,8 +29,7 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 				data: {
 					kind: "jev",
 					active: false,
-					question: configuredJevQuestion("noul"),
-					confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+					questions: [configuredJevQuestion("noul")],
 				},
 			},
 			{
@@ -87,25 +82,25 @@ export function connectedWorkflowGraph(): { nodes: FlowNode[]; edges: Edge[] } {
 			{
 				id: "first-yes",
 				source: "first-router",
-				sourceHandle: "yes",
+				sourceHandle: "question/yes",
 				target: "primary-model",
 			},
 			{
 				id: "first-no",
 				source: "first-router",
-				sourceHandle: "no",
+				sourceHandle: "question/no",
 				target: "second-router",
 			},
 			{
 				id: "second-yes",
 				source: "second-router",
-				sourceHandle: "yes",
+				sourceHandle: "question/yes",
 				target: "second-yes-model",
 			},
 			{
 				id: "second-no",
 				source: "second-router",
-				sourceHandle: "no",
+				sourceHandle: "question/no",
 				target: "second-no-model",
 			},
 			{

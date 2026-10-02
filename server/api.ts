@@ -13,7 +13,7 @@ import type { RouteEvidence } from "../src/lib/route-evidence.ts";
 import {
 	type ChatMessage,
 	JEV_MODEL_ID,
-	type JevDecision,
+	type JevEvaluation,
 	MAX_REQUEST_BYTES,
 	modelReasoningEffort,
 	type RouteStreamEvent,
@@ -73,15 +73,15 @@ type RouteExecution = {
 	providerEvidence: ProviderEvidence;
 };
 
-const jevConfidenceSchema = z.object({ task: z.number().finite() });
+const jevConfidenceSchema = z.record(z.string(), z.number().finite());
 
 async function classify(
 	state: string,
 	key: string,
-	question: JevQuestion,
+	questions: JevQuestion[],
 	signal: AbortSignal,
 	providerFetch?: ProviderFetch,
-): Promise<JevDecision> {
+): Promise<JevEvaluation> {
 	const start = performance.now();
 	const evaluationModel = evaluationModelFor({
 		keys: { TYPESAFE_API_KEY: key },
@@ -91,21 +91,22 @@ async function classify(
 	const result = await experimental_evaluate({
 		model: evaluationModel,
 		state,
-		questions: { task: questionForJev(question) },
+		questions: Object.fromEntries(
+			questions.map((question) => [question.id, questionForJev(question)]),
+		),
 		abortSignal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
 		maxRetries: 0,
 	});
 	const confidence = result.providerMetadata?.typesafe?.confidence;
-	const taskConfidence = jevConfidenceSchema.safeParse(confidence).data?.task;
+	const confidences = jevConfidenceSchema.safeParse(confidence).data;
 	try {
-		const decision = resolveJevAnswer(
-			question,
-			result.answers.task,
-			taskConfidence,
-		);
+		const answers = questions.map((question) => {
+			const answer = result.answers[question.id];
+			if (!answer) throw new Error(`Jev omitted question ${question.name}`);
+			return resolveJevAnswer(question, answer, confidences?.[question.id]);
+		});
 		return {
-			type: question.type,
-			...decision,
+			answers,
 			model: result.response?.modelId ?? JEV_MODEL_ID,
 			latencyMs: Math.round(performance.now() - start),
 			usage: evaluationUsage(result.usage),

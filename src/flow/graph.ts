@@ -12,16 +12,16 @@ import {
 	MAX_GRAPH_NODES,
 } from "@/lib/graph-snapshot";
 import {
+	batchOutputs,
 	defaultJevQuestion,
 	type JevQuestion,
-	questionOutputs,
+	stableQuestionOutputIds,
 } from "@/lib/jev-question";
 import type { ModelPlan, ModelRouting } from "@/lib/model-routing";
 import type { ReasoningEffort } from "@/lib/models";
 import type { NodeTimer } from "@/lib/node-timer";
 import {
 	DEFAULT_GOOGLE_MODEL,
-	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	DEFAULT_OPENAI_MODEL,
 	type ModelPromptMessage,
@@ -41,7 +41,7 @@ type NodeViewData = {
 	fallbackConnected?: boolean;
 	isBackup?: boolean;
 	decision?: string;
-	decisionDetails?: WorkflowDecision;
+	decisionDetails?: WorkflowDecision[];
 	contexts?: NodeContextTrace[];
 	calls?: ProviderCall[];
 	modelPlans?: ModelPlan[];
@@ -62,14 +62,12 @@ type NodeData = NodeViewData &
 				prompt?: never;
 				fields: StartField[];
 				documents?: ContextDocument[];
-				question?: never;
+				questions?: never;
 				model?: never;
 		  }
 		| {
 				kind: "jev";
-				question: JevQuestion;
-				confidenceThreshold: number;
-				fallbackOutputId?: string;
+				questions: JevQuestion[];
 				maxRepeats?: number;
 				variables?: string[];
 				context?: ContextPolicy;
@@ -87,20 +85,14 @@ type NodeData = NodeViewData &
 				pricing?: Pricing;
 				maxOutputTokens: number;
 				reasoningEffort?: ReasoningEffort;
-				question?: never;
+				questions?: never;
 		  }
 	);
 
 export type FlowNode = Node<NodeData, "route">;
 export type JevNodeSettings = Pick<
 	Extract<FlowNode["data"], { kind: "jev" }>,
-	| "question"
-	| "confidenceThreshold"
-	| "fallbackOutputId"
-	| "variables"
-	| "maxRepeats"
-	| "context"
-	| "pricing"
+	"questions" | "variables" | "maxRepeats" | "context" | "pricing"
 >;
 type ModelNodeData = Extract<FlowNode["data"], { kind: "google" | "openai" }>;
 export type ModelNodeSettings = Pick<
@@ -122,8 +114,7 @@ export function defaultNodeData(
 		return {
 			kind,
 			active: false,
-			question: defaultJevQuestion(),
-			confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+			questions: [defaultJevQuestion()],
 		};
 	const model =
 		provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL;
@@ -142,9 +133,7 @@ function persistedNodeData(data: FlowNode["data"]) {
 	if (data.kind === "jev")
 		return {
 			kind: data.kind,
-			question: data.question,
-			confidenceThreshold: data.confidenceThreshold,
-			fallbackOutputId: data.fallbackOutputId,
+			questions: data.questions,
 			maxRepeats: data.maxRepeats,
 			variables: data.variables,
 			context: data.context,
@@ -245,6 +234,7 @@ export function canConnectNodes(
 	if (
 		createsCycle &&
 		(source.data.kind !== "jev" ||
+			source.data.questions.length !== 1 ||
 			(target.data.kind !== "google" && target.data.kind !== "openai") ||
 			edges.some(
 				(edge) =>
@@ -265,8 +255,8 @@ export function canConnectNodes(
 		target.data.kind === "google" || target.data.kind === "openai";
 	if (source.data.kind === "jev")
 		return Boolean(
-			source.data.question &&
-				questionOutputs(source.data.question).some(
+			source.data.questions &&
+				batchOutputs(source.data.questions).some(
 					(output) => output.id === connection.sourceHandle,
 				) &&
 				(targetIsModel || target.data.kind === "jev"),
@@ -396,7 +386,11 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 			let type = "OUTPUT";
 			if (node.data.kind === "input") type = "START";
 			else if (node.data.kind === "jev")
-				type = jevRoleLabels[node.data.question.type].toUpperCase();
+				type = (
+					node.data.questions.length === 1
+						? jevRoleLabels[node.data.questions[0].type]
+						: "Decisions"
+				).toUpperCase();
 			else if (backupTargets.has(node.id)) type = "BACKUP";
 			else if (
 				edges.some(
@@ -440,13 +434,9 @@ export function routesFromGraph(
 						return {
 							id: node.id,
 							kind: "jev" as const,
-							question: node.data.question,
+							questions: node.data.questions,
 							context: node.data.context,
 							pricing: node.data.pricing,
-							confidenceThreshold: node.data.confidenceThreshold,
-							...(node.data.fallbackOutputId
-								? { fallbackOutputId: node.data.fallbackOutputId }
-								: {}),
 							...(node.data.variables?.length
 								? { variables: node.data.variables }
 								: {}),
@@ -498,16 +488,12 @@ export function routesFromGraph(
 }
 
 export function retainQuestionEdges(
-	previousQuestion: JevQuestion,
-	nextQuestion: JevQuestion,
+	previousQuestions: JevQuestion[],
+	nextQuestions: JevQuestion[],
 	edges: Edge[],
 	sourceId = "jev",
 ): Edge[] {
-	if (previousQuestion.type !== nextQuestion.type)
-		return edges.filter((edge) => edge.source !== sourceId);
-	const outputIds = new Set(
-		questionOutputs(nextQuestion).map((output) => output.id),
-	);
+	const outputIds = stableQuestionOutputIds(previousQuestions, nextQuestions);
 	return edges.filter(
 		(edge) =>
 			edge.source !== sourceId || outputIds.has(edge.sourceHandle ?? ""),

@@ -15,7 +15,6 @@ import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import { parseGraphJson } from "../src/lib/graph-snapshot";
 import { defaultJevQuestion, questionOutputs } from "../src/lib/jev-question";
 import {
-	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	routesUseJev,
 } from "../src/lib/routing";
@@ -44,8 +43,7 @@ function node(
 			...(kind === "input" ? { fields: [] } : {}),
 			...(kind === "jev"
 				? {
-						question: configuredJevQuestion(),
-						confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+						questions: [configuredJevQuestion()],
 					}
 				: {}),
 			...(kind === "openai"
@@ -339,7 +337,7 @@ describe("editable chatflow graph", () => {
 		).toBe(false);
 		expect(
 			canConnectNodes(
-				{ source: "judge", sourceHandle: "choice-1", target: "first" },
+				{ source: "judge", sourceHandle: "question/choice-1", target: "first" },
 				nodes,
 				edges,
 			),
@@ -396,13 +394,13 @@ describe("editable chatflow graph", () => {
 			{
 				id: "choice-1",
 				source: "judge",
-				sourceHandle: "choice-1",
+				sourceHandle: "question/choice-1",
 				target: "final",
 			},
 			{
 				id: "choice-2",
 				source: "judge",
-				sourceHandle: "choice-2",
+				sourceHandle: "question/choice-2",
 				target: "final",
 			},
 		];
@@ -468,8 +466,18 @@ describe("editable chatflow graph", () => {
 				sourceHandle: "next",
 				target: "join",
 			},
-			{ id: "yes", source: "join", sourceHandle: "choice-1", target: "final" },
-			{ id: "no", source: "join", sourceHandle: "choice-2", target: "final" },
+			{
+				id: "yes",
+				source: "join",
+				sourceHandle: "question/choice-1",
+				target: "final",
+			},
+			{
+				id: "no",
+				source: "join",
+				sourceHandle: "question/choice-2",
+				target: "final",
+			},
 		];
 		const routes = routesFromGraph(nodes, edges);
 		expect(
@@ -493,14 +501,14 @@ describe("editable chatflow graph", () => {
 			{
 				id: "retry",
 				source: "judge",
-				sourceHandle: "choice-1",
+				sourceHandle: "question/choice-1",
 				target: "draft",
 				data: { repeat: true },
 			},
 			{
 				id: "done",
 				source: "judge",
-				sourceHandle: "choice-2",
+				sourceHandle: "question/choice-2",
 				target: "final",
 			},
 		];
@@ -526,7 +534,7 @@ describe("editable chatflow graph", () => {
 			{
 				id: "choice-1",
 				source: "judge",
-				sourceHandle: "choice-1",
+				sourceHandle: "question/choice-1",
 				target: "model",
 			},
 		];
@@ -561,15 +569,15 @@ describe("editable chatflow graph", () => {
 			{
 				id: "choice-1",
 				source: "judge",
-				sourceHandle: "choice-1",
+				sourceHandle: "question/choice-1",
 				target: "model",
 			},
 		];
 		expect(questionOutputs(next)[0].label).toBe("Cheap");
 		expect(
-			retainQuestionEdges(previous, next, edges, "judge")[0],
+			retainQuestionEdges([previous], [next], edges, "judge")[0],
 		).toMatchObject({
-			sourceHandle: "choice-1",
+			sourceHandle: "question/choice-1",
 			target: "model",
 		});
 	});
@@ -583,12 +591,17 @@ describe("editable chatflow graph", () => {
 			{
 				id: "choice-yes",
 				source: "judge",
-				sourceHandle: "yes",
+				sourceHandle: "question/yes",
 				target: "model",
 			},
 		];
 		expect(
-			retainQuestionEdges(previous, defaultJevQuestion("noul"), edges, "judge"),
+			retainQuestionEdges(
+				[previous],
+				[defaultJevQuestion("noul")],
+				edges,
+				"judge",
+			),
 		).toEqual([edges[0]]);
 	});
 

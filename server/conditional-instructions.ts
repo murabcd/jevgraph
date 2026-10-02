@@ -21,24 +21,29 @@ export function resolveInstructions({
 				selectedStages.has(input.sourceNodeId)),
 	);
 	const byStage = new Map(selected.map((input) => [input.sourceNodeId, input]));
-	const trace = rules.map((rule) => ({
-		id: rule.id,
-		name: rule.name,
-		active:
-			rule.condition.kind === "variable"
-				? rule.condition.name in variables &&
-					variables[rule.condition.name] === rule.condition.value
-				: byStage.get(rule.condition.nodeId)?.decision?.status === "accepted" &&
-					byStage.get(rule.condition.nodeId)?.decision?.branch ===
-						rule.condition.outputId,
-	}));
-	const instructions = [
-		base,
-		...rules
-			.filter((_, index) => trace[index].active)
-			.map((rule) => rule.instructions),
-	]
+	const trace = rules.map(({ id, name, condition }) => {
+		const output =
+			condition.kind === "decision" ? byStage.get(condition.nodeId) : undefined;
+		return {
+			id,
+			name,
+			active:
+				condition.kind === "variable"
+					? condition.name in variables &&
+						variables[condition.name] === condition.value
+					: output?.kind === "jev" &&
+						output.decisions.some(
+							(decision) =>
+								decision.status === "accepted" &&
+								decision.branch === condition.outputId,
+						),
+		};
+	});
+	const activeInstructions = rules
+		.filter((_, index) => trace[index].active)
+		.map((rule) => rule.instructions);
+	const instructions = [base, ...activeInstructions]
 		.filter(Boolean)
 		.join("\n\n");
-	return { instructions, trace };
+	return { instructions, trace, activeInstructions };
 }

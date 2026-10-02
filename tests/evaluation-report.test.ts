@@ -80,7 +80,15 @@ test("confidence reports use configured Jev thresholds and omit rows when no thr
 	const { dataset, run, now } = await evaluationFixture();
 	const configure = (nodes: typeof dataset.graph.nodes) =>
 		nodes.map((node) =>
-			node.kind === "jev" ? { ...node, confidenceThreshold: 0.83 } : node,
+			node.kind === "jev"
+				? {
+						...node,
+						questions: node.questions.map((question) => ({
+							...question,
+							confidenceThreshold: 0.83,
+						})),
+					}
+				: node,
 		);
 	dataset.graph.nodes = configure(dataset.graph.nodes);
 	for (const trial of run.trials)

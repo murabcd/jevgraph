@@ -182,7 +182,7 @@ test("authenticated replay follows registration, exact input reuse and request d
 			packets.push(String(init?.body));
 			return Response.json({
 				model: "jev-1.13.0",
-				answers: { task: { type: "noul", noul: 0.99 } },
+				answers: { question: { type: "noul", noul: 0.99 } },
 				usage: { input_tokens: 10, output_tokens: 0 },
 			});
 		},
@@ -201,7 +201,7 @@ test("authenticated replay follows registration, exact input reuse and request d
 						{
 							id: "judge",
 							kind: "jev",
-							question: configuredJevQuestion("noul"),
+							questions: [configuredJevQuestion("noul")],
 						},
 					],
 					edges: [{ id: "entry", source: "input", target: "judge" }],

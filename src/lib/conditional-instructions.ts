@@ -13,7 +13,7 @@ export const conditionalInstructionSchema = z.strictObject({
 		z.strictObject({
 			kind: z.literal("decision"),
 			nodeId: z.string().min(1).max(100),
-			outputId: z.string().min(1).max(100),
+			outputId: z.string().min(1).max(200),
 		}),
 	]),
 });

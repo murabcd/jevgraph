@@ -1,10 +1,8 @@
 import { z } from "zod";
 import { contextDocumentsSchema, contextPolicySchema } from "./context.ts";
-import { defaultJevQuestion, jevQuestionSchema } from "./jev-question.ts";
+import { defaultJevQuestion, jevQuestionsSchema } from "./jev-question.ts";
 import { modelRoutingSchema } from "./model-routing.ts";
 import {
-	confidenceThresholdSchema,
-	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	MAX_PROMPT_LENGTH,
 	maxOutputTokensSchema,
 	modelIdSchema,
@@ -27,9 +25,7 @@ export const persistedNodeSchema = z.object({
 		}),
 		z.object({
 			kind: z.literal("jev"),
-			question: jevQuestionSchema,
-			confidenceThreshold: confidenceThresholdSchema,
-			fallbackOutputId: z.string().optional(),
+			questions: jevQuestionsSchema,
 			maxRepeats: z.number().int().min(1).max(5).optional(),
 			variables: z.array(z.string()).optional(),
 			context: contextPolicySchema.optional(),
@@ -102,8 +98,7 @@ export function createInitialGraph(): GraphSnapshot {
 				position: { x: 355, y: 235 },
 				data: {
 					kind: "jev",
-					question: defaultJevQuestion(),
-					confidenceThreshold: DEFAULT_JEV_CONFIDENCE_THRESHOLD,
+					questions: [defaultJevQuestion()],
 				},
 			},
 		],

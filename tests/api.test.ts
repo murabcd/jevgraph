@@ -71,8 +71,12 @@ describe("chatflow API", () => {
 				{
 					id: "custom-router",
 					kind: "jev",
-					question: configuredJevQuestion(),
-					fallbackOutputId: "choice-1",
+					questions: [
+						{
+							...configuredJevQuestion(),
+							fallbackOutputId: "question/choice-1",
+						},
+					],
 				},
 				{
 					id: "first-model",
@@ -92,13 +96,13 @@ describe("chatflow API", () => {
 				{
 					id: "choice-1",
 					source: "custom-router",
-					sourceHandle: "choice-1",
+					sourceHandle: "question/choice-1",
 					target: "first-model",
 				},
 				{
 					id: "choice-2",
 					source: "custom-router",
-					sourceHandle: "choice-2",
+					sourceHandle: "question/choice-2",
 					target: "second-model",
 				},
 			],

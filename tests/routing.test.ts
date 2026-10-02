@@ -221,9 +221,13 @@ describe("chatflow contract", () => {
 				{
 					id: "judge",
 					kind: "jev",
-					question: configuredJevQuestion(),
-					confidenceThreshold: 0.85,
-					fallbackOutputId: "choice-2",
+					questions: [
+						{
+							...configuredJevQuestion(),
+							confidenceThreshold: 0.85,
+							fallbackOutputId: "question/choice-2",
+						},
+					],
 				},
 			],
 			edges: [{ id: "entry", source: "input", target: "judge" }],
@@ -232,13 +236,29 @@ describe("chatflow contract", () => {
 		expect(
 			workflowRoutesSchema.safeParse({
 				...jev,
-				nodes: [jev.nodes[0], { ...jev.nodes[1], fallbackOutputId: "missing" }],
+				nodes: [
+					jev.nodes[0],
+					{
+						...jev.nodes[1],
+						questions: [
+							{ ...configuredJevQuestion(), fallbackOutputId: "missing" },
+						],
+					},
+				],
 			}).success,
 		).toBe(false);
 		expect(
 			workflowRoutesSchema.safeParse({
 				...jev,
-				nodes: [jev.nodes[0], { ...jev.nodes[1], confidenceThreshold: 1.2 }],
+				nodes: [
+					jev.nodes[0],
+					{
+						...jev.nodes[1],
+						questions: [
+							{ ...configuredJevQuestion(), confidenceThreshold: 1.2 },
+						],
+					},
+				],
 			}).success,
 		).toBe(false);
 		expect(
@@ -298,7 +318,7 @@ describe("chatflow contract", () => {
 					provider: "google",
 					model: "gemini-3.8-flash",
 				},
-				{ id: "judge", kind: "jev", question: configuredJevQuestion() },
+				{ id: "judge", kind: "jev", questions: [configuredJevQuestion()] },
 				{ id: "final", kind: "model", provider: "openai", model: "gpt-6-luna" },
 			],
 			edges: [
@@ -306,8 +326,18 @@ describe("chatflow contract", () => {
 				{ id: "b", source: "input", target: "second" },
 				{ id: "c", source: "first", sourceHandle: "next", target: "judge" },
 				{ id: "d", source: "second", sourceHandle: "next", target: "judge" },
-				{ id: "e", source: "judge", sourceHandle: "choice-1", target: "final" },
-				{ id: "f", source: "judge", sourceHandle: "choice-2", target: "final" },
+				{
+					id: "e",
+					source: "judge",
+					sourceHandle: "question/choice-1",
+					target: "final",
+				},
+				{
+					id: "f",
+					source: "judge",
+					sourceHandle: "question/choice-2",
+					target: "final",
+				},
 			],
 		};
 		const parsed = workflowRoutesSchema.parse(flow);

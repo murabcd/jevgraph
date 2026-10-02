@@ -3,7 +3,7 @@ import {
 	type NodeContextTrace,
 	resolveContextDocuments,
 } from "../src/lib/context.ts";
-import { type JevQuestion, questionOutputs } from "../src/lib/jev-question.ts";
+import type { JevQuestion } from "../src/lib/jev-question.ts";
 import type { CacheMode, ModelPlan } from "../src/lib/model-routing.ts";
 import { textModels } from "../src/lib/models.ts";
 import {
@@ -12,9 +12,8 @@ import {
 } from "../src/lib/route-evidence.ts";
 import {
 	type ChatMessage,
-	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	JEV_MODEL_ID,
-	type JevDecision,
+	type JevEvaluation,
 	modelTarget,
 	type NodeOutput,
 	type RouteResult,
@@ -30,6 +29,7 @@ import {
 import { type TokenUsage, totalUsage } from "../src/lib/usage.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import type { PreparedContext } from "./context.ts";
+import { resolveJevBatch } from "./jev-node.ts";
 import { runWithOneFallback } from "./model-failover.ts";
 import {
 	type ModelPlanningRequest,
@@ -95,9 +95,9 @@ type Execution = {
 	availableModels?: ReadonlySet<string>;
 	evaluate: (
 		nodeId: string,
-		question: JevQuestion,
+		questions: JevQuestion[],
 		state: string,
-	) => Promise<JevDecision>;
+	) => Promise<JevEvaluation>;
 	runModel: (request: WorkflowModelRequest) => Promise<WorkflowResponse>;
 	onDelta: (text: string) => void;
 	onRoute: (route: RouteSelectionResult) => void;
@@ -113,7 +113,7 @@ type Terminal = {
 type NodeExecution = {
 	lineage: NodeOutput[];
 	edges: WorkflowEdge[];
-	decision?: WorkflowDecision;
+	decisions?: WorkflowDecision[];
 	output?: NodeOutput;
 	terminal?: Terminal;
 	fallback?: { edge: WorkflowEdge; reason: string };
@@ -330,11 +330,10 @@ export async function executeWorkflow({
 			if (node.kind === "jev") {
 				const callId = ledger.nextId();
 				const context = await contextFor(node, inputs, callId);
-				const options = questionOutputs(node.question);
-				let decision: JevDecision | undefined;
+				let evaluation: JevEvaluation | undefined;
 				let error: string | undefined;
 				try {
-					decision = await ledger.run(
+					evaluation = await ledger.run(
 						{
 							nodeId: id,
 							purpose: "decision",
@@ -346,10 +345,13 @@ export async function executeWorkflow({
 						() =>
 							evaluate(
 								id,
-								{
-									...node.question,
-									instructions: context.instructions,
-								},
+								node.questions.map((question) => ({
+									...question,
+									instructions: [
+										question.instructions,
+										...context.activeInstructions,
+									].join("\n\n"),
+								})),
 								workflowRoutingState(
 									context.messages,
 									selectedVariables(startVariables, node.variables),
@@ -365,85 +367,38 @@ export async function executeWorkflow({
 						caught instanceof Error ? caught.message : "Unknown Jev error";
 				}
 				signal?.throwIfAborted();
-				const acceptedBranch =
-					decision &&
-					decision.confidence >=
-						(node.confidenceThreshold ?? DEFAULT_JEV_CONFIDENCE_THRESHOLD) &&
-					options.some((option) => option.id === decision.branch)
-						? decision.branch
-						: undefined;
-				const preferredBranch = acceptedBranch ?? node.fallbackOutputId;
-				if (!preferredBranch)
-					throw new Error(
-						`Jev ${id} could not choose a reliable answer${error ? `: ${error}` : ""}`,
-					);
-				let chosenEdge = outgoingEdges.find(
-					(edge) => edge.source === id && edge.sourceHandle === preferredBranch,
-				);
-				let limitReached = false;
-				if (chosenEdge?.repeat) {
-					const count = repeatCounts.get(chosenEdge.id) ?? 0;
-					if (count >= (node.maxRepeats ?? 3)) {
-						chosenEdge = undefined;
-						limitReached = true;
-					} else repeatCounts.set(chosenEdge.id, count + 1);
-				}
-				const branch = chosenEdge?.sourceHandle ?? preferredBranch;
-				const workflowDecision: WorkflowDecision = {
+				const resolved = resolveJevBatch({
 					nodeId: id,
-					branch,
-					status: limitReached
-						? "exhausted"
-						: error
-							? "provider-error"
-							: acceptedBranch
-								? "accepted"
-								: "uncertain",
-					selectedBranch: decision?.branch,
-					value: decision?.value,
-					probabilities: decision?.probabilities,
-					confidence: decision?.confidence,
+					questions: node.questions,
+					evaluation,
 					error,
-				};
-				const label =
-					options.find((option) => option.id === branch)?.label ?? branch;
+					edges: outgoingEdges,
+					repeatCounts,
+					maxRepeats: node.maxRepeats ?? 3,
+				});
 				const output: NodeOutput = {
 					nodeId: id,
 					sourceNodeId: id,
 					kind: "jev",
 					revision: revisionFor(id),
-					decision: workflowDecision,
-					text: limitReached
-						? "Repeat limit reached. Review did not pass."
-						: chosenEdge
-							? `Decision: ${label}`
-							: label,
+					decisions: resolved.decisions,
+					text: resolved.text,
 				};
-				if (!chosenEdge) {
-					const jevModel = decision?.model ?? JEV_MODEL_ID;
-					const terminal: Terminal = {
-						target: { nodeId: id, provider: "jev", model: jevModel },
-						response: {
-							text: output.text,
-							model: jevModel,
-							usage: decision?.usage,
-						},
-					};
-					if (limitReached) exhausted = terminal;
-					return {
-						lineage: [...inputs, output],
-						decision: workflowDecision,
-						output,
-						edges: [],
-						terminal,
-					};
-				}
-				return {
+				const result: NodeExecution = {
 					lineage: [...inputs, output],
-					decision: workflowDecision,
+					decisions: resolved.decisions,
 					output,
-					edges: [chosenEdge],
+					edges: resolved.edges,
 				};
+				if (resolved.edges.length === 0) {
+					const model = evaluation?.model ?? JEV_MODEL_ID;
+					result.terminal = {
+						target: { nodeId: id, provider: "jev", model },
+						response: { text: output.text, model },
+					};
+					if (resolved.exhausted) exhausted = result.terminal;
+				}
+				return result;
 			}
 			const target = modelTarget(node);
 			const next = normal.filter((edge) => edge.source === id);
@@ -575,7 +530,7 @@ export async function executeWorkflow({
 			MAX_CONCURRENT_NODES,
 			async (item) => {
 				const result = await executeNode(item);
-				if (result.decision) decisions.push(result.decision);
+				if (result.decisions) decisions.push(...result.decisions);
 				if (result.output) outputs.push(result.output);
 				report();
 				return result;

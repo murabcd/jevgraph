@@ -43,7 +43,7 @@ function providerResponse(url: RequestInfo | URL) {
 		return Response.json({
 			model: "jev-1.13.0",
 			answers: {
-				task: {
+				question: {
 					type: "choice",
 					choice: "Accept",
 					probabilities: { Accept: 0.99, Clarify: 0.01 },

@@ -21,7 +21,7 @@ const rules: ConditionalInstruction[] = [
 		id: "approved",
 		name: "Approved",
 		instructions: "Explain the approved refund.",
-		condition: { kind: "decision", nodeId: "review", outputId: "yes" },
+		condition: { kind: "decision", nodeId: "review", outputId: "question/yes" },
 	},
 ];
 const output: NodeOutput = {
@@ -30,7 +30,14 @@ const output: NodeOutput = {
 	revision: 1,
 	kind: "jev",
 	text: "yes",
-	decision: { nodeId: "review", branch: "yes", status: "accepted" },
+	decisions: [
+		{
+			questionId: "question",
+			nodeId: "review",
+			branch: "question/yes",
+			status: "accepted",
+		},
+	],
 };
 
 test("instruction activation uses selected typed values and accepted reached decisions only", () => {
@@ -58,12 +65,14 @@ test("instruction activation uses selected typed values and accepted reached dec
 				[
 					{
 						...output,
-						decision: {
-							...output.decision,
-							nodeId: "review",
-							branch: "yes",
-							status,
-						},
+						decisions: [
+							{
+								...output.decisions[0],
+								nodeId: "review",
+								branch: "question/yes",
+								status,
+							},
+						],
 					},
 				],
 				{ vip: false },
@@ -75,7 +84,14 @@ test("instruction activation uses selected typed values and accepted reached dec
 				{
 					...output,
 					revision: 2,
-					decision: { nodeId: "review", branch: "no", status: "accepted" },
+					decisions: [
+						{
+							questionId: "question",
+							nodeId: "review",
+							branch: "question/no",
+							status: "accepted",
+						},
+					],
 				},
 			],
 			{ vip: false },
@@ -97,7 +113,7 @@ test("workflow resolves active instructions for both Jev and generation before c
 			{
 				id: "review",
 				kind: "jev",
-				question: configuredJevQuestion("noul"),
+				questions: [configuredJevQuestion("noul")],
 				variables: ["vip"],
 				context: { ...DEFAULT_CONTEXT_POLICY, instructions: [rules[0]] },
 			},
@@ -115,7 +131,7 @@ test("workflow resolves active instructions for both Jev and generation before c
 			{
 				id: "accepted",
 				source: "review",
-				sourceHandle: "yes",
+				sourceHandle: "question/yes",
 				target: "answer",
 			},
 		],
@@ -125,13 +141,18 @@ test("workflow resolves active instructions for both Jev and generation before c
 		routes,
 		metadata: {},
 		messages: [{ role: "user", content: "Can I return this?" }],
-		evaluate: async (_, question) => {
-			expect(question.instructions).toContain("Offer priority service.");
+		evaluate: async (_, questions) => {
+			expect(questions[0].instructions).toContain("Offer priority service.");
 			return {
-				type: "noul",
-				branch: "yes",
-				value: 0.99,
-				confidence: 0.99,
+				answers: [
+					{
+						questionId: "question",
+						type: "noul",
+						branch: "question/yes",
+						value: 0.99,
+						confidence: 0.99,
+					},
+				],
 				model: "jev-latest",
 				latencyMs: 1,
 			};
@@ -161,7 +182,11 @@ test("workflow resolves active instructions for both Jev and generation before c
 			instructions: [
 				{
 					...rules[1],
-					condition: { kind: "decision", nodeId: "review", outputId: "yes" },
+					condition: {
+						kind: "decision",
+						nodeId: "review",
+						outputId: "question/yes",
+					},
 				},
 			],
 		};

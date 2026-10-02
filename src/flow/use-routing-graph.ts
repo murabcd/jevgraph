@@ -31,7 +31,7 @@ import {
 	MAX_GRAPH_NODES,
 	parseGraphJson,
 } from "@/lib/graph-snapshot";
-import { questionOutputs } from "@/lib/jev-question";
+import { batchOutputs, stableQuestionOutputIds } from "@/lib/jev-question";
 import { providerForModel } from "@/lib/models";
 import type { StartField } from "@/lib/routing";
 import { useSavedGraph } from "@/storage/use-saved-graph";
@@ -139,12 +139,15 @@ export function useRoutingGraph(workspace: Workspace) {
 
 	const onQuestionChange = useCallback(
 		(nodeId: string, settings: JevNodeSettings) => {
-			const nextQuestion = settings.question;
-			const currentQuestion = nodes.find((node) => node.id === nodeId)?.data
-				.question;
-			if (!currentQuestion) return;
-			const outputIds = new Set(
-				questionOutputs(nextQuestion).map(({ id }) => id),
+			const nextQuestions = settings.questions;
+			const previous = nodes.find(
+				(node) => node.id === nodeId && node.data.kind === "jev",
+			);
+			const previousQuestions = previous?.data.questions;
+			if (!previousQuestions) return;
+			const outputIds = stableQuestionOutputIds(
+				previousQuestions,
+				nextQuestions,
 			);
 			setNodes((current) =>
 				current.map((node) =>
@@ -154,11 +157,6 @@ export function useRoutingGraph(workspace: Workspace) {
 								data: {
 									...node.data,
 									...settings,
-									fallbackOutputId: questionOutputs(nextQuestion).some(
-										(output) => output.id === settings.fallbackOutputId,
-									)
-										? settings.fallbackOutputId
-										: undefined,
 								},
 							}
 						: node.data.kind !== "input" && node.data.context
@@ -181,7 +179,7 @@ export function useRoutingGraph(workspace: Workspace) {
 				),
 			);
 			setGraphEdges((current) =>
-				retainQuestionEdges(currentQuestion, nextQuestion, current, nodeId),
+				retainQuestionEdges(previousQuestions, nextQuestions, current, nodeId),
 			);
 			setPendingConnection(null);
 		},
@@ -316,8 +314,8 @@ export function useRoutingGraph(workspace: Workspace) {
 			const branch = state.fromHandle?.id;
 			if (
 				sourceKind === "jev" &&
-				(!sourceNode.data.question ||
-					!questionOutputs(sourceNode.data.question).some(
+				(!sourceNode.data.questions ||
+					!batchOutputs(sourceNode.data.questions).some(
 						(output) => output.id === branch,
 					))
 			)
@@ -412,9 +410,9 @@ export function useRoutingGraph(workspace: Workspace) {
 			}
 			const id = crypto.randomUUID();
 			const sourceQuestion = nodes.find((node) => node.id === source)?.data
-				.question;
+				.questions;
 			const providerKind =
-				sourceQuestion && questionOutputs(sourceQuestion)[0]?.id === branch
+				sourceQuestion && batchOutputs(sourceQuestion)[0]?.id === branch
 					? "google"
 					: "openai";
 			replaceBranch(source, branch, id, {

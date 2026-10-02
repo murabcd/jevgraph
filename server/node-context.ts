@@ -84,7 +84,11 @@ export async function prepareNodeContext(
 	const selected = selectedVariables(variables, node.variables);
 	const effective = resolveInstructions({
 		base:
-			node.kind === "jev" ? node.question.instructions : (node.prompt ?? ""),
+			node.kind === "jev"
+				? node.questions
+						.map(({ name, instructions }) => `${name}: ${instructions}`)
+						.join("\n\n")
+				: (node.prompt ?? ""),
 		policy: node.context,
 		variables: selected,
 		inputs,
@@ -206,6 +210,7 @@ export async function prepareNodeContext(
 	return {
 		...prepared,
 		instructions: effective.instructions,
+		activeInstructions: effective.activeInstructions,
 		trace: {
 			...prepared.trace,
 			instructions: effective.trace.length ? effective.trace : undefined,
