@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SelectionRow } from "@/flow/selection-row";
@@ -18,25 +17,6 @@ export function PricingFields({
 }) {
 	return (
 		<FieldGroup className="gap-3">
-			{published && (
-				<Button
-					variant="link"
-					nativeButton={false}
-					size="sm"
-					className="h-auto justify-start px-0"
-					render={
-						<a
-							href={published.source}
-							target="_blank"
-							rel="noreferrer"
-							aria-label={`${published.model} pricing: $${published.rates.input} input and $${published.rates.output} output per million tokens`}
-						/>
-					}
-					title={`${published.model} rates verified ${published.verifiedAt}`}
-				>
-					${published.rates.input} input · ${published.rates.output} output / 1M
-				</Button>
-			)}
 			<SelectionRow
 				selected={Boolean(value)}
 				onSelectedChange={(selected) =>

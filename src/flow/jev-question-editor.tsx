@@ -130,7 +130,7 @@ export function JevQuestionEditor({
 						{draft.map((question) => (
 							<section
 								key={question.id}
-								className="relative grid gap-4 rounded-lg border p-3"
+								className="grid gap-4"
 								aria-label={question.name}
 							>
 								<div className="flex items-center justify-between">

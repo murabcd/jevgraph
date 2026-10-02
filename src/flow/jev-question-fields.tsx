@@ -285,9 +285,14 @@ export function JevQuestionFields({
 }: FieldsProps<JevQuestion>) {
 	const prefix = `jev-${question.id}`;
 	return (
-		<FieldGroup className="gap-4">
+		<FieldGroup className="gap-6">
 			<Field>
-				<FieldLabel htmlFor={`${prefix}-name`}>Name</FieldLabel>
+				<FieldLabel
+					htmlFor={`${prefix}-name`}
+					className="text-xs text-muted-foreground"
+				>
+					Name
+				</FieldLabel>
 				<Input
 					id={`${prefix}-name`}
 					value={question.name}
@@ -297,7 +302,12 @@ export function JevQuestionFields({
 				/>
 			</Field>
 			<Field>
-				<FieldLabel htmlFor={`${prefix}-type`}>Question type</FieldLabel>
+				<FieldLabel
+					htmlFor={`${prefix}-type`}
+					className="text-xs text-muted-foreground"
+				>
+					Question type
+				</FieldLabel>
 				<Select
 					value={question.type}
 					onValueChange={(value) => {
@@ -334,7 +344,12 @@ export function JevQuestionFields({
 				</Select>
 			</Field>
 			<Field>
-				<FieldLabel htmlFor={`${prefix}-instructions`}>Instructions</FieldLabel>
+				<FieldLabel
+					htmlFor={`${prefix}-instructions`}
+					className="text-xs text-muted-foreground"
+				>
+					Instructions
+				</FieldLabel>
 				<Textarea
 					id={`${prefix}-instructions`}
 					className={editorTextareaSize}
@@ -356,7 +371,10 @@ export function JevQuestionFields({
 				<ScoreFields question={question} onChange={onChange} />
 			)}
 			<Field>
-				<FieldLabel htmlFor={`${prefix}-confidence`}>
+				<FieldLabel
+					htmlFor={`${prefix}-confidence`}
+					className="text-xs text-muted-foreground"
+				>
 					{question.type === "noul"
 						? "Minimum probability of chosen answer (%)"
 						: "Minimum confidence (%)"}
@@ -381,7 +399,10 @@ export function JevQuestionFields({
 				/>
 			</Field>
 			<Field>
-				<FieldLabel htmlFor={`${prefix}-uncertain`}>
+				<FieldLabel
+					htmlFor={`${prefix}-uncertain`}
+					className="text-xs text-muted-foreground"
+				>
 					When below threshold or Jev fails
 				</FieldLabel>
 				<Select
