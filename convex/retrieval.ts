@@ -49,8 +49,10 @@ async function authorize(
 	ctx: QueryCtx | MutationCtx,
 	args: { workspaceId: Id<"workspaces">; runId: Id<"runs">; scope: string },
 ) {
-	const workspace = await ownWorkspace(ctx, args.workspaceId);
-	const run = await ownRun(ctx, args.runId);
+	const [workspace, run] = await Promise.all([
+		ownWorkspace(ctx, args.workspaceId),
+		ownRun(ctx, args.runId),
+	]);
 	if (
 		workspace.conversationId !== run.conversationId ||
 		run.status !== "running" ||
@@ -243,6 +245,8 @@ async function loadSelected(
 		keys: string[];
 	},
 ) {
+	if (!args.keys.length || args.keys.length > 220)
+		throw new ConvexError("Invalid retrieval selection");
 	const run = await authorize(ctx, args);
 	const routes = workflowRoutesSchema.parse(JSON.parse(run.routes));
 	const start = routes.nodes.find((node) => node.kind === "input");
@@ -266,8 +270,6 @@ async function loadSelected(
 			),
 		),
 	);
-	if (!args.keys.length || args.keys.length > 220)
-		throw new ConvexError("Invalid retrieval selection");
 	return Promise.all(
 		args.keys.map(async (key) => {
 			const source = await ctx.db
@@ -337,6 +339,7 @@ export const hydrate = internalQuery({
 	},
 	returns: v.array(candidateValue),
 	handler: async (ctx, args): Promise<RetrievalCandidate[]> => {
+		if (args.ids.length > 256) throw new ConvexError("Too many retrieval hits");
 		const sources = await loadSelected(ctx, {
 			workspaceId: args.workspaceId,
 			runId: args.runId,
@@ -344,10 +347,10 @@ export const hydrate = internalQuery({
 			keys: args.keys,
 		});
 		const byKey = new Map(sources.map((source) => [source.key, source]));
-		if (args.ids.length > 256) throw new ConvexError("Too many retrieval hits");
+		const chunks = await Promise.all(args.ids.map((id) => ctx.db.get(id)));
 		const result: RetrievalCandidate[] = [];
-		for (const [index, id] of args.ids.entries()) {
-			const chunk = await ctx.db.get(id);
+		for (const [index, chunk] of chunks.entries()) {
+			const id = args.ids[index];
 			const source = chunk && byKey.get(chunk.sourceKey);
 			if (!chunk || !source) continue;
 			result.push({

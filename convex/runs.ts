@@ -292,11 +292,13 @@ export const inspect = query({
 		const run = await ownRun(ctx, runId);
 		if (run.status === "running")
 			throw new ConvexError("This run is still active");
-		const input = await readRunInput(ctx, run._id);
-		const rows = await ctx.db
-			.query("routeEvaluations")
-			.withIndex("by_run", (q) => q.eq("runId", run._id))
-			.take(100);
+		const [input, rows] = await Promise.all([
+			readRunInput(ctx, run._id),
+			ctx.db
+				.query("routeEvaluations")
+				.withIndex("by_run", (q) => q.eq("runId", run._id))
+				.take(100),
+		]);
 		return {
 			input: JSON.stringify(input),
 			routes: run.routes,

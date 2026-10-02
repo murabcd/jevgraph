@@ -11,6 +11,7 @@ import { routeEvidenceKey } from "../../src/lib/route-evidence.ts";
 import { DEFAULT_JEV_CONFIDENCE_THRESHOLD } from "../../src/lib/routing.ts";
 import { artifactTrace } from "../../src/lib/run-artifact.ts";
 import { totalUsage } from "../../src/lib/usage.ts";
+import { mapConcurrent } from "../concurrency.ts";
 import {
 	datasetKey,
 	type EvaluationDataset,
@@ -143,11 +144,22 @@ export async function evaluationReport(
 	const slots = new Map<string, EvaluationTrial>();
 	const scopes = new Set<string | null>();
 	const identities = new Map<string, Set<string>>();
+	const candidates = new Set(run.candidates);
+	const keysByTrial = new Map(
+		await mapConcurrent(run.trials, 4, async (trial) => {
+			if (!trial.record) return [trial, null] as const;
+			const [strategyKey, caseKey] = await Promise.all([
+				routeEvidenceKey(trial.record.routes, dataset.evaluationNodeId),
+				frozenCaseKey(trial.record.input),
+			]);
+			return [trial, { strategyKey, caseKey }] as const;
+		}),
+	);
 	for (const trial of run.trials) {
 		const item = caseById.get(trial.caseId);
 		if (
 			!item ||
-			!run.candidates.includes(trial.candidate) ||
+			!candidates.has(trial.candidate) ||
 			trial.repetition > run.repeats
 		)
 			throw new Error("Trial is outside the planned case/candidate slots");
@@ -173,12 +185,7 @@ export async function evaluationReport(
 			JSON.stringify(evaluationCaseInput(dataset.graph, item))
 		)
 			throw new Error(`Frozen inputs differ from the labelled case ${item.id}`);
-		if (
-			(await routeEvidenceKey(
-				trial.record.routes,
-				dataset.evaluationNodeId,
-			)) !== strategy
-		)
+		if (keysByTrial.get(trial)?.strategyKey !== strategy)
 			throw new Error("Strategies differ; quality/cost comparison is invalid");
 		const node = trial.record.routes.nodes.find(
 			(node) => node.id === dataset.evaluationNodeId,
@@ -186,7 +193,9 @@ export async function evaluationReport(
 		if (node?.kind !== "model" || node.model !== trial.candidate)
 			throw new Error("Candidate identity differs from the registered graph");
 		const keys = identities.get(item.id) ?? new Set<string>();
-		keys.add(await frozenCaseKey(trial.record.input));
+		const caseKey = keysByTrial.get(trial)?.caseKey;
+		if (!caseKey) throw new Error("Trial identity unavailable");
+		keys.add(caseKey);
 		identities.set(item.id, keys);
 	}
 	const credentialScopesMatch = scopes.size === 1 && !scopes.has(null);

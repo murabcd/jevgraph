@@ -69,6 +69,7 @@ export const evaluationDatasetSchema = z
 				message: "Dataset requires an evaluated Model node",
 			});
 		const identities: string[] = [];
+		const nodes = new Map(dataset.graph.nodes.map((node) => [node.id, node]));
 		for (const item of dataset.cases) {
 			const request = routeRequestSchema.safeParse({
 				conversationId: "validation",
@@ -87,9 +88,7 @@ export const evaluationDatasetSchema = z
 					JSON.stringify(evaluationCaseInput(dataset.graph, item)),
 				);
 			for (const expected of item.decisions) {
-				const judge = dataset.graph.nodes.find(
-					(node) => node.id === expected.nodeId,
-				);
+				const judge = nodes.get(expected.nodeId);
 				if (
 					judge?.kind !== "jev" ||
 					!dataset.graph.edges.some(

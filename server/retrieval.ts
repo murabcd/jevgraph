@@ -122,9 +122,12 @@ export function createContextRetriever(
 					plan.passages.map((passage) => ({ plan, passage })),
 				);
 				// Batch across source boundaries, including individual history messages.
-				for (let offset = 0; offset < passages.length; offset += 16) {
+				const batches = Array.from(
+					{ length: Math.ceil(passages.length / 16) },
+					(_, index) => passages.slice(index * 16, (index + 1) * 16),
+				);
+				await mapConcurrent(batches, 1, async (batch) => {
 					signal?.throwIfAborted();
-					const batch = passages.slice(offset, offset + 16);
 					const result = await embed(batch.map(({ passage }) => passage.text));
 					if (result.embeddings.length !== batch.length)
 						throw new Error("Embedding count does not match source passages");
@@ -133,7 +136,7 @@ export function createContextRetriever(
 							...passage,
 							embedding: result.embeddings[index],
 						});
-				}
+				});
 				await mapConcurrent(plans, 4, async (plan) => {
 					signal?.throwIfAborted();
 					await store.put(plan.key, plan.source, plan.chunks);

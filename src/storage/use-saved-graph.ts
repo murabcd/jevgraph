@@ -41,7 +41,7 @@ export function useSavedGraph(workspace: Workspace) {
 		[queue, flush],
 	);
 	useEffect(() => {
-		queue.observe(workspace.revision, workspace.graph);
+		queue.receiveRemote(workspace.revision, workspace.graph);
 	}, [workspace.revision, workspace.graph, queue]);
 	useEffect(() => {
 		const beforeUnload = (event: BeforeUnloadEvent) => {

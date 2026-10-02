@@ -34,8 +34,9 @@ test("settled clocks restore preparation, repeated generation and failed backups
 			call("backup", "model", 600, "failed"),
 		],
 	};
+	const savedTrace = JSON.stringify(trace);
 	const restored = settledNodeTimers(
-		routeTraceSchema.parse(JSON.parse(JSON.stringify(trace))),
+		routeTraceSchema.parse(JSON.parse(savedTrace)),
 	);
 	expect(restored).toEqual({
 		input: { nodeId: "input", durationMs: 0, attempts: 1, status: "completed" },

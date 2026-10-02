@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { ConvexHttpClient } from "convex/browser";
 import { evaluationCandidate } from "../../src/lib/evaluation-candidate.ts";
+import { mapConcurrent } from "../concurrency.ts";
 import { ConvexPersistence } from "../convex-persistence.ts";
 import { datasetKey, loadEvaluationDataset } from "./dataset.ts";
 import { applyLocalLabels, labelSources, labelTemplate } from "./labels.ts";
@@ -130,17 +131,22 @@ async function main() {
 		throw new Error("Dataset does not match the recorded run");
 	if (command === "collect") {
 		if (!values.out) throw new Error("Collect requires a new --out file");
+		const outputPath = values.out;
 		const session = connection();
 		const persistence = new ConvexPersistence(session.client);
-		await writeNew(values.out, JSON.stringify(run, null, 2));
-		for (let index = 0; index < run.trials.length; index++) {
-			run.trials[index] = await collectTrial(
-				persistence,
-				run.trials[index],
-				dataset.evaluationNodeId,
-			);
-			await saveEvaluationRun(values.out, run);
-		}
+		await writeNew(outputPath, JSON.stringify(run, null, 2));
+		await mapConcurrent(
+			run.trials.map((_, index) => index),
+			1,
+			async (index) => {
+				run.trials[index] = await collectTrial(
+					persistence,
+					run.trials[index],
+					dataset.evaluationNodeId,
+				);
+				await saveEvaluationRun(outputPath, run);
+			},
+		);
 		console.log(
 			`Collected owned artifacts and reviews in ${values.out}; no provider calls.`,
 		);

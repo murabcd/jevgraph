@@ -32,7 +32,8 @@ export async function recordRouteEvaluations(
 	run: Doc<"runs">,
 	evaluations: RouteEvaluation[],
 ) {
-	if (!run.evaluation || !evaluations.length) return;
+	const identity = run.evaluation;
+	if (!identity || !evaluations.length) return;
 	const conversation = await ctx.db.get(run.conversationId);
 	if (!conversation) throw new ConvexError("Conversation unavailable");
 	const workspace = await ctx.db
@@ -49,22 +50,27 @@ export async function recordRouteEvaluations(
 		.query("routeEvaluations")
 		.withIndex("by_workspace_expiry", (q) => q.eq("workspaceId", workspace._id))
 		.take(MAX_EVALUATIONS);
-	for (const row of retained.slice(
-		0,
-		Math.max(0, retained.length + evaluations.length - MAX_EVALUATIONS),
-	))
-		await ctx.db.delete(row._id);
-	for (const value of evaluations) {
-		const evaluation = routeEvaluationSchema.parse(value);
-		await ctx.db.insert("routeEvaluations", {
-			...evaluation,
-			workspaceId: workspace._id,
-			runId: run._id,
-			...run.evaluation,
-			passed: evaluation.completed ? undefined : false,
-			expiresAt: Date.now() + EVIDENCE_TTL_MS,
-		});
-	}
+	await Promise.all(
+		retained
+			.slice(
+				0,
+				Math.max(0, retained.length + evaluations.length - MAX_EVALUATIONS),
+			)
+			.map((row) => ctx.db.delete(row._id)),
+	);
+	await Promise.all(
+		evaluations.map((value) => {
+			const evaluation = routeEvaluationSchema.parse(value);
+			return ctx.db.insert("routeEvaluations", {
+				...evaluation,
+				workspaceId: workspace._id,
+				runId: run._id,
+				...identity,
+				passed: evaluation.completed ? undefined : false,
+				expiresAt: Date.now() + EVIDENCE_TTL_MS,
+			});
+		}),
+	);
 }
 
 export const evidence = query({
@@ -356,7 +362,7 @@ export const expire = internalMutation({
 			.query("routeEvaluations")
 			.withIndex("by_expiry", (q) => q.lt("expiresAt", Date.now()))
 			.take(100);
-		for (const row of rows) await ctx.db.delete(row._id);
+		await Promise.all(rows.map((row) => ctx.db.delete(row._id)));
 		if (rows.length === 100)
 			await ctx.scheduler.runAfter(0, internal.routeEvaluations.expire, {});
 		return null;

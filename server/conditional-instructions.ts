@@ -13,11 +13,12 @@ export function resolveInstructions({
 	inputs: NodeOutput[];
 }) {
 	const rules = policy?.instructions ?? [];
+	const selectedStages = new Set(policy?.outputNodeIds);
 	const selected = inputs.filter(
 		(input) =>
 			policy?.upstream !== "none" &&
 			(policy?.upstream !== "selected" ||
-				policy.outputNodeIds.includes(input.sourceNodeId)),
+				selectedStages.has(input.sourceNodeId)),
 	);
 	const byStage = new Map(selected.map((input) => [input.sourceNodeId, input]));
 	const trace = rules.map((rule) => ({

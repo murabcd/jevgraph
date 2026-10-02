@@ -16,7 +16,7 @@ test("graph saves coalesce, serialize revisions, and ignore their own realtime e
 	const flushing = queue.flush();
 	queue.enqueue("middle");
 	queue.enqueue("last");
-	queue.observe(1, "first");
+	queue.receiveRemote(1, "first");
 	release(1);
 	await flushing;
 	expect(calls).toEqual([
@@ -25,11 +25,11 @@ test("graph saves coalesce, serialize revisions, and ignore their own realtime e
 	]);
 	expect(queue.busy).toBe(false);
 	expect(queue.getSnapshot().remote).toEqual({ graph: "initial", revision: 0 });
-	queue.observe(2, "last");
+	queue.receiveRemote(2, "last");
 	queue.enqueue("last");
 	await queue.flush();
 	expect(calls).toHaveLength(2);
-	queue.observe(3, "remote");
+	queue.receiveRemote(3, "remote");
 	expect(queue.getSnapshot().remote).toEqual({ graph: "remote", revision: 3 });
 });
 
@@ -45,7 +45,7 @@ test("a remote update received during flush is applied after acknowledgement", a
 	);
 	queue.enqueue("local");
 	const flushing = queue.flush();
-	queue.observe(2, "remote");
+	queue.receiveRemote(2, "remote");
 	release(1);
 	await flushing;
 	expect(queue.getSnapshot().remote).toEqual({ graph: "remote", revision: 2 });
@@ -59,7 +59,7 @@ test("a save conflict freezes the queue instead of silently overwriting another 
 	});
 	queue.enqueue("local");
 	await expect(queue.flush()).rejects.toThrow("Reload latest graph");
-	queue.observe(1, "remote");
+	queue.receiveRemote(1, "remote");
 	queue.enqueue("overwrite");
 	await expect(queue.flush()).rejects.toThrow("Reload latest graph");
 	expect(writes).toBe(1);

@@ -38,7 +38,7 @@ export class GraphSaveQueue {
 	get failed() {
 		return this.failure !== null;
 	}
-	observe(revision: number, graph: string) {
+	receiveRemote(revision: number, graph: string) {
 		if (this.busy) {
 			this.observed = { graph, revision };
 			return;
@@ -60,30 +60,29 @@ export class GraphSaveQueue {
 		this.flushing = this.drain();
 		try {
 			await this.flushing;
-		} finally {
-			this.flushing = null;
-			if (this.observed) {
-				const { graph, revision } = this.observed;
-				this.observed = null;
-				this.observe(revision, graph);
-			}
-		}
-	}
-	private async drain() {
-		try {
-			while (this.pending !== null) {
-				const graph = this.pending;
-				this.pending = null;
-				if (graph === this.acknowledged) continue;
-				this.revision = await this.write(graph, this.revision);
-				this.acknowledged = graph;
-			}
 		} catch (error) {
 			this.failure =
 				error instanceof Error ? error : new Error("Graph could not be saved");
 			this.snapshot = { ...this.snapshot, error: this.failure.message };
 			this.publish();
 			throw this.failure;
+		} finally {
+			this.flushing = null;
+			if (this.observed) {
+				const { graph, revision } = this.observed;
+				this.observed = null;
+				this.receiveRemote(revision, graph);
+			}
 		}
+	}
+	private async drain(): Promise<void> {
+		const graph = this.pending;
+		this.pending = null;
+		if (graph === null) return;
+		if (graph !== this.acknowledged) {
+			this.revision = await this.write(graph, this.revision);
+			this.acknowledged = graph;
+		}
+		return this.drain();
 	}
 }

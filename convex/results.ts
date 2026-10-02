@@ -28,24 +28,25 @@ export const save = action({
 			artifact.status === "completed" &&
 				artifact.result.outcome === "completed",
 		);
+		const settlement = {
+			runId: args.runId,
+			content:
+				artifact.status === "completed" ? artifact.result.text : artifact.text,
+			status: artifact.status,
+			error: artifact.status === "completed" ? undefined : artifact.error,
+			footer:
+				artifact.status === "completed"
+					? JSON.stringify(runFooter(artifact.result))
+					: undefined,
+			evaluations: JSON.stringify(evaluations),
+		};
 		const resultFile = await ctx.storage.store(
 			new Blob([JSON.stringify(artifact)], { type: "application/json" }),
 		);
 		try {
 			await ctx.runMutation(internal.runs.settleArtifact, {
-				runId: args.runId,
-				content:
-					artifact.status === "completed"
-						? artifact.result.text
-						: artifact.text,
-				status: artifact.status,
-				error: artifact.status === "completed" ? undefined : artifact.error,
-				footer:
-					artifact.status === "completed"
-						? JSON.stringify(runFooter(artifact.result))
-						: undefined,
+				...settlement,
 				resultFile,
-				evaluations: JSON.stringify(evaluations),
 			});
 		} catch (error) {
 			await ctx.storage.delete(resultFile);
