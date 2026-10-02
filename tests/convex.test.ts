@@ -109,6 +109,7 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 	).rejects.toThrow("Wait for the current response");
 	await owner.action(api.results.save, {
 		runId: first.runId,
+		executionId: first.executionId,
 		result: JSON.stringify({
 			status: "interrupted",
 			providerEvidence: [],
@@ -153,6 +154,7 @@ test("Convex deduplicates requests, protects running chats, and retains partial 
 	).toEqual([newId, workspace.conversationId]);
 	await owner.action(api.results.save, {
 		runId: next.runId,
+		executionId: next.executionId,
 		result: JSON.stringify({
 			status: "failed",
 			providerEvidence: [],
@@ -183,6 +185,7 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 	);
 	await owner.action(api.results.save, {
 		runId: first.runId,
+		executionId: first.executionId,
 		result: JSON.stringify({
 			status: "failed",
 			providerEvidence: [],
@@ -216,6 +219,7 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 	const result = { ...response, latencyMs: 30 };
 	await owner.action(api.results.save, {
 		runId: next.runId,
+		executionId: next.executionId,
 		result: JSON.stringify({
 			status: "completed",
 			coverage: "unavailable",
@@ -251,7 +255,10 @@ test("Convex stores full traces and picks the newest run by creation time", asyn
 		streaming: false,
 	});
 	expect(JSON.parse(turns.at(-1)?.footer ?? "{}").usage.inputTokens).toBe(10);
-	await owner.mutation(internal.runs.expire, { runId: next.runId });
+	await owner.mutation(internal.runs.expire, {
+		runId: next.runId,
+		executionId: next.executionId,
+	});
 	expect((await t.run((ctx) => ctx.db.get(next.runId)))?.status).toBe(
 		"completed",
 	);
@@ -263,7 +270,10 @@ test("Convex expires abandoned runs and scoped summaries without crossing owners
 		api.runs.begin,
 		request(workspace.conversationId),
 	);
-	await owner.mutation(internal.runs.expire, { runId: run.runId });
+	await owner.mutation(internal.runs.expire, {
+		runId: run.runId,
+		executionId: run.executionId,
+	});
 	expect(
 		(
 			await owner.query(api.conversations.turns, {

@@ -7,6 +7,7 @@ const modules = {
 	"./workspaces.ts": () => import("../convex/workspaces"),
 	"./conversations.ts": () => import("../convex/conversations"),
 	"./runs.ts": () => import("../convex/runs"),
+	"./checkpoints.ts": () => import("../convex/checkpoints"),
 	"./results.ts": () => import("../convex/results"),
 	"./summaries.ts": () => import("../convex/summaries"),
 	"./retrieval.ts": () => import("../convex/retrieval"),

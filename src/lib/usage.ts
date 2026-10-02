@@ -42,7 +42,7 @@ export const providerCallSchema = z.strictObject({
 	provider: z.enum(["openai", "google", "jev"]),
 	model: z.string(),
 	status: z.enum(["completed", "failed"]),
-	durationMs: z.number().finite().min(0),
+	durationMs: z.number().finite().min(0).optional(),
 	usage: tokenUsageSchema.optional(),
 	estimatedCostUsd: z.number().finite().min(0).optional(),
 	error: z.string().optional(),

@@ -21,9 +21,9 @@ export function NodeTimerLabel({
 		const interval = window.setInterval(() => setNow(performance.now()), 100);
 		return () => window.clearInterval(interval);
 	}, [startedAt]);
-	const duration = formatNodeDuration(
+	const duration = `${timer.durationIncomplete ? "≥" : ""}${formatNodeDuration(
 		nodeTimerDuration(timer, Math.max(now, startedAt ?? 0)),
-	);
+	)}`;
 	const status = nodeTimerStatusLabels[timer.status];
 	const label = `${status} ${timer.status === "running" ? "for" : "in"} ${duration}`;
 	return (

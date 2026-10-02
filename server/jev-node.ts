@@ -73,10 +73,6 @@ export function resolveJevBatch({
 	const exhausted = decisions.some(
 		(decision) => decision.status === "exhausted",
 	);
-	if (!exhausted)
-		for (const edge of selected)
-			if (edge.repeat)
-				repeatCounts.set(edge.id, (repeatCounts.get(edge.id) ?? 0) + 1);
 	const outputs = new Map(
 		batchOutputs(questions).map(({ id, label }) => [id, label]),
 	);

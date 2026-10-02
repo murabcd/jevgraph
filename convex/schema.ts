@@ -72,6 +72,13 @@ export default defineSchema({
 			dimensions: EMBEDDING_DIMENSIONS,
 			filterFields: ["namespace"],
 		}),
+	runCheckpoints: defineTable({
+		runId: v.id("runs"),
+		executionId: v.string(),
+		revision: v.number(),
+		file: v.optional(v.id("_storage")),
+		cancelled: v.boolean(),
+	}).index("by_run", ["runId"]),
 	workspaces: defineTable({
 		owner: v.id("users"),
 		graph: v.string(),

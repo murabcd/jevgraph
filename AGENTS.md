@@ -14,7 +14,7 @@ Every `lat.md/` section must begin with a concise overview paragraph. Use `[[wik
 - `src/lib`: source-owned graph, request, stream, context, model, and pricing contracts shared with the server.
 - `src/storage`: anonymous workspace initialization and revision-checked realtime graph saves.
 - `server`: local API, graph scheduling, direct provider calls, context preparation, cost planning, and Convex persistence client.
-- `convex`: authentication, indexed schema, owner checks, workspaces, conversations, runs, result files, and reusable summaries. `_generated` contains CLI-generated bindings.
+- `convex`: authentication, indexed schema, owner checks, workspaces, conversations, runs, checkpoint journals, result files, and reusable summaries. `_generated` contains CLI-generated bindings.
 - `tests`: Bun behavior tests, typed provider fixtures, and the Convex test backend.
 - `lat.md`: architecture and runtime knowledge graph.
 - `public`: app assets and the README preview.
@@ -41,13 +41,13 @@ Do not hide failures behind empty results, guessed defaults, or successful compl
 
 ## Architecture Boundaries
 
-The chat composer starts every turn at the single required Start node. Start owns typed input fields and reference documents; API values override configured defaults. Jev and Model nodes receive only explicitly selected Start fields and context sources. Persisting chat messages does not resume graph execution between turns. See [lat.md/routing.md](lat.md/routing.md) and [lat.md/context.md](lat.md/context.md).
+The chat composer starts every turn at the single required Start node. Start owns typed input fields and reference documents; API values override configured defaults. Jev and Model nodes receive only explicitly selected Start fields and context sources. New chat turns never inherit execution state. Explicit recovery resumes the same interrupted run from acknowledged stages using its frozen graph and inputs. See [lat.md/routing.md](lat.md/routing.md) and [lat.md/context.md](lat.md/context.md).
 
 Jev evaluates its 1–16 named Choice, Noul, or Score questions together only on a reached path. Each question owns its threshold, explicit default, and question-scoped output IDs. Resolve the entire batch before releasing selected paths; retain every decision downstream. A repeat Jev node contains exactly one question. Model nodes can continue, run in parallel, join, or use an explicit backup; Jev can repeat a bounded branch. Preserve forward-cycle rejection, joins over reachable work, logical stage identity through backups and repeats, and the single final-answer requirement. An exhausted review loop must not traverse its success exit or appear approved.
 
 The local server calls Jev, OpenAI, and Gemini through direct AI SDK provider packages; do not add AI Gateway. Jev evaluates decisions rather than generating prose. Generation currently supports GPT-6 Luna and Gemini 3.8 Flash. A catalog change must update supported reasoning options, request validation, provider execution, editor behavior, pricing, relevant tests, and Lat together. Provider icons remain in their shared module.
 
-Keep execution bounded and cancellation propagated through generation, decisions, relevance, and summary preparation. The scheduler currently allows four independent nodes at once and enforces a two-minute turn deadline plus node, provider-attempt, and repeat budgets. Do not add implicit SDK retries: a configured backup runs once only if the primary failed before producing text, and never after cancellation or a partial answer.
+Keep execution bounded and cancellation propagated through generation, decisions, relevance, and summary preparation. The scheduler currently allows four independent nodes at once and enforces a two-minute active-attempt deadline plus run-wide node, provider-attempt, and repeat budgets retained across recovery. Do not add implicit SDK retries: a configured backup runs once only if the primary failed before producing text, and never after cancellation or a partial answer.
 
 The API emits validated newline-delimited JSON events. Keep the server producer, shared event schemas, stream decoder, chat consumer, and canvas projection aligned. Running node timers use a monotonic browser clock; final durations come from the server. Temporary execution state must stay out of saved graph configuration.
 
@@ -67,7 +67,7 @@ Convex owns owner-scoped graph configuration, documents, conversations, messages
 
 Anonymous Convex Auth supplies the browser identity. Authenticate application queries, mutations, and actions and verify ownership of every referenced workspace, conversation, run, or file through the shared access layer. A valid ID is not authorization. Anonymous sessions have no cross-device account recovery.
 
-The local API requires an authenticated Convex connection, a conversation ID, and a unique request UUID. Register the user/assistant pair and active-run lock before any paid provider call. Preserve request deduplication, one active response per conversation, lease-based interruption recovery, partial failure text, and settlement before the final stream completion event. Database failure must not silently switch execution to an in-memory mode.
+The local API requires an authenticated Convex connection, a conversation ID, and a unique request UUID. Register the user/assistant pair and active-run lock before any paid provider call. Preserve request deduplication, one active response per conversation, lease-based interruption recovery, partial failure text, and settlement before the final stream completion event. Checkpoint each provider reservation before paid work and each completed stage before downstream execution. Recovery rotates the execution token and checks journal revisions, ownership, credential scope, frozen versions, and latest/current conversation identity. Lost provider attempts retain unknown duration and usage. Stop is final; no paid work resumes automatically. Delete superseded journal and interrupted artifact files on their actual finalization paths. Database failure must not silently switch execution to an in-memory mode.
 
 Streaming deltas, live timers, and provider-cache observations remain temporary. Convex stores settled messages and traces; browser storage retains viewport, theme, chat visibility, and authentication state. Do not reintroduce local-storage graph drafts, legacy session-ID requests, or a database-optional API.
 

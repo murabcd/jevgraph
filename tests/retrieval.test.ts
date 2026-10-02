@@ -163,6 +163,7 @@ test("indexing shares work, while changed source text gets a fresh index", async
 	).rejects.toThrow("Retrieval document version is not declared");
 	await fixture.persistence.settle(
 		fixture.run.runId,
+		fixture.run.executionId,
 		{
 			status: "failed",
 			text: "",
@@ -221,6 +222,7 @@ test("retrieval rejects forged source keys and stale document versions within th
 	).rejects.toThrow("Retrieval key does not match its source");
 	await fixture.persistence.settle(
 		fixture.run.runId,
+		fixture.run.executionId,
 		{
 			status: "failed",
 			text: "",

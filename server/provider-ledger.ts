@@ -7,6 +7,7 @@ import {
 } from "../src/lib/usage.ts";
 import { ProviderEvidence } from "./provider-evidence.ts";
 import { ProviderUsageError } from "./provider-usage.ts";
+import type { WorkflowJournal } from "./workflow-journal.ts";
 
 /** Owns call identities, the execution budget, and completed or failed usage. */
 export class ProviderLedger {
@@ -15,13 +16,21 @@ export class ProviderLedger {
 	private started = 0;
 	private onRecorded: () => void;
 	private evidence: ProviderEvidence;
+	private journal?: WorkflowJournal;
 
 	constructor(
 		onRecorded: () => void,
 		evidence: ProviderEvidence = new ProviderEvidence(),
+		journal?: WorkflowJournal,
 	) {
+		this.journal = journal;
 		this.onRecorded = onRecorded;
 		this.evidence = evidence;
+		if (journal) {
+			this.calls.push(...journal.state.calls);
+			this.sequence = journal.state.sequence;
+			this.started = this.calls.length;
+		}
 	}
 
 	nextId(): string {
@@ -47,6 +56,7 @@ export class ProviderLedger {
 		if (this.started >= 200)
 			throw new Error("Chatflow exceeded its provider call budget");
 		this.started++;
+		await this.journal?.beforeCall({ ...identity, id: callId }, this.sequence);
 		const began = performance.now();
 		let usage: TokenUsage | undefined;
 		let model = identity.model;
@@ -65,7 +75,7 @@ export class ProviderLedger {
 			);
 			throw caught;
 		} finally {
-			this.calls.push({
+			const call: ProviderCall = {
 				...identity,
 				model,
 				id: callId,
@@ -78,8 +88,10 @@ export class ProviderLedger {
 						publishedRates(identity.provider, model, usage?.inputTokens),
 				),
 				error,
-			});
+			};
+			this.calls.push(call);
 			this.onRecorded();
+			await this.journal?.afterCall(call);
 		}
 	}
 }

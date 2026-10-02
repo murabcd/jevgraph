@@ -260,6 +260,7 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 	});
 	await owner.action(api.results.save, {
 		runId: first.runId,
+		executionId: first.executionId,
 		result: JSON.stringify({
 			status: "completed",
 			coverage: "complete",
@@ -278,6 +279,7 @@ test("recorded reviews retain the final reply and allow older unreviewed cases w
 	const second = await begin();
 	await owner.action(api.results.save, {
 		runId: second.runId,
+		executionId: second.executionId,
 		result: JSON.stringify({
 			status: "failed",
 			providerEvidence: [],
@@ -375,6 +377,7 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 	});
 	await owner.action(api.results.save, {
 		runId: run.runId,
+		executionId: run.executionId,
 		result: JSON.stringify({
 			status: "completed",
 			coverage: "complete",
@@ -441,6 +444,7 @@ test("Convex persists owner reviews, isolates scope, and records failed attempts
 	});
 	await owner.action(api.results.save, {
 		runId: failed.runId,
+		executionId: failed.executionId,
 		result: JSON.stringify({
 			status: "failed",
 			providerEvidence: [],
@@ -574,7 +578,10 @@ test("an abandoned evaluation lease records a failed unknown-cost complete-route
 		routes: JSON.stringify(routes),
 		evaluation: { scope },
 	});
-	await owner.mutation(internal.runs.expire, { runId: run.runId });
+	await owner.mutation(internal.runs.expire, {
+		runId: run.runId,
+		executionId: run.executionId,
+	});
 	const key = await routeEvidenceKey(routes, "answer");
 	const [evidence] = JSON.parse(
 		await owner.query(api.routeEvaluations.evidence, {

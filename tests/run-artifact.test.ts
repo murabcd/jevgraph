@@ -99,11 +99,13 @@ test("failure artifacts preserve traces, isolate owners, and delete files when s
 	await expect(
 		other.owner.action(api.results.save, {
 			runId: run.runId,
+			executionId: run.executionId,
 			result: JSON.stringify(artifact),
 		}),
 	).rejects.toThrow("Conversation unavailable");
 	await owner.action(api.results.save, {
 		runId: run.runId,
+		executionId: run.executionId,
 		result: JSON.stringify(artifact),
 	});
 	const saved = await t.run(async (ctx) => {
@@ -120,6 +122,7 @@ test("failure artifacts preserve traces, isolate owners, and delete files when s
 	await expect(
 		owner.action(api.results.save, {
 			runId: run.runId,
+			executionId: run.executionId,
 			result: JSON.stringify(artifact),
 		}),
 	).rejects.toThrow("already settled");

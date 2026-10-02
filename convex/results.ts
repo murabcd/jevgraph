@@ -11,12 +11,14 @@ import { internal } from "./_generated/api";
 import { action } from "./_generated/server";
 
 export const save = action({
-	args: { runId: v.id("runs"), result: v.string() },
+	args: { runId: v.id("runs"), executionId: v.string(), result: v.string() },
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const run = await ctx.runQuery(internal.runs.owned, { runId: args.runId });
 		if (new TextEncoder().encode(args.result).length > MAX_ARTIFACT_BYTES)
 			throw new Error("Run result is too large to save");
+		if (run.executionId !== args.executionId)
+			throw new Error("This execution no longer owns the run");
 		const artifact = runArtifactSchema.parse(JSON.parse(args.result));
 		const trace = artifactTrace(artifact);
 		const evaluations = await routeEvaluations(
@@ -30,6 +32,7 @@ export const save = action({
 		);
 		const settlement = {
 			runId: args.runId,
+			executionId: args.executionId,
 			content:
 				artifact.status === "completed" ? artifact.result.text : artifact.text,
 			status: artifact.status,

@@ -1,6 +1,7 @@
-import { ArrowUp, CircleAlert, Minus, Plus, Zap } from "lucide-react";
+import { CircleAlert, Minus, Plus, Zap } from "lucide-react";
 import type { ComponentProps } from "react";
-import { type KeyboardEvent, useRef } from "react";
+import { useRef } from "react";
+import { ChatComposer } from "@/chat/chat-composer";
 import { ChatHistoryMenu } from "@/chat/chat-history-menu";
 import { ChatMessageItem } from "@/chat/chat-message-item";
 import type { ChatTurn } from "@/chat/types";
@@ -13,12 +14,6 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@/components/ui/empty";
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupTextarea,
-} from "@/components/ui/input-group";
 import {
 	MessageScroller,
 	MessageScrollerButton,
@@ -45,17 +40,16 @@ import {
 } from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
-export type ChatPanelProps = {
+export type ChatPanelProps = Omit<
+	ComponentProps<typeof ChatComposer>,
+	"composerRef"
+> & {
 	routes: WorkflowRoutes | null;
 	onClose: () => void;
-	draft: string;
-	onDraftChange: (value: string) => void;
 	messages: ChatTurn[];
 	error: string;
-	running: boolean;
 	status?: KeyStatus;
 	statusUnavailable: boolean;
-	onSend: () => void;
 	onClear: () => void;
 	history: ComponentProps<typeof ChatHistoryMenu>["history"];
 	currentConversationId: ComponentProps<typeof ChatHistoryMenu>["currentId"];
@@ -119,25 +113,16 @@ export function ChatPanel({
 	status,
 	statusUnavailable,
 	onSend,
+	onResume,
+	canResume,
+	onStop,
+	canStop,
 	onClear,
 	history,
 	currentConversationId,
 	onOpenConversation,
 }: ChatPanelProps) {
 	const composerRef = useRef<HTMLTextAreaElement>(null);
-
-	const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-		if (
-			event.key === "Enter" &&
-			!event.shiftKey &&
-			!event.nativeEvent.isComposing &&
-			!running
-		) {
-			event.preventDefault();
-			onSend();
-			composerRef.current?.focus({ preventScroll: true });
-		}
-	};
 	return (
 		<PopoverContent
 			id="routing-chat"
@@ -241,40 +226,17 @@ export function ChatPanel({
 				</MessageScroller>
 			</MessageScrollerProvider>
 
-			<form
-				className="p-3"
-				onSubmit={(event) => {
-					event.preventDefault();
-					onSend();
-					composerRef.current?.focus({ preventScroll: true });
-				}}
-			>
-				<InputGroup className="min-h-[132px] max-h-[min(32rem,calc(100dvh-11rem))] items-stretch flex-col overflow-hidden">
-					<InputGroupTextarea
-						ref={composerRef}
-						aria-label="Message"
-						placeholder="Ask anything…"
-						rows={1}
-						className="max-h-96 px-3 py-3"
-						maxLength={12000}
-						value={draft}
-						onChange={(event) => onDraftChange(event.target.value)}
-						onKeyDown={onComposerKeyDown}
-					/>
-					<InputGroupAddon align="block-end" className="justify-end px-2 pb-2">
-						<InputGroupButton
-							type="submit"
-							variant="default"
-							size="icon-sm"
-							className="rounded-full"
-							aria-label="Send message"
-							disabled={!draft.trim() || running}
-						>
-							<ArrowUp />
-						</InputGroupButton>
-					</InputGroupAddon>
-				</InputGroup>
-			</form>
+			<ChatComposer
+				composerRef={composerRef}
+				draft={draft}
+				onDraftChange={onDraftChange}
+				running={running}
+				onSend={onSend}
+				onResume={onResume}
+				canResume={canResume}
+				onStop={onStop}
+				canStop={canStop}
+			/>
 		</PopoverContent>
 	);
 }

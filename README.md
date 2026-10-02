@@ -30,7 +30,9 @@
   - Styling with [Tailwind CSS](https://tailwindcss.com)
   - Component primitives from [Base UI](https://base-ui.com) for accessibility and flexibility
 - Data Persistence
-  - [Convex](https://www.convex.dev/) for saving workflows, chat history, and run records
+  - [Convex](https://www.convex.dev/) for saving workflows, chat history, run records, and execution checkpoints
+  - Explicit recovery of interrupted responses using the frozen graph and inputs; completed stages are reused, while unfinished calls may incur another charge
+  - Durable Stop, checked checkpoint revisions, and execution ownership prevent stale workers from overwriting a resumed run
   - [Convex file storage](https://docs.convex.dev/file-storage) for complete execution results and provider evidence
   - [Convex Vector Search](https://docs.convex.dev/search/vector-search) and text search for selected documents and opt-in saved history, with Jev reranking
 - [Convex Auth](https://labs.convex.dev/auth)

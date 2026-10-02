@@ -169,7 +169,7 @@ const workflowNodeSchema = z.discriminatedUnion("kind", [
 		pricing: pricingSchema.optional(),
 	}),
 ]);
-const workflowEdgeSchema = z.strictObject({
+export const workflowEdgeSchema = z.strictObject({
 	id: nodeIdSchema,
 	source: nodeIdSchema,
 	sourceHandle: z.string().min(1).max(100).optional(),
@@ -496,6 +496,8 @@ export const routeRequestSchema = z
 			});
 		}
 	});
+
+export type RouteRequest = z.infer<typeof routeRequestSchema>;
 
 export type JevEvaluation = {
 	answers: ReturnType<typeof resolveJevAnswer>[];

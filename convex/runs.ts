@@ -21,10 +21,14 @@ import {
 	query,
 } from "./_generated/server";
 import { ownConversation, ownRun } from "./access";
+import {
+	discardCheckpointFile,
+	RUN_LEASE_MS,
+	readCheckpoint,
+} from "./checkpoints";
 import { recordRouteEvaluations } from "./routeEvaluations";
 import { followupFor, freezeRunInput, readRunInput } from "./runInputs";
-
-const RUN_LEASE_MS = 180000;
+import { runStatus } from "./schema";
 
 async function settle(
 	ctx: MutationCtx,
@@ -59,6 +63,8 @@ export const begin = mutation({
 	},
 	returns: v.object({
 		runId: v.id("runs"),
+		executionId: v.string(),
+		createdAt: v.number(),
 		input: v.string(),
 		started: v.boolean(),
 		conversationId: v.id("conversations"),
@@ -91,14 +97,19 @@ export const begin = mutation({
 				q.eq("conversationId", conversationId).eq("requestId", args.requestId),
 			)
 			.unique();
-		if (existing)
+		if (existing) {
+			const checkpoint = await readCheckpoint(ctx, existing._id);
+			if (!checkpoint) throw new ConvexError("Run checkpoint unavailable");
 			return {
 				runId: existing._id,
+				executionId: checkpoint.executionId,
+				createdAt: existing._creationTime,
 				input: JSON.stringify(await readRunInput(ctx, existing._id)),
 				started: false,
 				conversationId,
 				workspaceId: workspace._id,
 			};
+		}
 		if (conversation.activeRunId) {
 			const active = await ctx.db.get(conversation.activeRunId);
 			if (active?.status === "running")
@@ -127,6 +138,15 @@ export const begin = mutation({
 		const evaluation = args.evaluation
 			? { scope: args.evaluation.scope, caseKey: await frozenCaseKey(frozen) }
 			: undefined;
+		const previous = await ctx.db
+			.query("runs")
+			.withIndex("by_conversation", (q) =>
+				q.eq("conversationId", conversationId),
+			)
+			.order("desc")
+			.first();
+		// A new turn supersedes recovery of the previous response.
+		if (previous) await discardCheckpointFile(ctx, previous._id);
 		const runId = await ctx.db.insert("runs", {
 			conversationId: conversationId,
 			requestId: args.requestId,
@@ -134,6 +154,15 @@ export const begin = mutation({
 			evaluation,
 			status: "running",
 			expiresAt: Date.now() + RUN_LEASE_MS,
+		});
+		const createdRun = await ctx.db.get(runId);
+		if (!createdRun) throw new ConvexError("Run unavailable");
+		const executionId = crypto.randomUUID();
+		await ctx.db.insert("runCheckpoints", {
+			runId,
+			executionId,
+			revision: 0,
+			cancelled: false,
 		});
 		await ctx.db.insert("runInputs", { runId, input });
 		await ctx.db.insert("messages", {
@@ -151,9 +180,14 @@ export const begin = mutation({
 			failed: false,
 		});
 		await ctx.db.patch(conversation._id, { activeRunId: runId });
-		await ctx.scheduler.runAfter(RUN_LEASE_MS, internal.runs.expire, { runId });
+		await ctx.scheduler.runAfter(RUN_LEASE_MS, internal.runs.expire, {
+			runId,
+			executionId,
+		});
 		return {
 			runId,
+			executionId,
+			createdAt: createdRun._creationTime,
 			input,
 			started: true,
 			conversationId,
@@ -163,12 +197,14 @@ export const begin = mutation({
 });
 
 export const expire = internalMutation({
-	args: { runId: v.id("runs") },
+	args: { runId: v.id("runs"), executionId: v.string() },
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const run = await ctx.db.get(args.runId);
 		if (run?.status !== "running") return null;
-		if (run.evaluation) {
+		const checkpoint = await readCheckpoint(ctx, run._id);
+		if (checkpoint?.executionId !== args.executionId) return null;
+		if (run.evaluation && (!checkpoint.file || checkpoint.cancelled)) {
 			// A lost server cannot prove which calls completed or what they cost.
 			await recordRouteEvaluations(
 				ctx,
@@ -181,6 +217,7 @@ export const expire = internalMutation({
 				),
 			);
 		}
+		if (checkpoint.cancelled) await discardCheckpointFile(ctx, run._id);
 		await settle(ctx, args.runId, "", true);
 		await ctx.db.patch(args.runId, {
 			status: "interrupted",
@@ -193,6 +230,7 @@ export const expire = internalMutation({
 export const settleArtifact = internalMutation({
 	args: {
 		runId: v.id("runs"),
+		executionId: v.string(),
 		content: v.string(),
 		footer: v.optional(v.string()),
 		status: v.union(
@@ -207,17 +245,26 @@ export const settleArtifact = internalMutation({
 	returns: v.null(),
 	handler: async (ctx, args) => {
 		const run = await ownRun(ctx, args.runId);
+		const checkpoint = await readCheckpoint(ctx, run._id);
+		if (
+			!checkpoint ||
+			checkpoint.executionId !== args.executionId ||
+			((checkpoint.cancelled || run.expiresAt <= Date.now()) &&
+				args.status === "completed")
+		)
+			throw new ConvexError("This execution no longer owns the run");
 		if (run.status !== "running")
 			throw new ConvexError("This run is already settled");
 		if (args.footer) runFooterSchema.parse(JSON.parse(args.footer));
-		await recordRouteEvaluations(
-			ctx,
-			run,
-			z
-				.array(routeEvaluationSchema)
-				.max(100)
-				.parse(JSON.parse(args.evaluations)),
-		);
+		if (args.status !== "interrupted" || checkpoint.cancelled)
+			await recordRouteEvaluations(
+				ctx,
+				run,
+				z
+					.array(routeEvaluationSchema)
+					.max(100)
+					.parse(JSON.parse(args.evaluations)),
+			);
 		await settle(ctx, args.runId, args.content, args.status !== "completed");
 		await ctx.db.patch(args.runId, {
 			status: args.status,
@@ -225,16 +272,20 @@ export const settleArtifact = internalMutation({
 			footer: args.footer,
 			resultFile: args.resultFile,
 		});
+		if (args.status !== "interrupted" || checkpoint.cancelled)
+			await discardCheckpointFile(ctx, run._id);
 		return null;
 	},
 });
 
 export const owned = internalQuery({
 	args: { runId: v.id("runs") },
-	returns: v.object({ routes: v.string() }),
+	returns: v.object({ routes: v.string(), executionId: v.string() }),
 	handler: async (ctx, args) => {
 		const run = await ownRun(ctx, args.runId);
-		return { routes: run.routes };
+		const checkpoint = await readCheckpoint(ctx, run._id);
+		if (!checkpoint) throw new ConvexError("Run checkpoint unavailable");
+		return { routes: run.routes, executionId: checkpoint.executionId };
 	},
 });
 
@@ -243,6 +294,11 @@ export const latest = query({
 	returns: v.union(
 		v.null(),
 		v.object({
+			runId: v.id("runs"),
+			requestId: v.string(),
+			status: runStatus,
+			resumable: v.boolean(),
+			checkpointUrl: v.union(v.string(), v.null()),
 			routes: v.string(),
 			resultUrl: v.union(v.null(), v.string()),
 			error: v.optional(v.string()),
@@ -258,7 +314,19 @@ export const latest = query({
 			.order("desc")
 			.take(1);
 		if (!run[0]) return null;
+		const checkpoint = await readCheckpoint(ctx, run[0]._id);
 		return {
+			runId: run[0]._id,
+			requestId: run[0].requestId,
+			status: run[0].status,
+			resumable:
+				run[0].status === "interrupted" &&
+				!!checkpoint?.file &&
+				!checkpoint.cancelled,
+			checkpointUrl:
+				run[0].status === "interrupted" && checkpoint?.file
+					? await ctx.storage.getUrl(checkpoint.file)
+					: null,
 			routes: run[0].routes,
 			resultUrl: run[0].resultFile
 				? await ctx.storage.getUrl(run[0].resultFile)

@@ -26,7 +26,8 @@ import {
 	type WorkflowEdge,
 	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
-import { type TokenUsage, totalUsage } from "../src/lib/usage.ts";
+import { totalUsage } from "../src/lib/usage.ts";
+import type { WorkflowStep } from "../src/lib/workflow-journal.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import type { PreparedContext } from "./context.ts";
 import { resolveJevBatch } from "./jev-node.ts";
@@ -41,6 +42,7 @@ import type { ProviderEvidence } from "./provider-evidence.ts";
 import { ProviderLedger } from "./provider-ledger.ts";
 import { SessionMemory, type SummaryStore } from "./session-memory.ts";
 import { formattedUpstreamOutputs } from "./upstream-context.ts";
+import type { WorkflowJournal } from "./workflow-journal.ts";
 
 const MAX_TRACE_OUTPUT = 4000;
 const MAX_CONCURRENT_NODES = 4;
@@ -70,11 +72,8 @@ export function workflowRoutingState(
 	].join("\n");
 }
 
-type WorkflowResponse = {
-	text: string;
-	model: string;
-	usage?: TokenUsage;
-};
+type Terminal = NonNullable<WorkflowStep["terminal"]>;
+type WorkflowResponse = Terminal["response"];
 
 export type WorkflowModelRequest = ModelPlanningRequest & {
 	context: PreparedContext;
@@ -104,19 +103,11 @@ type Execution = {
 	onProgress: (trace: RouteTrace) => void;
 	onSnapshot?: (trace: RouteTrace) => void;
 	signal?: AbortSignal;
+	journal?: WorkflowJournal;
 };
 
-type Terminal = {
-	target: Pick<RouteResult, "nodeId" | "provider" | "model">;
-	response: WorkflowResponse;
-};
-type NodeExecution = {
+type NodeExecution = Omit<WorkflowStep, "key" | "nodeId"> & {
 	lineage: NodeOutput[];
-	edges: WorkflowEdge[];
-	decisions?: WorkflowDecision[];
-	output?: NodeOutput;
-	terminal?: Terminal;
-	fallback?: { edge: WorkflowEdge; reason: string };
 };
 
 function workflowTopology(routes: WorkflowRoutes): {
@@ -191,6 +182,7 @@ export async function executeWorkflow({
 	onProgress,
 	onSnapshot,
 	signal,
+	journal,
 }: Execution): Promise<Omit<RouteResult, "latencyMs">> {
 	const byId = new Map(routes.nodes.map((node) => [node.id, node]));
 	const start = byId.get("input");
@@ -209,10 +201,10 @@ export async function executeWorkflow({
 	const traversedEdges: WorkflowEdge[] = [];
 	const decisions: WorkflowDecision[] = [];
 	const outputs: NodeOutput[] = [];
-	const ledger = new ProviderLedger(() => report(), providerEvidence);
+	const ledger = new ProviderLedger(() => report(), providerEvidence, journal);
 	const calls = ledger.calls;
-	const contexts: NodeContextTrace[] = [];
-	const modelPlans: ModelPlan[] = [];
+	const contexts: NodeContextTrace[] = journal?.state.contexts ?? [];
+	const modelPlans: ModelPlan[] = journal?.state.modelPlans ?? [];
 	const evidenceByNode = new Map<string, Promise<RouteEvidence[]>>();
 	const revisions = new Map<string, number>();
 	let exhausted: Terminal | undefined;
@@ -323,6 +315,7 @@ export async function executeWorkflow({
 			if (!node) throw new Error(`Workflow node ${id} is missing`);
 			if (node.kind === "input") {
 				return {
+					exhausted: false,
 					lineage: inputs,
 					edges: normal.filter((edge) => edge.source === id),
 				};
@@ -363,6 +356,7 @@ export async function executeWorkflow({
 							),
 					);
 				} catch (caught) {
+					if (journal?.failed) throw caught;
 					error =
 						caught instanceof Error ? caught.message : "Unknown Jev error";
 				}
@@ -386,7 +380,7 @@ export async function executeWorkflow({
 				};
 				const result: NodeExecution = {
 					lineage: [...inputs, output],
-					decisions: resolved.decisions,
+					exhausted: resolved.exhausted,
 					output,
 					edges: resolved.edges,
 				};
@@ -396,7 +390,6 @@ export async function executeWorkflow({
 						target: { nodeId: id, provider: "jev", model },
 						response: { text: output.text, model },
 					};
-					if (resolved.exhausted) exhausted = result.terminal;
 				}
 				return result;
 			}
@@ -501,7 +494,7 @@ export async function executeWorkflow({
 				(reason) => {
 					if (fallbackEdge) usedFallback = { edge: fallbackEdge, reason };
 				},
-				() => !signal?.aborted,
+				() => !signal?.aborted && !journal?.failed,
 			);
 			const output: NodeOutput = {
 				nodeId: usedTarget.nodeId,
@@ -511,13 +504,18 @@ export async function executeWorkflow({
 				text: attempt.response.text,
 			};
 			return {
+				exhausted: false,
 				lineage: [...inputs, output],
 				edges: next,
 				output,
 				...(next.length === 0
 					? {
 							terminal: {
-								target: usedTarget,
+								target: {
+									nodeId: usedTarget.nodeId,
+									provider: usedTarget.provider,
+									model: usedTarget.model,
+								},
 								response: attempt.response,
 							},
 						}
@@ -529,8 +527,29 @@ export async function executeWorkflow({
 			batch,
 			MAX_CONCURRENT_NODES,
 			async (item) => {
-				const result = await executeNode(item);
-				if (result.decisions) decisions.push(...result.decisions);
+				const key = `${pass}:${item.id}`;
+				const cached = journal?.get(key);
+				let result: NodeExecution;
+				if (cached) {
+					result = {
+						...cached,
+						lineage: [
+							...item.inputs,
+							...(cached.output ? [cached.output] : []),
+						],
+					};
+					if (cached.output)
+						revisions.set(cached.output.nodeId, cached.output.revision);
+				} else {
+					await journal?.beginStep();
+					result = await executeNode(item);
+					if (journal) {
+						const { lineage: _, ...completed } = result;
+						await journal.complete({ ...completed, key, nodeId: item.id });
+					}
+				}
+				if (result.output?.kind === "jev")
+					decisions.push(...result.output.decisions);
 				if (result.output) outputs.push(result.output);
 				report();
 				return result;
@@ -538,12 +557,15 @@ export async function executeWorkflow({
 		);
 		for (const result of results) {
 			if (result.terminal) terminals.push(result.terminal);
+			if (result.exhausted) exhausted = result.terminal;
 			if (result.fallback) {
 				fallbackReason = result.fallback.reason;
 				traversedEdges.push(result.fallback.edge);
 				path.push({ nodeId: result.fallback.edge.target, via: "fallback" });
 			}
 			for (const edge of result.edges) {
+				if (edge.repeat)
+					repeatCounts.set(edge.id, (repeatCounts.get(edge.id) ?? 0) + 1);
 				traversedEdges.push(edge);
 				const values = incoming.get(edge.target) ?? [];
 				values.push(result.lineage);

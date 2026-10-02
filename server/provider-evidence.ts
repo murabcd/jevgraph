@@ -6,6 +6,10 @@ import {
 } from "../src/lib/provider-evidence.ts";
 import type { ProviderFetch } from "./provider-access.ts";
 
+function retainedBodyBytes(text: string) {
+	return new TextEncoder().encode(JSON.stringify(text)).length - 2;
+}
+
 /** Captures consumed provider bodies, without headers or URL query credentials. */
 export class ProviderEvidence {
 	private scope = new AsyncLocalStorage<string>();
@@ -13,8 +17,28 @@ export class ProviderEvidence {
 	private remaining = MAX_PROVIDER_EVIDENCE_BYTES;
 	private credentials: string[];
 
-	constructor(credentials: string[] = []) {
+	constructor(credentials: string[] = [], retained: ProviderExchange[] = []) {
 		this.credentials = credentials.filter((value) => value.length > 0);
+		this.exchanges = retained.map((exchange) =>
+			exchange.state === "running"
+				? {
+						...exchange,
+						state: "interrupted",
+						response: { ...exchange.response, complete: false },
+					}
+				: exchange,
+		);
+		this.remaining = Math.max(
+			0,
+			MAX_PROVIDER_EVIDENCE_BYTES -
+				retained.reduce(
+					(bytes, entry) =>
+						bytes +
+						retainedBodyBytes(entry.request.text) +
+						retainedBodyBytes(entry.response.text),
+					0,
+				),
+		);
 	}
 
 	redact = (text: string) => {
@@ -91,8 +115,7 @@ export class ProviderEvidence {
 	) {
 		body.bytes += bytes;
 		let end = text.length;
-		const size = (end: number) =>
-			new TextEncoder().encode(JSON.stringify(text.slice(0, end))).length - 2;
+		const size = (end: number) => retainedBodyBytes(text.slice(0, end));
 		if (size(end) > this.remaining) {
 			let low = 0,
 				high = end;

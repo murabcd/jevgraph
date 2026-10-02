@@ -44,8 +44,10 @@ export function NodeRunDetails({
 								{call.model} · {call.purpose} · {call.status}
 							</span>
 							<span className="text-muted-foreground tabular-nums">
-								{call.durationMs} ms · input{" "}
-								{call.usage?.inputTokens ?? "unknown"} · output{" "}
+								{call.durationMs === undefined
+									? "unknown duration"
+									: `${call.durationMs} ms`}{" "}
+								· input {call.usage?.inputTokens ?? "unknown"} · output{" "}
 								{call.usage?.outputTokens ?? "unknown"}
 							</span>
 							{call.usage?.cachedInputTokens !== undefined && (

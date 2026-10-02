@@ -111,6 +111,7 @@ async function setup() {
 	};
 	await fixture.owner.action(api.results.save, {
 		runId: run.runId,
+		executionId: run.executionId,
 		result: JSON.stringify(artifact),
 	});
 	const input = frozenCaseSchema.parse(JSON.parse(run.input));

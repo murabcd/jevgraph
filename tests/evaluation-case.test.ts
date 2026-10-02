@@ -64,7 +64,10 @@ test("registration freezes saved history and replay preserves case identity whil
 			metadata: {},
 		}),
 	});
-	await fixture.owner.mutation(internal.runs.expire, { runId: old.runId });
+	await fixture.owner.mutation(internal.runs.expire, {
+		runId: old.runId,
+		executionId: old.executionId,
+	});
 	const registered = await persistence.begin({
 		conversationId: fixture.workspace.conversationId,
 		requestId: crypto.randomUUID(),
@@ -94,6 +97,7 @@ test("registration freezes saved history and replay preserves case identity whil
 	expect(history.sources).toEqual([source]);
 	await fixture.owner.mutation(internal.runs.expire, {
 		runId: registered.runId,
+		executionId: registered.executionId,
 	});
 	const candidate = await resolveReplay(persistence, {
 		runId: registered.runId,

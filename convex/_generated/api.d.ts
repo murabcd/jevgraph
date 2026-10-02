@@ -10,6 +10,7 @@
 
 import type * as access from "../access.js";
 import type * as auth from "../auth.js";
+import type * as checkpoints from "../checkpoints.js";
 import type * as conversations from "../conversations.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
@@ -30,6 +31,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   access: typeof access;
   auth: typeof auth;
+  checkpoints: typeof checkpoints;
   conversations: typeof conversations;
   crons: typeof crons;
   http: typeof http;

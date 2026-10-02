@@ -102,6 +102,10 @@ function App({ workspace }: { workspace: Workspace }) {
 						status={status}
 						statusUnavailable={Boolean(statusError)}
 						onSend={() => void chat.run()}
+						onResume={() => void chat.resume()}
+						canResume={chat.canResume}
+						onStop={() => void chat.stop()}
+						canStop={chat.canStop}
 						onClear={() => void chat.clearChat()}
 						history={chat.history}
 						currentConversationId={workspace.conversationId}

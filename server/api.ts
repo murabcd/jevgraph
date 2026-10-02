@@ -25,6 +25,11 @@ import {
 } from "../src/lib/routing.ts";
 import type { TokenUsage } from "../src/lib/usage.ts";
 import {
+	ACTIVE_EXECUTION_MS,
+	emptyWorkflowJournal,
+	resumeRequestSchema,
+} from "../src/lib/workflow-journal.ts";
+import {
 	assessContext,
 	filterContext,
 	summarizeContext,
@@ -54,6 +59,7 @@ import {
 	type SummaryStore,
 } from "./session-memory.ts";
 import { executeWorkflow, type WorkflowModelRequest } from "./workflow.ts";
+import { WorkflowJournal } from "./workflow-journal.ts";
 
 const sessionMemories = new SessionMemoryPool();
 
@@ -71,6 +77,8 @@ type RouteExecution = {
 	emit: (event: RouteStreamEvent) => void;
 	onSnapshot: (trace: RouteTrace) => void;
 	providerEvidence: ProviderEvidence;
+	journal: WorkflowJournal;
+	createdAt: number;
 };
 
 const jevConfidenceSchema = z.record(z.string(), z.number().finite());
@@ -203,10 +211,11 @@ async function executeRoute(
 		emit,
 		onSnapshot,
 		providerEvidence,
+		journal,
+		createdAt,
 	}: RouteExecution,
 	routes: WorkflowRoutes,
 ) {
-	const start = performance.now();
 	emitStartTiming(emit);
 	const response = await executeWorkflow({
 		routes,
@@ -287,11 +296,12 @@ async function executeRoute(
 		onDelta: (text) => emit({ type: "delta", text }),
 		onRoute: (route) => emit({ type: "route", route }),
 		onSnapshot,
+		journal,
 		providerEvidence,
 		onProgress: (trace) => emit({ type: "progress", trace }),
 		signal,
 	});
-	return { ...response, latencyMs: Math.round(performance.now() - start) };
+	return { ...response, latencyMs: Math.max(0, Date.now() - createdAt) };
 }
 
 export async function handleApi(
@@ -316,7 +326,7 @@ export async function handleApi(
 	}
 	if (
 		request.method !== "POST" ||
-		(path !== "/api/route" && path !== "/api/replay")
+		(path !== "/api/route" && path !== "/api/replay" && path !== "/api/resume")
 	) {
 		return Response.json({ error: "Not found" }, { status: 404 });
 	}
@@ -337,15 +347,31 @@ export async function handleApi(
 			path === "/api/replay"
 				? routeReplayRequestSchema.parse(JSON.parse(bodyText))
 				: undefined;
-		const input = replay
-			? await resolveReplay(persistence, replay)
-			: routeRequestSchema.parse(JSON.parse(bodyText));
 		const credentials = [
 			keys.TYPESAFE_API_KEY,
 			keys.OPENAI_API_KEY,
 			keys.GOOGLE_GENERATIVE_AI_API_KEY,
 		];
 		const credentialScope = contentFingerprint(JSON.stringify(credentials));
+		const recovery =
+			path === "/api/resume"
+				? await persistence.resume(
+						resumeRequestSchema.parse(JSON.parse(bodyText)).runId,
+						credentialScope,
+					)
+				: undefined;
+		const input = recovery
+			? {
+					conversationId: recovery.conversationId,
+					requestId: recovery.requestId,
+					routes: recovery.routes,
+					messages: recovery.input.messages,
+					metadata: recovery.input.metadata,
+					documents: undefined,
+				}
+			: replay
+				? await resolveReplay(persistence, replay)
+				: routeRequestSchema.parse(JSON.parse(bodyText));
 		const start = input.routes.nodes.find((node) => node.kind === "input");
 		const resolvedDocuments = resolveContextDocuments(
 			start?.kind === "input" ? (start.documents ?? []) : [],
@@ -359,29 +385,31 @@ export async function handleApi(
 				),
 			).sort(([a], [b]) => a.localeCompare(b)),
 		);
-		const saved = await persistence.begin({
-			conversationId: input.conversationId,
-			requestId: input.requestId,
-			input: { messages: input.messages, metadata },
-			replayRunId: replay?.runId,
-			routes: {
-				...input.routes,
-				nodes: input.routes.nodes.map((node) =>
-					node.kind === "input" && input.documents
-						? { ...node, documents: resolvedDocuments }
-						: node,
-				),
-			},
-			evaluation: {
-				scope: credentialScope,
-			},
-		});
+		const saved =
+			recovery ??
+			(await persistence.begin({
+				conversationId: input.conversationId,
+				requestId: input.requestId,
+				input: { messages: input.messages, metadata },
+				replayRunId: replay?.runId,
+				routes: {
+					...input.routes,
+					nodes: input.routes.nodes.map((node) =>
+						node.kind === "input" && input.documents
+							? { ...node, documents: resolvedDocuments }
+							: node,
+					),
+				},
+				evaluation: {
+					scope: credentialScope,
+				},
+			}));
 		const encoder = new TextEncoder();
 		const cancellation = new AbortController();
 		const signal = AbortSignal.any([
 			request.signal,
 			cancellation.signal,
-			AbortSignal.timeout(120000),
+			AbortSignal.timeout(ACTIVE_EXECUTION_MS),
 		]);
 		let closed = false;
 		let partialText = "";
@@ -394,10 +422,32 @@ export async function handleApi(
 			contexts: [],
 			modelPlans: [],
 		};
-		const executionStarted = performance.now();
 		const providerEvidence = new ProviderEvidence(
 			credentials.filter((value): value is string => value !== undefined),
+			recovery?.journal.providerEvidence,
 		);
+		const journal = new WorkflowJournal(
+			recovery?.journal ?? emptyWorkflowJournal(saved.runId),
+			persistence.checkpointWriter(
+				saved.runId,
+				saved.executionId,
+				recovery?.revision ?? 0,
+			),
+			providerEvidence,
+		);
+		await journal.commit();
+		// Serialize ownership checks; a remote Stop or lost lease cancels in-flight providers.
+		let checking = false;
+		const ownershipTimer = setInterval(() => {
+			if (checking || signal.aborted) return;
+			checking = true;
+			void persistence
+				.assertExecution(saved.runId, saved.executionId)
+				.catch((error) => cancellation.abort(error))
+				.finally(() => {
+					checking = false;
+				});
+		}, 2000);
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const redactedDeltas = providerEvidence.streamRedactor();
@@ -446,6 +496,8 @@ export async function handleApi(
 						documents: input.documents,
 						providerFetch: providerEvidence.fetch(providerFetch),
 						providerEvidence,
+						journal,
+						createdAt: saved.createdAt,
 						keys,
 						memory: sessionMemories.get(
 							contentFingerprint(
@@ -467,6 +519,7 @@ export async function handleApi(
 					.then(async (result) => {
 						await persistence.settle(
 							saved.runId,
+							saved.executionId,
 							{
 								status: "completed",
 								result,
@@ -485,12 +538,17 @@ export async function handleApi(
 						await persistence
 							.settle(
 								saved.runId,
+								saved.executionId,
 								{
-									status: signal.aborted ? "interrupted" : "failed",
+									status:
+										signal.aborted || journal.failed ? "interrupted" : "failed",
 									text: partialText,
 									error: message.slice(0, 2000),
 									trace: latestTrace,
-									latencyMs: Math.round(performance.now() - executionStarted),
+									latencyMs: Math.max(
+										0,
+										Math.round(Date.now() - saved.createdAt),
+									),
 									...providerEvidence.artifactEvidence(
 										latestTrace.calls.map((call) => call.id),
 									),
@@ -509,6 +567,7 @@ export async function handleApi(
 						emit({ type: "error", error: message });
 					})
 					.finally(() => {
+						clearInterval(ownershipTimer);
 						if (!closed) {
 							closed = true;
 							controller.close();
@@ -516,6 +575,7 @@ export async function handleApi(
 					});
 			},
 			cancel() {
+				clearInterval(ownershipTimer);
 				closed = true;
 				cancellation.abort();
 			},

@@ -180,3 +180,38 @@ test("stream redaction protects every credential split and preserves ordinary te
 		"Plain prose",
 	);
 });
+
+test("restored provider evidence retains its JSON byte budget and marks lost streams interrupted", async () => {
+	const first = new ProviderEvidence();
+	const originalFetch = first.fetch(
+		async () => new Response('"\\\n'.repeat(180000)),
+	);
+	await first.run("first", async () =>
+		(await originalFetch("https://fixture.example")).text(),
+	);
+	const retained = first.snapshot();
+	retained[0].state = "running";
+	const restored = new ProviderEvidence([], retained);
+	const transport = restored.fetch(
+		async () => new Response("x".repeat(1000000)),
+	);
+	await restored.run("second", async () =>
+		(await transport("https://fixture.example")).text(),
+	);
+	const entries = restored.snapshot();
+	const retainedBytes = entries.reduce(
+		(bytes, entry) =>
+			bytes +
+			new TextEncoder().encode(JSON.stringify(entry.request.text)).length -
+			2 +
+			new TextEncoder().encode(JSON.stringify(entry.response.text)).length -
+			2,
+		0,
+	);
+	expect(retainedBytes).toBeLessThanOrEqual(MAX_PROVIDER_EVIDENCE_BYTES);
+	expect(entries[0]).toMatchObject({
+		state: "interrupted",
+		response: { complete: false },
+	});
+	expect(entries[1].response.complete).toBe(false);
+});
