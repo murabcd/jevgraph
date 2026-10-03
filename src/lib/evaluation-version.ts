@@ -3,7 +3,7 @@ import { RETRIEVAL_VERSION } from "./retrieval.ts";
 
 /** Bump these contracts when execution, prompts, or review semantics move. */
 export const EVALUATION_VERSIONS = {
-	runtime: "jevgraph:6",
+	runtime: "jevgraph:7",
 	prompts: "node-context:2",
 	evaluator: "criterion-review:1",
 	retrieval: RETRIEVAL_VERSION,

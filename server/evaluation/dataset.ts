@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { contentHash } from "../../src/lib/content-identity.ts";
 import { canonicalEvaluationInput } from "../../src/lib/evaluation-case.ts";
+import { batchOutputs } from "../../src/lib/jev-question.ts";
 import {
 	resolveStartVariables,
 	routeRequestSchema,
@@ -42,9 +43,12 @@ export const evaluationDatasetSchema = z
 						.max(100)
 						.refine(
 							(labels) =>
-								new Set(labels.map((label) => label.nodeId)).size ===
-								labels.length,
-							"Label each final Jev decision once",
+								new Set(
+									labels.map((label) =>
+										JSON.stringify([label.nodeId, label.branch.split("/")[0]]),
+									),
+								).size === labels.length,
+							"Label each final Jev question once",
 						),
 				}),
 			)
@@ -91,9 +95,8 @@ export const evaluationDatasetSchema = z
 				const judge = nodes.get(expected.nodeId);
 				if (
 					judge?.kind !== "jev" ||
-					!dataset.graph.edges.some(
-						(edge) =>
-							edge.source === judge.id && edge.sourceHandle === expected.branch,
+					!batchOutputs(judge.questions).some(
+						({ id }) => id === expected.branch,
 					)
 				)
 					ctx.addIssue({

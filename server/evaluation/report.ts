@@ -8,7 +8,7 @@ import {
 	validateQualityReview,
 } from "../../src/lib/quality-review.ts";
 import { routeEvidenceKey } from "../../src/lib/route-evidence.ts";
-
+import type { WorkflowDecision } from "../../src/lib/routing.ts";
 import { artifactTrace } from "../../src/lib/run-artifact.ts";
 import { totalUsage } from "../../src/lib/usage.ts";
 import { mapConcurrent } from "../concurrency.ts";
@@ -205,13 +205,17 @@ export async function evaluationReport(
 	const labelsApprovedBeforeRun =
 		dataset.labels.status === "owner-approved" &&
 		Date.parse(dataset.labels.reviewedAt) <= Date.parse(run.startedAt);
-	const thresholds = dataset.graph.nodes.flatMap((node) =>
+	const questions = dataset.graph.nodes.flatMap((node) =>
 		node.kind === "jev"
-			? node.questions.map(({ confidenceThreshold }) => confidenceThreshold)
+			? node.questions.map((question) => ({ nodeId: node.id, question }))
 			: [],
 	);
+	const thresholds = questions.map(
+		({ question }) => question.confidenceThreshold,
+	);
 	const models = run.candidates.map((candidate) => {
-		const observations: DecisionObservation[] = [];
+		const observations: (DecisionObservation &
+			Pick<WorkflowDecision, "nodeId" | "questionId">)[] = [];
 		const rows = cases.flatMap((item) =>
 			Array.from({ length: run.repeats }, (_, index) => {
 				const trial = slots.get(
@@ -222,13 +226,21 @@ export async function evaluationReport(
 				let routeCorrect: boolean | undefined = true;
 				for (const label of item.decisions) {
 					const decision = trace?.jevSteps.findLast(
-						(step) => step.nodeId === label.nodeId,
+						(step) =>
+							step.nodeId === label.nodeId &&
+							label.branch.startsWith(`${step.questionId}/`),
 					);
-					if (!decision || decision.status === "provider-error") {
+					if (
+						!decision ||
+						decision.status === "provider-error" ||
+						decision.error !== undefined
+					) {
 						if (routeCorrect !== false) routeCorrect = undefined;
 						continue;
 					}
 					observations.push({
+						nodeId: decision.nodeId,
+						questionId: decision.questionId,
 						caseId: item.id,
 						correct:
 							(decision.selectedBranch ?? decision.branch) === label.branch,
@@ -324,6 +336,32 @@ export async function evaluationReport(
 			userReactions: rows.map((row) => ({
 				caseId: row.caseId,
 				outcome: row.trial?.record?.review?.value.reaction.outcome ?? "unknown",
+			})),
+			decisionsByQuestion: questions.map(({ nodeId, question }) => ({
+				nodeId,
+				questionId: question.id,
+				name: question.name,
+				type: question.type,
+				measure:
+					question.type === "noul"
+						? "chosen-answer-probability"
+						: "provider-confidence",
+				...confidenceReport(
+					observations.filter(
+						(item) => item.nodeId === nodeId && item.questionId === question.id,
+					),
+					cases.reduce(
+						(sum, item) =>
+							sum +
+							item.decisions.filter(
+								(label) =>
+									label.nodeId === nodeId &&
+									label.branch.startsWith(`${question.id}/`),
+							).length,
+						0,
+					) * run.repeats,
+					[question.confidenceThreshold],
+				),
 			})),
 			decisions: confidenceReport(
 				observations,

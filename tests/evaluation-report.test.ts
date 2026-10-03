@@ -18,6 +18,7 @@ import {
 	evaluationDatasetFixture,
 	evaluationFixture,
 } from "./evaluation-fixture";
+import { configuredJevQuestion } from "./jev-question-fixture";
 
 test("dataset prevents default-value duplicates across splits and pins installed provider SDKs", async () => {
 	const seed = evaluationDatasetFixture();
@@ -101,6 +102,102 @@ test("confidence reports use configured Jev thresholds and omit rows when no thr
 			0.83,
 		]);
 	expect(confidenceReport([], 0, []).thresholds).toEqual([]);
+});
+
+test("batched question labels and threshold reports keep each question's observations separate", async () => {
+	const { dataset, run, now } = await evaluationFixture();
+	const question = {
+		...configuredJevQuestion("noul"),
+		id: "eligibility",
+		name: "Eligibility",
+		confidenceThreshold: 0.9,
+		uncertainOutputId: "eligibility/yes",
+	};
+	const judge = dataset.graph.nodes.find((node) => node.id === "intent");
+	if (judge?.kind !== "jev") throw new Error("Missing Jev fixture");
+	judge.questions.push(question);
+	for (const item of dataset.cases)
+		item.decisions.push({ nodeId: "intent", branch: "eligibility/yes" });
+	evaluationDatasetSchema.parse(dataset);
+	const duplicate = structuredClone(dataset);
+	duplicate.cases[0].decisions.push({
+		nodeId: "intent",
+		branch: "eligibility/no",
+	});
+	expect(() => evaluationDatasetSchema.parse(duplicate)).toThrow(
+		"Label each final Jev question once",
+	);
+	for (const trial of run.trials) {
+		if (!trial.record) throw new Error("Missing trial fixture");
+		const node = trial.record.routes.nodes.find((node) => node.id === "intent");
+		if (node?.kind !== "jev") throw new Error("Missing Jev fixture");
+		node.questions.push(question);
+		artifactTrace(trial.record.artifact).jevSteps.push({
+			nodeId: "intent",
+			questionId: "eligibility",
+			branch: "eligibility/yes",
+			selectedBranch: "eligibility/yes",
+			confidence: 0.8,
+			value: 0.8,
+			status: "uncertain",
+		});
+	}
+	run.datasetKey = await datasetKey(dataset);
+	const report = await evaluationReport(dataset, run, now);
+	for (const model of report.models) {
+		expect(model.decisions.accuracy).toBe(1);
+		expect(model.decisionsByQuestion[0]).toMatchObject({
+			questionId: "question",
+			measure: "provider-confidence",
+			labelledDecisions: 5,
+			thresholds: [{ threshold: 0.7, decisions: 5, coverage: 1, errorRate: 0 }],
+		});
+		expect(model.decisionsByQuestion[1]).toMatchObject({
+			questionId: "eligibility",
+			measure: "chosen-answer-probability",
+			labelledDecisions: 5,
+			thresholds: [
+				{ threshold: 0.9, decisions: 0, coverage: 0, errorRate: null },
+			],
+		});
+	}
+});
+
+test("failed Jev evaluations remain missing observations when their repeat is exhausted", async () => {
+	const { dataset, run, now } = await evaluationFixture();
+	const record = run.trials[0].record;
+	if (record?.artifact?.status !== "completed")
+		throw new Error("Missing completed fixture");
+	const decision = record.artifact.result.jevSteps[0];
+	decision.status = "exhausted";
+	decision.error = "Jev unavailable";
+	decision.selectedBranch = undefined;
+	decision.confidence = undefined;
+	record.artifact.result.outcome = "repeat-exhausted";
+	record.review = undefined;
+	const report = await evaluationReport(dataset, run, now);
+	for (const decisions of [
+		report.models[0].decisions,
+		report.models[0].decisionsByQuestion[0],
+	])
+		expect(decisions).toMatchObject({
+			labelledDecisions: 4,
+			expectedDecisions: 5,
+			missingDecisions: 1,
+			confidenceReports: 4,
+		});
+	expect(report.models[0].passingRoutes).toBe(4);
+	expect(report.models[1].decisions.missingDecisions).toBe(0);
+	decision.error = undefined;
+	decision.selectedBranch = decision.branch;
+	decision.confidence = 0.9;
+	const valid = await evaluationReport(dataset, run, now);
+	expect(valid.models[0].decisionsByQuestion[0]).toMatchObject({
+		labelledDecisions: 5,
+		missingDecisions: 0,
+		confidenceReports: 5,
+	});
+	expect(valid.models[0].passingRoutes).toBe(4);
 });
 
 test("complete paired reports require pre-approved labels, bounded policy evidence and independent outcomes", async () => {

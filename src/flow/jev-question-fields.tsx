@@ -377,7 +377,7 @@ export function JevQuestionFields({
 				>
 					{question.type === "noul"
 						? "Minimum probability of chosen answer (%)"
-						: "Minimum confidence (%)"}
+						: "Minimum Jev confidence (%)"}
 				</FieldLabel>
 				<Input
 					id={`${prefix}-confidence`}
@@ -398,52 +398,55 @@ export function JevQuestionFields({
 					}
 				/>
 			</Field>
-			<Field>
-				<FieldLabel
-					htmlFor={`${prefix}-uncertain`}
-					className="text-xs text-muted-foreground"
-				>
-					When below threshold or Jev fails
-				</FieldLabel>
-				<Select
-					value={
-						question.fallbackOutputId
-							? choiceValue(question.fallbackOutputId)
-							: "error"
-					}
-					onValueChange={(value) => {
-						if (value)
-							onChange({
-								...question,
-								fallbackOutputId: questionOutputs(question).find(
-									({ id }) => choiceValue(id) === value,
-								)?.id,
-							});
-					}}
-				>
-					<SelectTrigger id={`${prefix}-uncertain`} className="w-full">
-						<SelectValue>
-							{(selected: string | null) =>
-								selected === "error"
-									? "Stop with error"
-									: questionOutputs(question).find(
-											({ id }) => choiceValue(id) === selected,
-										)?.label
-							}
-						</SelectValue>
-					</SelectTrigger>
-					<SelectContent alignItemWithTrigger={false}>
-						<SelectGroup>
-							<SelectItem value="error">Stop with error</SelectItem>
-							{questionOutputs(question).map((output) => (
-								<SelectItem key={output.id} value={choiceValue(output.id)}>
-									{output.label}
-								</SelectItem>
-							))}
-						</SelectGroup>
-					</SelectContent>
-				</Select>
-			</Field>
+			{(
+				[
+					{ field: "uncertainOutputId", label: "When below threshold" },
+					{ field: "errorOutputId", label: "When Jev fails" },
+				] as const
+			).map(({ field, label }) => (
+				<Field key={field}>
+					<FieldLabel
+						htmlFor={`${prefix}-${field}`}
+						className="text-xs text-muted-foreground"
+					>
+						{label}
+					</FieldLabel>
+					<Select
+						value={question[field] ? choiceValue(question[field]) : "error"}
+						onValueChange={(value) => {
+							if (value)
+								onChange({
+									...question,
+									[field]: questionOutputs(question).find(
+										({ id }) => choiceValue(id) === value,
+									)?.id,
+								});
+						}}
+					>
+						<SelectTrigger id={`${prefix}-${field}`} className="w-full">
+							<SelectValue>
+								{(selected: string | null) =>
+									selected === "error"
+										? "Stop with error"
+										: questionOutputs(question).find(
+												({ id }) => choiceValue(id) === selected,
+											)?.label
+								}
+							</SelectValue>
+						</SelectTrigger>
+						<SelectContent alignItemWithTrigger={false}>
+							<SelectGroup>
+								<SelectItem value="error">Stop with error</SelectItem>
+								{questionOutputs(question).map((output) => (
+									<SelectItem key={output.id} value={choiceValue(output.id)}>
+										{output.label}
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+				</Field>
+			))}
 		</FieldGroup>
 	);
 }

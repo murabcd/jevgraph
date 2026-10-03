@@ -74,7 +74,7 @@ describe("chatflow API", () => {
 					questions: [
 						{
 							...configuredJevQuestion(),
-							fallbackOutputId: "question/choice-1",
+							errorOutputId: "question/choice-1",
 						},
 					],
 				},

@@ -61,6 +61,10 @@ test("Convex isolates owners and rejects stale graph writes atomically", async (
 	).rejects.toThrow("Conversation unavailable");
 	const changed = parseGraphJson(graph);
 	changed.nodes[0].position.x = 55;
+	const judge = changed.nodes.find((node) => node.data.kind === "jev");
+	if (judge?.data.kind !== "jev") throw new Error("Missing Jev fixture");
+	judge.data.questions[0].uncertainOutputId = "question/choice-1";
+	judge.data.questions[0].errorOutputId = "question/choice-2";
 	expect(
 		await owner.mutation(api.workspaces.save, {
 			id,
@@ -71,9 +75,9 @@ test("Convex isolates owners and rejects stale graph writes atomically", async (
 	await expect(
 		owner.mutation(api.workspaces.save, { id, revision: 0, graph }),
 	).rejects.toThrow("changed in another tab");
-	expect((await owner.query(api.workspaces.current, {}))?.graph).toBe(
-		JSON.stringify(changed),
-	);
+	const saved = await owner.query(api.workspaces.current, {});
+	if (!saved) throw new Error("Missing saved workspace");
+	expect(parseGraphJson(saved.graph)).toEqual(changed);
 	await expect(
 		owner.mutation(api.workspaces.save, {
 			id,

@@ -36,7 +36,11 @@ const question: JevQuestion = {
 		},
 	],
 };
-function jevRoutes(fallback = true): WorkflowRoutes {
+function jevRoutes(
+	policy: Pick<JevQuestion, "uncertainOutputId" | "errorOutputId"> = {
+		uncertainOutputId: "question/operator",
+	},
+): WorkflowRoutes {
 	return {
 		kind: "workflow",
 		nodes: [
@@ -48,7 +52,7 @@ function jevRoutes(fallback = true): WorkflowRoutes {
 					{
 						...question,
 						confidenceThreshold: 0.9,
-						...(fallback ? { fallbackOutputId: "question/operator" } : {}),
+						...policy,
 					},
 				],
 			},
@@ -137,13 +141,16 @@ async function runHttp(routes: WorkflowRoutes, providerFetch: ProviderFetch) {
 
 test("Russian HTTP flow returns the configured label after Jev 503 with one failed attempt", async () => {
 	let requests = 0;
-	const { result, error } = await runHttp(jevRoutes(), async () => {
-		requests++;
-		return Response.json(
-			{ message: "Сервис временно недоступен" },
-			{ status: 503 },
-		);
-	});
+	const { result, error } = await runHttp(
+		jevRoutes({ errorOutputId: "question/operator" }),
+		async () => {
+			requests++;
+			return Response.json(
+				{ message: "Сервис временно недоступен" },
+				{ status: 503 },
+			);
+		},
+	);
 	expect(error).toBeUndefined();
 	expect(requests).toBe(1);
 	expect(result?.text).toBe("Оператор");
@@ -156,23 +163,18 @@ test("Russian HTTP flow returns the configured label after Jev 503 with one fail
 	expect(result?.usage.costComplete).toBe(false);
 });
 
-test("Russian HTTP flow stops when Jev fails without a configured fallback", async () => {
+test("Russian HTTP flow stops on Jev failure even when a clarification output is configured", async () => {
 	let requests = 0;
-	const { result, error, events } = await runHttp(
-		jevRoutes(false),
-		async () => {
-			requests++;
-			return Response.json(
-				{ message: "Сервис временно недоступен" },
-				{ status: 503 },
-			);
-		},
-	);
+	const { result, error, events } = await runHttp(jevRoutes(), async () => {
+		requests++;
+		return Response.json(
+			{ message: "Сервис временно недоступен" },
+			{ status: 503 },
+		);
+	});
 	expect(requests).toBe(1);
 	expect(result).toBeUndefined();
-	expect(error).toStartWith(
-		"Jev couldn’t determine a reliable answer for “Question”: ",
-	);
+	expect(error).toStartWith("Jev couldn’t evaluate “Question”: ");
 	expect(events.some((event) => event.type === "delta")).toBe(false);
 });
 

@@ -217,7 +217,7 @@ test("per-question uncertainty is explicit and a rejected batch releases no path
 	const resolved = resolve(
 		questions.map((question) =>
 			question.id === "quality"
-				? { ...question, fallbackOutputId: "quality/score-0" }
+				? { ...question, uncertainOutputId: "quality/score-0" }
 				: question,
 		),
 	);
@@ -233,14 +233,184 @@ test("per-question uncertainty is explicit and a rejected batch releases no path
 	});
 });
 
-test("batches reject duplicate identities, cross-question defaults, and ambiguous repeat control", () => {
+test("uncertainty and provider errors use only their own configured outputs", () => {
+	const question = {
+		...questions[0],
+		uncertainOutputId: "intent/choice-2",
+		errorOutputId: "intent/choice-1",
+	};
+	const resolve = (
+		batch: typeof questions,
+		result: typeof evaluation | undefined,
+		error?: string,
+	) =>
+		resolveJevBatch({
+			nodeId: "judge",
+			questions: batch,
+			evaluation: result,
+			error,
+			edges: [],
+			repeatCounts: new Map(),
+			maxRepeats: 3,
+		});
+	const uncertain = {
+		...evaluation,
+		answers: [{ ...evaluation.answers[0], confidence: 0.69 }],
+	};
+	expect(resolve([question], uncertain).decisions[0]).toMatchObject({
+		branch: "intent/choice-2",
+		status: "uncertain",
+	});
+	expect(
+		resolve([question], undefined, "unavailable").decisions[0],
+	).toMatchObject({
+		branch: "intent/choice-1",
+		status: "provider-error",
+		error: "unavailable",
+	});
+	expect(() =>
+		resolve(
+			[{ ...question, errorOutputId: undefined }],
+			undefined,
+			"unavailable",
+		),
+	).toThrow("couldn’t evaluate");
+	expect(() =>
+		resolve([{ ...question, uncertainOutputId: undefined }], uncertain),
+	).toThrow("couldn’t determine a reliable answer");
+	for (const invalid of [
+		{ ...evaluation, answers: [] },
+		{
+			...evaluation,
+			answers: [{ ...evaluation.answers[0], branch: "intent/missing" }],
+		},
+	]) {
+		expect(resolve([question], invalid).decisions[0]).toMatchObject({
+			status: "provider-error",
+			error: "Jev returned no valid answer",
+		});
+		expect(() =>
+			resolve([{ ...question, errorOutputId: undefined }], invalid),
+		).toThrow("no valid answer");
+	}
+	expect(resolve([question], undefined, "").decisions[0].status).toBe(
+		"provider-error",
+	);
+});
+
+test("each question accepts its threshold boundary and uses only its uncertainty policy below it", () => {
+	for (const question of questions) {
+		const answer = evaluation.answers.find(
+			(answer) => answer.questionId === question.id,
+		);
+		if (!answer) throw new Error("Missing fixture answer");
+		for (const confidence of [0.699, 0.7]) {
+			const result = resolveJevBatch({
+				nodeId: "judge",
+				questions: [{ ...question, uncertainOutputId: answer.branch }],
+				evaluation: { ...evaluation, answers: [{ ...answer, confidence }] },
+				error: undefined,
+				edges: [],
+				repeatCounts: new Map(),
+				maxRepeats: 3,
+			});
+			expect(result.decisions[0].status).toBe(
+				confidence < 0.7 ? "uncertain" : "accepted",
+			);
+		}
+	}
+});
+
+test("an error output cannot traverse an exhausted repeat or its success exit", () => {
+	const result = resolveJevBatch({
+		nodeId: "judge",
+		questions: [{ ...questions[0], errorOutputId: "intent/choice-2" }],
+		evaluation: undefined,
+		error: "unavailable",
+		edges: [
+			{
+				id: "repeat",
+				source: "judge",
+				sourceHandle: "intent/choice-2",
+				target: "draft",
+				repeat: true,
+			},
+			{
+				id: "success",
+				source: "judge",
+				sourceHandle: "intent/choice-1",
+				target: "answer",
+			},
+		],
+		repeatCounts: new Map([["repeat", 3]]),
+		maxRepeats: 3,
+	});
+	expect(result.exhausted).toBe(true);
+	expect(result.edges).toEqual([]);
+	expect(result.decisions[0]).toMatchObject({
+		status: "exhausted",
+		error: "unavailable",
+	});
+	expect(result.text).toBe("Repeat limit reached. Review did not pass.");
+});
+
+test("a failed question releases no batch paths even when another question is accepted", async () => {
+	let modelCalls = 0;
+	await expect(
+		executeWorkflow({
+			routes: {
+				...graph,
+				nodes: [
+					...graph.nodes,
+					{
+						id: "answer",
+						kind: "model",
+						provider: "openai",
+						model: "gpt-6-luna",
+					},
+				],
+				edges: [
+					...graph.edges,
+					{
+						id: "selected",
+						source: "judge",
+						sourceHandle: "intent/choice-1",
+						target: "answer",
+					},
+				],
+			},
+			messages: [{ role: "user", content: "Review" }],
+			metadata: {},
+			evaluate: async () => ({
+				...evaluation,
+				answers: [evaluation.answers[0]],
+			}),
+			runModel: async ({ target }) => {
+				modelCalls++;
+				return { text: "unexpected", model: target.model };
+			},
+			onDelta: () => {},
+			onProgress: () => {},
+			onRoute: () => {},
+		}),
+	).rejects.toThrow("Eligibility");
+	expect(modelCalls).toBe(0);
+});
+
+test("batches reject duplicate identities, cross-question failure outputs, and ambiguous repeat control", () => {
 	expect(
 		configuredJevQuestionsSchema.safeParse([questions[0], questions[0]])
 			.success,
 	).toBe(false);
+	for (const field of ["uncertainOutputId", "errorOutputId"] as const)
+		expect(
+			configuredJevQuestionsSchema.safeParse([
+				{ ...questions[0], [field]: "eligible/yes" },
+			]).success,
+		).toBe(false);
 	expect(
 		configuredJevQuestionsSchema.safeParse([
-			{ ...questions[0], fallbackOutputId: "eligible/yes" },
+			{ ...questions[0], fallbackOutputId: "intent/choice-1" },
 		]).success,
 	).toBe(false);
 	const routes = {

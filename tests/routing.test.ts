@@ -225,7 +225,7 @@ describe("chatflow contract", () => {
 						{
 							...configuredJevQuestion(),
 							confidenceThreshold: 0.85,
-							fallbackOutputId: "question/choice-2",
+							uncertainOutputId: "question/choice-2",
 						},
 					],
 				},
@@ -241,7 +241,7 @@ describe("chatflow contract", () => {
 					{
 						...jev.nodes[1],
 						questions: [
-							{ ...configuredJevQuestion(), fallbackOutputId: "missing" },
+							{ ...configuredJevQuestion(), uncertainOutputId: "missing" },
 						],
 					},
 				],

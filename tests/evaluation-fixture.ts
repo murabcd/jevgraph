@@ -61,7 +61,7 @@ export function evaluationDatasetFixture() {
 								],
 							},
 							confidenceThreshold: 0.7,
-							fallbackOutputId: "question/clarify",
+							uncertainOutputId: "question/clarify",
 						},
 					],
 

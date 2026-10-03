@@ -46,6 +46,7 @@ function providerResponse(url: RequestInfo | URL) {
 				question: {
 					type: "choice",
 					choice: "Accept",
+					confidence: 0.98,
 					probabilities: { Accept: 0.99, Clarify: 0.01 },
 				},
 			},

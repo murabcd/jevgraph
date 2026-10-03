@@ -39,14 +39,28 @@ export function resolveJevBatch({
 	const selected: WorkflowEdge[] = [];
 	for (const question of questions) {
 		const answer = answers.get(question.id);
+		const failure =
+			error !== undefined
+				? error || "Jev evaluation failed"
+				: !answer ||
+						!questionOutputs(question).some(({ id }) => id === answer.branch)
+					? "Jev returned no valid answer"
+					: undefined;
 		const accepted =
+			failure === undefined &&
 			answer &&
-			answer.confidence >= question.confidenceThreshold &&
-			questionOutputs(question).some(({ id }) => id === answer.branch);
-		const branch = accepted ? answer.branch : question.fallbackOutputId;
+			answer.confidence >= question.confidenceThreshold;
+		const branch =
+			failure !== undefined
+				? question.errorOutputId
+				: accepted
+					? answer.branch
+					: question.uncertainOutputId;
 		if (!branch)
 			throw new Error(
-				`Jev couldn’t determine a reliable answer for “${question.name}”${error ? `: ${error}` : "."}`,
+				failure !== undefined
+					? `Jev couldn’t evaluate “${question.name}”: ${failure}`
+					: `Jev couldn’t determine a reliable answer for “${question.name}”.`,
 			);
 		const edge = outgoing.get(branch);
 		const exhausted =
@@ -57,7 +71,7 @@ export function resolveJevBatch({
 			branch,
 			status: exhausted
 				? "exhausted"
-				: error
+				: failure !== undefined
 					? "provider-error"
 					: accepted
 						? "accepted"
@@ -66,7 +80,7 @@ export function resolveJevBatch({
 			value: answer?.value,
 			probabilities: answer?.probabilities,
 			confidence: answer?.confidence,
-			error,
+			error: failure,
 		});
 		if (edge && !exhausted) selected.push(edge);
 	}

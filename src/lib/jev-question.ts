@@ -15,7 +15,8 @@ const questionIdentity = {
 		.regex(/^[a-zA-Z0-9_-]+$/),
 	name: z.string().trim().min(1).max(80),
 	confidenceThreshold: confidenceThresholdSchema,
-	fallbackOutputId: z.string().min(1).max(200).optional(),
+	uncertainOutputId: z.string().min(1).max(200).optional(),
+	errorOutputId: z.string().min(1).max(200).optional(),
 };
 
 const probabilitiesSchema = z.record(
@@ -24,7 +25,7 @@ const probabilitiesSchema = z.record(
 );
 
 function questionSchema(text: z.ZodString) {
-	const choiceQuestionSchema = z.object({
+	const choiceQuestionSchema = z.strictObject({
 		...questionIdentity,
 		type: z.literal("choice"),
 		instructions: text,
@@ -46,14 +47,14 @@ function questionSchema(text: z.ZodString) {
 				"Choice IDs and labels must be unique",
 			),
 	});
-	const noulQuestionSchema = z.object({
+	const noulQuestionSchema = z.strictObject({
 		...questionIdentity,
 		type: z.literal("noul"),
 		instructions: text,
 		yesDescription: text,
 		noDescription: text,
 	});
-	const scoreQuestionSchema = z.object({
+	const scoreQuestionSchema = z.strictObject({
 		...questionIdentity,
 		type: z.literal("score"),
 		instructions: text,
@@ -96,15 +97,16 @@ function questionBatchSchema(question: typeof jevQuestionSchema) {
 					code: "custom",
 					message: "Question IDs and names must be unique",
 				});
-			for (const item of questions) {
-				if (
-					item.fallbackOutputId &&
-					!questionOutputs(item).some(({ id }) => id === item.fallbackOutputId)
-				)
-					ctx.addIssue({
-						code: "custom",
-						message: `Invalid fallback for ${item.name}`,
-					});
+			for (const [index, item] of questions.entries()) {
+				const outputs = new Set(questionOutputs(item).map(({ id }) => id));
+				for (const field of ["uncertainOutputId", "errorOutputId"] as const) {
+					if (item[field] !== undefined && !outputs.has(item[field]))
+						ctx.addIssue({
+							code: "custom",
+							path: [index, field],
+							message: `Invalid ${field === "uncertainOutputId" ? "uncertainty" : "error"} output for ${item.name}`,
+						});
+				}
 			}
 		});
 }

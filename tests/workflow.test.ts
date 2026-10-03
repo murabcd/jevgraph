@@ -177,7 +177,7 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 					{
 						...configuredJevQuestion(),
 						confidenceThreshold: 0.9,
-						fallbackOutputId: "question/choice-1",
+						uncertainOutputId: "question/choice-1",
 					},
 				],
 			},
@@ -230,7 +230,7 @@ test("Jev uses its configured confidence threshold and fallback output", async (
 	expect(result.jevSteps[0]?.branch).toBe("question/choice-1");
 });
 
-test("Jev can return a configured fallback label when its provider fails", async () => {
+test("Jev can return a configured error label when its provider fails", async () => {
 	const routes: WorkflowRoutes = {
 		kind: "workflow",
 		nodes: [
@@ -239,7 +239,7 @@ test("Jev can return a configured fallback label when its provider fails", async
 				id: "judge",
 				kind: "jev",
 				questions: [
-					{ ...configuredJevQuestion(), fallbackOutputId: "question/choice-2" },
+					{ ...configuredJevQuestion(), errorOutputId: "question/choice-2" },
 				],
 			},
 		],
@@ -665,10 +665,24 @@ test("a parallel join waits for a repeating branch before running the final mode
 	expect(result.text).toBe("joined result");
 });
 
-test("cancellation during Jev evaluation stops before the default model", async () => {
+test("cancellation during Jev evaluation never takes a configured error output", async () => {
 	const controller = new AbortController();
 	let modelCalls = 0;
-	const execution = run(connected, {
+	const routes: WorkflowRoutes = {
+		...connected,
+		nodes: connected.nodes.map((node) =>
+			node.kind === "jev"
+				? {
+						...node,
+						questions: node.questions.map((question) => ({
+							...question,
+							errorOutputId: "question/yes",
+						})),
+					}
+				: node,
+		),
+	};
+	const execution = run(routes, {
 		signal: controller.signal,
 		decide: async () => {
 			controller.abort();
