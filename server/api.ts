@@ -1,8 +1,6 @@
 import type { OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
 import { streamText } from "ai";
 import { z } from "zod";
-import type { ContextDocument } from "../src/lib/context.ts";
-import { resolveContextDocuments } from "../src/lib/context.ts";
 import {
 	type JevQuestion,
 	questionForJev,
@@ -10,25 +8,15 @@ import {
 } from "../src/lib/jev-question.ts";
 import { effectiveModelConfiguration } from "../src/lib/model-configuration.ts";
 import { textModels } from "../src/lib/models.ts";
-import type { RouteEvidence } from "../src/lib/route-evidence.ts";
 import {
-	type ChatMessage,
 	JEV_MODEL_ID,
 	type JevEvaluation,
 	MAX_REQUEST_BYTES,
 	type RouteStreamEvent,
-	type RouteTrace,
-	type RoutingMetadata,
-	resolveStartVariables,
 	routeRequestSchema,
-	type WorkflowRoutes,
 } from "../src/lib/routing.ts";
 import type { TokenUsage } from "../src/lib/usage.ts";
-import {
-	ACTIVE_EXECUTION_MS,
-	emptyWorkflowJournal,
-	resumeRequestSchema,
-} from "../src/lib/workflow-journal.ts";
+import { resumeRequestSchema } from "../src/lib/workflow-journal.ts";
 import {
 	assessContext,
 	filterContext,
@@ -39,46 +27,23 @@ import { evaluateJev } from "./jev-evaluation.ts";
 import { modelPrompt } from "./model-prompt.ts";
 import {
 	languageModelFor,
+	type ProviderAccess,
 	type ProviderFetch,
 	type ProviderKeys,
 } from "./provider-access.ts";
-import { ProviderEvidence } from "./provider-evidence.ts";
 import {
 	evaluationUsage,
 	languageModelUsage,
 	ProviderUsageError,
 } from "./provider-usage.ts";
 import { resolveReplay, routeReplayRequestSchema } from "./replay.ts";
-import { type ContextRetriever, createContextRetriever } from "./retrieval.ts";
+import { createContextRetriever } from "./retrieval.ts";
 import { embedContext, rerankContext } from "./retrieval-providers.ts";
-import {
-	contentFingerprint,
-	type SessionMemory,
-	SessionMemoryPool,
-	type SummaryStore,
-} from "./session-memory.ts";
+import { contentFingerprint, SessionMemoryPool } from "./session-memory.ts";
 import { executeWorkflow, type WorkflowModelRequest } from "./workflow.ts";
-import { WorkflowJournal } from "./workflow-journal.ts";
+import { RunExecution, type RunExecutionContext } from "./workflow-journal.ts";
 
 const sessionMemories = new SessionMemoryPool();
-
-type RouteExecution = {
-	messages: ChatMessage[];
-	metadata: RoutingMetadata;
-	documents?: ContextDocument[];
-	providerFetch?: ProviderFetch;
-	keys: ProviderKeys;
-	memory: SessionMemory;
-	summaryStore: SummaryStore;
-	retrieve: ContextRetriever;
-	evidenceFor: (key: string) => Promise<RouteEvidence[]>;
-	signal: AbortSignal;
-	emit: (event: RouteStreamEvent) => void;
-	onSnapshot: (trace: RouteTrace) => void;
-	providerEvidence: ProviderEvidence;
-	journal: WorkflowJournal;
-	createdAt: number;
-};
 
 const jevConfidenceSchema = z.record(z.string(), z.number().finite());
 
@@ -125,11 +90,7 @@ async function classify(
 
 async function runModel(
 	{ target, context, variables, onDelta, cache }: WorkflowModelRequest,
-	{
-		keys,
-		signal,
-		providerFetch,
-	}: Pick<RouteExecution, "keys" | "signal" | "providerFetch">,
+	{ keys, signal, providerFetch }: ProviderAccess,
 ) {
 	const { provider, model: modelId } = target;
 	const model = languageModelFor(provider, modelId, {
@@ -193,32 +154,44 @@ async function runModel(
 
 async function executeRoute(
 	{
-		messages,
-		metadata,
-		documents,
-		providerFetch,
-		keys,
-		memory,
-		summaryStore,
-		retrieve,
-		evidenceFor,
+		saved,
+		credentialScope,
 		signal,
 		emit,
 		onSnapshot,
 		providerEvidence,
 		journal,
-		createdAt,
-	}: RouteExecution,
-	routes: WorkflowRoutes,
+	}: RunExecutionContext,
+	{
+		keys,
+		persistence,
+		providerFetch,
+	}: {
+		keys: ProviderKeys;
+		persistence: ConvexPersistence;
+		providerFetch?: ProviderFetch;
+	},
 ) {
-	const response = await executeWorkflow({
-		routes,
-		messages,
-		metadata,
-		documents,
-		memory,
-		summaryStore,
-		evidenceFor,
+	const providers = {
+		keys,
+		signal,
+		providerFetch: providerEvidence.fetch(providerFetch),
+	};
+	return executeWorkflow({
+		routes: saved.routes,
+		messages: saved.input.messages,
+		metadata: saved.input.metadata ?? {},
+		memory: sessionMemories.get(
+			contentFingerprint(
+				JSON.stringify({
+					conversationId: saved.conversationId,
+					credentialScope,
+				}),
+			),
+		),
+		summaryStore: persistence.summaryStore(saved.workspaceId, credentialScope),
+		evidenceFor: (key) =>
+			persistence.routeEvidence(saved.workspaceId, credentialScope, key),
 		availableModels: new Set(
 			textModels
 				.filter((model) =>
@@ -230,20 +203,21 @@ async function executeRoute(
 		),
 		contextProviders: {
 			retrieval: {
-				retrieve,
-				embed: (values) =>
-					embedContext(values, { keys, signal, providerFetch }),
-				rerank: (request) =>
-					rerankContext(request, { keys, signal, providerFetch }),
+				retrieve: createContextRetriever(
+					persistence.retrievalStore(
+						saved.workspaceId,
+						saved.runId,
+						credentialScope,
+					),
+				),
+				embed: (values) => embedContext(values, providers),
+				rerank: (request) => rerankContext(request, providers),
 			},
 			automatic: {
-				summarize: (request) =>
-					summarizeContext(request, { keys, signal, providerFetch }),
-				assess: (request) =>
-					assessContext(request, { keys, signal, providerFetch }),
+				summarize: (request) => summarizeContext(request, providers),
+				assess: (request) => assessContext(request, providers),
 			},
-			filter: (request) =>
-				filterContext(request, { keys, signal, providerFetch }),
+			filter: (request) => filterContext(request, providers),
 		},
 		evaluate: (_nodeId, question, state) => {
 			if (!keys.TYPESAFE_API_KEY)
@@ -253,10 +227,10 @@ async function executeRoute(
 				keys.TYPESAFE_API_KEY,
 				question,
 				signal,
-				providerFetch,
+				providers.providerFetch,
 			);
 		},
-		runModel: (request) => runModel(request, { keys, signal, providerFetch }),
+		runModel: (request) => runModel(request, providers),
 		onTiming: emit,
 		onDelta: (text) => emit({ type: "delta", text }),
 		onRoute: (route) => emit({ type: "route", route }),
@@ -266,7 +240,6 @@ async function executeRoute(
 		onProgress: (trace) => emit({ type: "progress", trace }),
 		signal,
 	});
-	return { ...response, latencyMs: Math.max(0, Date.now() - createdAt) };
 }
 
 export async function handleApi(
@@ -317,116 +290,39 @@ export async function handleApi(
 			keys.OPENAI_API_KEY,
 			keys.GOOGLE_GENERATIVE_AI_API_KEY,
 		];
-		const credentialScope = contentFingerprint(JSON.stringify(credentials));
-		const recovery =
-			path === "/api/resume"
-				? await persistence.resume(
-						resumeRequestSchema.parse(JSON.parse(bodyText)).runId,
-						credentialScope,
-					)
-				: undefined;
-		const input = recovery
-			? {
-					conversationId: recovery.conversationId,
-					requestId: recovery.requestId,
-					routes: recovery.routes,
-					messages: recovery.input.messages,
-					metadata: recovery.input.metadata,
-					documents: undefined,
-				}
-			: replay
-				? await resolveReplay(persistence, replay)
-				: routeRequestSchema.parse(JSON.parse(bodyText));
-		const start = input.routes.nodes.find((node) => node.kind === "input");
-		const resolvedDocuments = resolveContextDocuments(
-			start?.kind === "input" ? (start.documents ?? []) : [],
-			input.documents,
-		);
-		const metadata = Object.fromEntries(
-			Object.entries(
-				resolveStartVariables(
-					start?.kind === "input" ? start.fields : [],
-					input.metadata ?? {},
-				),
-			).sort(([a], [b]) => a.localeCompare(b)),
-		);
-		const saved =
-			recovery ??
-			(await persistence.begin({
-				conversationId: input.conversationId,
-				requestId: input.requestId,
-				input: { messages: input.messages, metadata },
-				replayRunId: replay?.runId,
-				routes: {
-					...input.routes,
-					nodes: input.routes.nodes.map((node) =>
-						node.kind === "input" && input.documents
-							? { ...node, documents: resolvedDocuments }
-							: node,
-					),
-				},
-				evaluation: {
-					scope: credentialScope,
-				},
-			}));
+		const execution = await RunExecution.start({
+			persistence,
+			credentials,
+			signal: request.signal,
+			request:
+				path === "/api/resume"
+					? {
+							kind: "resume",
+							runId: resumeRequestSchema.parse(JSON.parse(bodyText)).runId,
+						}
+					: {
+							kind: "turn",
+							input: replay
+								? await resolveReplay(persistence, replay)
+								: routeRequestSchema.parse(JSON.parse(bodyText)),
+							replayRunId: replay?.runId,
+						},
+		});
 		const encoder = new TextEncoder();
-		const cancellation = new AbortController();
-		const signal = AbortSignal.any([
-			request.signal,
-			cancellation.signal,
-			AbortSignal.timeout(ACTIVE_EXECUTION_MS),
-		]);
 		let closed = false;
-		let partialText = "";
-		let latestTrace: RouteTrace = {
-			path: [],
-			traversedEdges: [],
-			jevSteps: [],
-			outputs: [],
-			calls: [],
-			contexts: [],
-			modelPlans: [],
-		};
-		const providerEvidence = new ProviderEvidence(
-			credentials.filter((value): value is string => value !== undefined),
-			recovery?.journal.providerEvidence,
-		);
-		const journal = new WorkflowJournal(
-			recovery?.journal ?? emptyWorkflowJournal(saved.runId),
-			persistence.checkpointWriter(
-				saved.runId,
-				saved.executionId,
-				recovery?.revision ?? 0,
-			),
-			providerEvidence,
-		);
-		await journal.commit();
-		// Serialize ownership checks; a remote Stop or lost lease cancels in-flight providers.
-		let checking = false;
-		const ownershipTimer = setInterval(() => {
-			if (checking || signal.aborted) return;
-			checking = true;
-			void persistence
-				.assertExecution(saved.runId, saved.executionId)
-				.catch((error) => cancellation.abort(error))
-				.finally(() => {
-					checking = false;
-				});
-		}, 2000);
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
-				const redactedDeltas = providerEvidence.streamRedactor();
+				const redactedDeltas = execution.evidence.streamRedactor();
 				const send = (event: RouteStreamEvent) => {
 					if (!closed)
 						controller.enqueue(
 							encoder.encode(
-								`${JSON.stringify(event, (_key, value: unknown) => (typeof value === "string" ? providerEvidence.redact(value) : value))}\n`,
+								`${JSON.stringify(event, (_key, value: unknown) => (typeof value === "string" ? execution.evidence.redact(value) : value))}\n`,
 							),
 						);
 				};
 				const emit = (event: RouteStreamEvent) => {
 					if (event.type === "delta") {
-						partialText += event.text;
 						const text = redactedDeltas.write(event.text);
 						if (text) send({ type: "delta", text });
 					} else {
@@ -437,119 +333,37 @@ export async function handleApi(
 						send(event);
 					}
 				};
-				void executeRoute(
-					{
-						messages: saved.input.messages,
-						evidenceFor: (key) =>
-							persistence.routeEvidence(
-								saved.workspaceId,
-								credentialScope,
-								key,
-							),
-						retrieve: createContextRetriever(
-							persistence.retrievalStore(
-								saved.workspaceId,
-								saved.runId,
-								credentialScope,
-							),
-						),
-						summaryStore: persistence.summaryStore(
-							saved.workspaceId,
-							credentialScope,
-						),
-						metadata: saved.input.metadata ?? {},
-						documents: input.documents,
-						providerFetch: providerEvidence.fetch(providerFetch),
-						providerEvidence,
-						journal,
-						createdAt: saved.createdAt,
-						keys,
-						memory: sessionMemories.get(
-							contentFingerprint(
-								JSON.stringify({
-									conversationId: saved.conversationId,
-									credentialScope,
-								}),
-							),
-						),
-						signal,
+				void execution
+					.run(
+						(context) =>
+							executeRoute(context, { keys, persistence, providerFetch }),
 						emit,
-						onSnapshot: (trace) => {
-							latestTrace = trace;
+					)
+					.then(
+						() => {
+							if (!closed) {
+								closed = true;
+								controller.close();
+							}
 						},
-					},
-					input.routes,
-				)
-
-					.then(async (result) => {
-						await persistence.settle(
-							saved.runId,
-							saved.executionId,
-							{
-								status: "completed",
-								result,
-								...providerEvidence.artifactEvidence(
-									result.calls.map((call) => call.id),
-								),
-							},
-							providerEvidence.redact,
-						);
-						emit({ type: "done", route: result });
-					})
-					.catch(async (error) => {
-						const message = providerEvidence.redact(
-							error instanceof Error ? error.message : "Chatflow failed",
-						);
-						await persistence
-							.settle(
-								saved.runId,
-								saved.executionId,
-								{
-									status:
-										signal.aborted || journal.failed ? "interrupted" : "failed",
-									text: partialText,
-									error: message.slice(0, 2000),
-									trace: latestTrace,
-									latencyMs: Math.max(
-										0,
-										Math.round(Date.now() - saved.createdAt),
-									),
-									...providerEvidence.artifactEvidence(
-										latestTrace.calls.map((call) => call.id),
-									),
-								},
-								providerEvidence.redact,
-							)
-							// Lease expiry will release the run if the database is unavailable.
-							.catch((settlementError) => {
-								emit({
-									type: "error",
-									error: providerEvidence.redact(
-										`Could not save the failed run: ${settlementError instanceof Error ? settlementError.message : "Database unavailable"}`,
-									),
-								});
-							});
-						emit({ type: "error", error: message });
-					})
-					.finally(() => {
-						clearInterval(ownershipTimer);
-						if (!closed) {
-							closed = true;
-							controller.close();
-						}
-					});
+						(error) => {
+							if (!closed) {
+								closed = true;
+								controller.error(error);
+							}
+						},
+					);
 			},
 			cancel() {
-				clearInterval(ownershipTimer);
 				closed = true;
-				cancellation.abort();
+				execution.cancel();
 			},
 		});
 		return new Response(body, {
 			headers: {
 				"Content-Type": "application/x-ndjson; charset=utf-8",
 				"Cache-Control": "no-cache, no-transform",
-				"X-Run-Id": saved.runId,
+				"X-Run-Id": execution.runId,
 			},
 		});
 	} catch (error) {

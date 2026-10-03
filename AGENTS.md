@@ -21,6 +21,8 @@ Every `lat.md/` section must begin with a concise overview paragraph. Use `[[wik
 
 Keep browser code independent of server modules and provider credentials. Shared contracts belong in the module that owns their schema or runtime behavior; the browser and server should consume the same contract.
 
+Never create `eval-results/` in this repository. Evaluation artifacts belong outside the checkout in an existing directory explicitly selected by the user; the CLI must not create output directories.
+
 ## Core Priorities
 
 1. Performance first.

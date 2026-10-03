@@ -18,18 +18,19 @@ Live trials require an owned session and explicit paid execution; private checkp
 
 [[server/evaluation/runner.ts]] starts a fresh conversation per case, uses POST /api/route once and POST /api/replay for subsequent candidates/repetitions, retaining the original frozen inputs despite later messages. It executes sequentially under the normal active-run lock and two-minute deadline, with at most one hundred planned trials and one to three repetitions. Registration failure skips remaining paired trials for that case rather than guessing replacement inputs. Each attempt checkpoints its registered run, error and available evidence. A transport or collection failure stays unknown and can be inspected later; no implicit retry spends provider calls. The supplied benchmark graph never overwrites the editor graph.
 
-[[convex/runs.ts]] exposes an owner-authorized settled-run inspector. [[server/convex-persistence.ts]] parses stored inputs, graph and reviews once at its boundary. [[src/lib/run-artifact-load.ts]] bounds browser and CLI artifact downloads to eight million bytes, validates UTF-8 and artifact structure, times out after thirty seconds and cancels incomplete reads. Local files are limited to 64 MB, created without overwrite with mode 0600 and replaced atomically during checkpoints. The gitignored eval-results directory contains sensitive owner evidence. Oversized checkpoints fail explicitly; settled artifacts remain in Convex.
+[[convex/runs.ts]] exposes an owner-authorized settled-run inspector. [[server/convex-persistence.ts]] parses stored inputs, graph and reviews once at its boundary. [[src/lib/run-artifact-load.ts]] bounds browser and CLI artifact downloads to eight million bytes, validates UTF-8 and artifact structure, times out after thirty seconds and cancels incomplete reads. Local files are limited to 64 MB, created without overwrite with mode 0600 and replaced atomically during checkpoints. Evaluation artifacts contain sensitive owner evidence and belong outside the checkout in an existing private directory explicitly selected by the user. The CLI never creates output directories. Oversized checkpoints fail explicitly; settled artifacts remain in Convex.
 
 ```sh
 # Set EVAL_DATASET to your versioned dataset JSON file path.
+# Set EVAL_OUTPUT_DIR to an existing private directory outside the checkout.
 bun run eval validate --dataset "$EVAL_DATASET"
-bun run eval run --live --dataset "$EVAL_DATASET" --split dev --out eval-results/dev.json
-bun run eval run --live --dataset "$EVAL_DATASET" --split test --out eval-results/test.json
-bun run eval collect --dataset "$EVAL_DATASET" --input eval-results/test.json --out eval-results/collected.json
-bun run eval sources --dataset "$EVAL_DATASET" --input eval-results/collected.json --out eval-results/sources.json
-bun run eval labels --dataset "$EVAL_DATASET" --input eval-results/collected.json --out eval-results/labels.json
+bun run eval run --live --dataset "$EVAL_DATASET" --split dev --out "$EVAL_OUTPUT_DIR/dev.json"
+bun run eval run --live --dataset "$EVAL_DATASET" --split test --out "$EVAL_OUTPUT_DIR/test.json"
+bun run eval collect --dataset "$EVAL_DATASET" --input "$EVAL_OUTPUT_DIR/test.json" --out "$EVAL_OUTPUT_DIR/collected.json"
+bun run eval sources --dataset "$EVAL_DATASET" --input "$EVAL_OUTPUT_DIR/collected.json" --out "$EVAL_OUTPUT_DIR/sources.json"
+bun run eval labels --dataset "$EVAL_DATASET" --input "$EVAL_OUTPUT_DIR/collected.json" --out "$EVAL_OUTPUT_DIR/labels.json"
 # A human fills labels.json using case expectations and exact source quotes.
-bun run eval report --dataset "$EVAL_DATASET" --input eval-results/collected.json --labels eval-results/labels.json --out eval-results/report.json
+bun run eval report --dataset "$EVAL_DATASET" --input "$EVAL_OUTPUT_DIR/collected.json" --labels "$EVAL_OUTPUT_DIR/labels.json" --out "$EVAL_OUTPUT_DIR/report.json"
 ```
 
 ## Human review and reporting

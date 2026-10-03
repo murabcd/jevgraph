@@ -1,5 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { ConvexHttpClient } from "convex/browser";
 import { evaluationCandidate } from "../../src/lib/evaluation-candidate.ts";
@@ -35,7 +34,6 @@ const { positionals, values } = parseArgs({
 async function writeNew(path: string, value: string) {
 	if (Buffer.byteLength(value) > MAX_EVALUATION_FILE_BYTES)
 		throw new Error("Output exceeds 64 MB");
-	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
 	await writeFile(path, `${value}\n`, { flag: "wx", mode: 0o600 });
 }
 

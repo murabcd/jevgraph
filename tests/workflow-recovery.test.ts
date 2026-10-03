@@ -5,10 +5,12 @@ import { ConvexPersistence } from "../server/convex-persistence";
 import { ProviderEvidence } from "../server/provider-evidence";
 import { contentFingerprint } from "../server/session-memory";
 import { executeWorkflow } from "../server/workflow";
-import { WorkflowJournal } from "../server/workflow-journal";
+import { RunExecution, WorkflowJournal } from "../server/workflow-journal";
+import { resolveJevAnswer } from "../src/lib/jev-question";
 import { readRouteStream } from "../src/lib/route-stream";
 import {
 	type RouteResult,
+	type RouteStreamEvent,
 	type WorkflowRoutes,
 	workflowRoutesSchema,
 } from "../src/lib/routing";
@@ -573,4 +575,198 @@ test("a remote Stop aborts an active provider and leaves no resumable journal", 
 	);
 	expect(checkpoint?.cancelled).toBe(true);
 	expect(checkpoint?.file).toBeUndefined();
+});
+
+test("initial checkpoint failure settles the lock without starting paid work", async () => {
+	const fixture = await createApiFixture();
+	class UnavailableCheckpoint extends ConvexPersistence {
+		override checkpointWriter() {
+			return async () => {
+				throw new Error("Initial checkpoint unavailable");
+			};
+		}
+	}
+	const persistence = new UnavailableCheckpoint(fixture.owner);
+	let providers = 0;
+	const response = await handleApi(
+		new Request("http://local/api/route", {
+			method: "POST",
+			headers: fixture.headers,
+			body: JSON.stringify({
+				...fixture.requestFields(),
+				routes: linear,
+				messages: [
+					{ role: "user", content: "Do not pay without a checkpoint" },
+				],
+			}),
+		}),
+		{
+			keys,
+			connect: () => persistence,
+			providerFetch: async () => {
+				providers++;
+				return generated("wrong");
+			},
+		},
+	);
+	await expect(readRouteStream(response, () => {})).rejects.toThrow(
+		"Initial checkpoint unavailable",
+	);
+	expect(providers).toBe(0);
+	const latest = await fixture.owner.query(api.runs.latest, {
+		conversationId: fixture.workspace.conversationId,
+	});
+	expect(latest).toMatchObject({
+		status: "interrupted",
+		resumable: false,
+		checkpointUrl: null,
+		error: "Initial checkpoint unavailable",
+	});
+	await fixture.t.run(async (ctx) => {
+		const conversation = await ctx.db.get(fixture.workspace.conversationId);
+		expect(conversation?.activeRunId).toBeUndefined();
+	});
+});
+
+test("run execution emits completion only after settlement and rejects a second worker", async () => {
+	const fixture = await createApiFixture();
+	const entered = Promise.withResolvers<void>();
+	const acknowledge = Promise.withResolvers<void>();
+	class PendingSettlement extends ConvexPersistence {
+		override async settle(...args: Parameters<ConvexPersistence["settle"]>) {
+			if (args[2].status === "completed") {
+				entered.resolve();
+				await acknowledge.promise;
+			}
+			return super.settle(...args);
+		}
+	}
+	const execution = await RunExecution.start({
+		persistence: new PendingSettlement(fixture.owner),
+		credentials: [],
+		signal: new AbortController().signal,
+		request: {
+			kind: "turn",
+			input: {
+				...fixture.requestFields(),
+				routes: linear,
+				messages: [{ role: "user", content: "Wait for durable settlement" }],
+			},
+		},
+	});
+	const events: RouteStreamEvent[] = [];
+	let workers = 0;
+	const completion = execution.run(
+		async ({ saved, signal, journal, providerEvidence, onSnapshot }) => {
+			workers++;
+			return executeWorkflow({
+				routes: saved.routes,
+				messages: saved.input.messages,
+				metadata: saved.input.metadata ?? {},
+				signal,
+				journal,
+				providerEvidence,
+				onSnapshot,
+				evaluate: async (_nodeId, questions) => ({
+					model: "jev-1.13.0",
+					latencyMs: 1,
+					answers: questions.map((question) =>
+						resolveJevAnswer(
+							question,
+							{ type: "boolean", probability: 0.99 },
+							undefined,
+						),
+					),
+				}),
+				runModel: async ({ target }) => ({
+					model: target.model,
+					text: "Settled answer",
+				}),
+				onDelta: () => {},
+				onRoute: () => {},
+				onProgress: () => {},
+			});
+		},
+		(event) => events.push(event),
+	);
+	await Promise.race([
+		entered.promise,
+		completion.then(() => {
+			throw new Error("Execution ended before settlement");
+		}),
+	]);
+	expect(events.some((event) => event.type === "done")).toBe(false);
+	await expect(
+		execution.run(
+			async () => {
+				throw new Error("second worker");
+			},
+			() => {},
+		),
+	).rejects.toThrow("already started");
+	expect(workers).toBe(1);
+	acknowledge.resolve();
+	await completion;
+	expect(events.map((event) => event.type)).toEqual(["done"]);
+	const latest = await fixture.owner.query(api.runs.latest, {
+		conversationId: fixture.workspace.conversationId,
+	});
+	expect(latest?.status).toBe("completed");
+});
+
+test("cancelling the stream while settlement is pending finishes storage without another provider call", async () => {
+	const fixture = await createApiFixture();
+	const entered = Promise.withResolvers<void>();
+	const acknowledge = Promise.withResolvers<void>();
+	const stored = Promise.withResolvers<void>();
+	class PendingSettlement extends ConvexPersistence {
+		override async settle(...args: Parameters<ConvexPersistence["settle"]>) {
+			entered.resolve();
+			await acknowledge.promise;
+			await super.settle(...args);
+			stored.resolve();
+		}
+	}
+	let paid = 0;
+	const response = await handleApi(
+		new Request("http://local/api/route", {
+			method: "POST",
+			headers: fixture.headers,
+			body: JSON.stringify({
+				...fixture.requestFields(),
+				routes: {
+					kind: "workflow",
+					nodes: [{ id: "input", kind: "input", fields: [] }, model("answer")],
+					edges: [{ id: "entry", source: "input", target: "answer" }],
+				},
+				messages: [{ role: "user", content: "Complete before disconnect" }],
+			}),
+		}),
+		{
+			keys,
+			connect: () => new PendingSettlement(fixture.owner),
+			providerFetch: async () => {
+				paid++;
+				return generated("Complete answer");
+			},
+		},
+	);
+	await entered.promise;
+	if (!response.body) throw new Error("Missing response stream");
+	await response.body.cancel();
+	acknowledge.resolve();
+	await stored.promise;
+	expect(paid).toBe(1);
+	const latest = await fixture.owner.query(api.runs.latest, {
+		conversationId: fixture.workspace.conversationId,
+	});
+	expect(latest).toMatchObject({
+		status: "completed",
+		resumable: false,
+		checkpointUrl: null,
+	});
+	const messages = await fixture.owner.query(api.conversations.turns, {
+		conversationId: fixture.workspace.conversationId,
+	});
+	expect(messages.at(-1)?.content).toBe("Complete answer");
 });
