@@ -90,6 +90,9 @@ type NodeData = NodeViewData &
 	);
 
 export type FlowNode = Node<NodeData, "route">;
+export type FlowEdge = Edge<
+	NonNullable<GraphSnapshot["edges"][number]["data"]>
+>;
 export type JevNodeSettings = Pick<
 	Extract<FlowNode["data"], { kind: "jev" }>,
 	"questions" | "variables" | "maxRepeats" | "context" | "pricing"
@@ -180,7 +183,7 @@ export function duplicateModelNode(
 export function reachesNode(
 	start: string,
 	target: string,
-	edges: Edge[],
+	edges: FlowEdge[],
 ): boolean {
 	const seen = new Set<string>();
 	const pending = [start];
@@ -201,7 +204,7 @@ export function reachesNode(
 export function canConnectNodes(
 	connection: { source: string; sourceHandle?: string | null; target: string },
 	nodes: FlowNode[],
-	edges: Edge[] = [],
+	edges: FlowEdge[] = [],
 ) {
 	if (edges.length >= MAX_GRAPH_EDGES) return false;
 	const source = nodes.find((node) => node.id === connection.source);
@@ -275,14 +278,17 @@ export function canConnectNodes(
 
 export function hasFallbackConnection(
 	sourceId: string,
-	edges: Edge[],
+	edges: FlowEdge[],
 ): boolean {
 	return edges.some(
 		(edge) => edge.source === sourceId && edge.sourceHandle === "fallback",
 	);
 }
 
-export function graphSnapshot(nodes: FlowNode[], edges: Edge[]): GraphSnapshot {
+export function graphSnapshot(
+	nodes: FlowNode[],
+	edges: FlowEdge[],
+): GraphSnapshot {
 	return graphSnapshotSchema.parse({
 		nodes: nodes.map((node) => ({
 			id: node.id,
@@ -301,7 +307,7 @@ export function graphSnapshot(nodes: FlowNode[], edges: Edge[]): GraphSnapshot {
 
 export function restoreGraph(snapshot: GraphSnapshot): {
 	nodes: FlowNode[];
-	edges: Edge[];
+	edges: FlowEdge[];
 } {
 	return {
 		nodes: snapshot.nodes.map((node) => ({
@@ -316,7 +322,7 @@ export function restoreGraph(snapshot: GraphSnapshot): {
 /** Remove the node, its edges, and dependent context references. */
 export function removeGraphNode(
 	nodes: FlowNode[],
-	edges: Edge[],
+	edges: FlowEdge[],
 	nodeId: string,
 ) {
 	if (nodeId === "input") return { nodes, edges };
@@ -357,7 +363,7 @@ function graphEntryNodes(nodes: FlowNode[]): FlowNode[] {
 	return system ? [system] : [];
 }
 
-export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
+export function nodeStepLabels(nodes: FlowNode[], edges: FlowEdge[]) {
 	const nodesById = new Map(nodes.map((node) => [node.id, node]));
 	const targetsBySource = new Map<string, string[]>();
 	const backupTargets = new Set<string>();
@@ -405,7 +411,7 @@ export function nodeStepLabels(nodes: FlowNode[], edges: Edge[]) {
 
 export function routesFromGraph(
 	nodes: FlowNode[],
-	edges: Edge[],
+	edges: FlowEdge[],
 ): WorkflowRoutes | null {
 	const entries = graphEntryNodes(nodes);
 	if (entries.length !== 1 || entries[0].id !== "input") return null;
@@ -437,12 +443,10 @@ export function routesFromGraph(
 							questions: node.data.questions,
 							context: node.data.context,
 							pricing: node.data.pricing,
-							...(node.data.variables?.length
-								? { variables: node.data.variables }
-								: {}),
-							...(node.data.maxRepeats
-								? { maxRepeats: node.data.maxRepeats }
-								: {}),
+							...(node.data.variables?.length && {
+								variables: node.data.variables,
+							}),
+							...(node.data.maxRepeats && { maxRepeats: node.data.maxRepeats }),
 						};
 					const { reasoningEffort } = effectiveModelConfiguration(node.data);
 					return {
@@ -455,13 +459,13 @@ export function routesFromGraph(
 						pricing: node.data.pricing,
 						maxOutputTokens: node.data.maxOutputTokens,
 						reasoningEffort,
-						...(node.data.variables?.length
-							? { variables: node.data.variables }
-							: {}),
-						...(node.data.prompt ? { prompt: node.data.prompt } : {}),
-						...(node.data.promptMessages?.length
-							? { promptMessages: node.data.promptMessages }
-							: {}),
+						...(node.data.variables?.length && {
+							variables: node.data.variables,
+						}),
+						...(node.data.prompt && { prompt: node.data.prompt }),
+						...(node.data.promptMessages?.length && {
+							promptMessages: node.data.promptMessages,
+						}),
 					};
 				}),
 		],
@@ -471,8 +475,8 @@ export function routesFromGraph(
 				.map((edge) => ({
 					id: edge.id,
 					source: edge.source,
-					...(edge.sourceHandle ? { sourceHandle: edge.sourceHandle } : {}),
-					...(edge.data?.repeat ? { repeat: true } : {}),
+					...(edge.sourceHandle && { sourceHandle: edge.sourceHandle }),
+					...(edge.data?.repeat && { repeat: true }),
 					target: edge.target,
 				})),
 		],
@@ -484,9 +488,9 @@ export function routesFromGraph(
 export function retainQuestionEdges(
 	previousQuestions: JevQuestion[],
 	nextQuestions: JevQuestion[],
-	edges: Edge[],
+	edges: FlowEdge[],
 	sourceId = "jev",
-): Edge[] {
+): FlowEdge[] {
 	const outputIds = stableQuestionOutputIds(previousQuestions, nextQuestions);
 	return edges.filter(
 		(edge) =>

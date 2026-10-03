@@ -30,3 +30,5 @@ The browser sends the graph with each turn, and the server validates Start field
 ## Validation
 
 bun run check runs Lat, Konsistent, and read-only Biome checks. bun run typecheck, bun run test, and bun run build cover TypeScript, behavior, and the production bundle.
+
+[biome.json](../biome.json) loads thirteen custom GritQL rules from `tools/biome/`, adopted from Graneri. `bun run lint`, `bun run check`, and the focused `bun run lint:plugins` command enforce this same set across authored JavaScript and TypeScript, including tests, while excluding generated bindings. Quality reviews run these checks and resolve violations before committing. The rules reject chained assertions, `Reflect.get`/`Reflect.apply`, broad object parameters, `Record<string, unknown>`, generic `isRecord`/`asRecord` guards, aliases hiding unknown, structure-only symbol names, conditional spreads with an empty-object branch, inline imports, import-expression types, local-module Vitest mocks, and Vitest global mutation. They match syntax rather than inferred types; truly unknown external data still requires a named boundary schema and source-owned types downstream.

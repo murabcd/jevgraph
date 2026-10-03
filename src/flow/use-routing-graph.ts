@@ -1,6 +1,5 @@
 import {
 	type Connection,
-	type Edge,
 	type OnConnectEnd,
 	type OnConnectStart,
 	useEdgesState,
@@ -13,6 +12,7 @@ import {
 	canConnectNodes,
 	defaultNodeData,
 	duplicateModelNode,
+	type FlowEdge,
 	type FlowNode,
 	graphSnapshot,
 	hasFallbackConnection,
@@ -55,7 +55,7 @@ export function useRoutingGraph(workspace: Workspace) {
 	const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(
 		initialGraph.nodes,
 	);
-	const [graphEdges, setGraphEdges, onEdgesChange] = useEdgesState<Edge>(
+	const [graphEdges, setGraphEdges, onEdgesChange] = useEdgesState<FlowEdge>(
 		initialGraph.edges,
 	);
 	const [pendingConnection, setPendingConnection] =
@@ -267,9 +267,9 @@ export function useRoutingGraph(workspace: Workspace) {
 					sourceHandle: branch,
 					target: targetId,
 					...(nodes.find((node) => node.id === source)?.data.kind === "jev" &&
-					reachesNode(targetId, source, current)
-						? { data: { repeat: true } }
-						: {}),
+						reachesNode(targetId, source, current) && {
+							data: { repeat: true },
+						}),
 					type: "default",
 				},
 			]);

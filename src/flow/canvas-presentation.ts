@@ -1,6 +1,6 @@
-import type { Edge } from "@xyflow/react";
 import { useMemo } from "react";
 import {
+	type FlowEdge,
 	type FlowNode,
 	hasFallbackConnection,
 	nodeStepLabels,
@@ -143,7 +143,7 @@ export function useCanvasPresentation({
 		dismissPendingConnection,
 	]);
 
-	const displayEdges = useMemo<Edge[]>(() => {
+	const displayEdges = useMemo<FlowEdge[]>(() => {
 		const muted = "var(--muted-foreground)";
 		const routeEdges = graphEdges.map((edge) => {
 			const onPath = highlightedPaths.edgeIds.has(edge.id);
@@ -155,9 +155,9 @@ export function useCanvasPresentation({
 				style: {
 					stroke: onPath ? "var(--route-accent)" : muted,
 					strokeWidth: onPath ? 1.8 : 1.2,
-					...(edge.data?.repeat ? { strokeDasharray: "5 4" } : {}),
+					...(edge.data?.repeat && { strokeDasharray: "5 4" }),
 				},
-				...(edge.data?.repeat ? { label: "Repeat" } : {}),
+				...(edge.data?.repeat && { label: "Repeat" }),
 			};
 		});
 		if (!pendingConnection) return routeEdges;

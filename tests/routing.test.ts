@@ -107,7 +107,7 @@ describe("chatflow contract", () => {
 		const withModel = (
 			provider: string,
 			model: string,
-			settings: object = {},
+			settings: { reasoningEffort?: string; thinkingBudget?: number } = {},
 		) => ({
 			...direct,
 			nodes: [

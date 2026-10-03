@@ -1,17 +1,26 @@
 import { convexTest } from "convex-test";
 import { api } from "../convex/_generated/api";
+import * as serverFunctions from "../convex/_generated/server.js";
+import * as checkpoints from "../convex/checkpoints";
+import * as conversations from "../convex/conversations";
+import * as results from "../convex/results";
+import * as retrieval from "../convex/retrieval";
+import * as routeEvaluations from "../convex/routeEvaluations";
+import * as runs from "../convex/runs";
 import schema from "../convex/schema";
+import * as summaries from "../convex/summaries";
+import * as workspaces from "../convex/workspaces";
 
 const modules = {
-	"./_generated/server.js": () => import("../convex/_generated/server.js"),
-	"./workspaces.ts": () => import("../convex/workspaces"),
-	"./conversations.ts": () => import("../convex/conversations"),
-	"./runs.ts": () => import("../convex/runs"),
-	"./checkpoints.ts": () => import("../convex/checkpoints"),
-	"./results.ts": () => import("../convex/results"),
-	"./summaries.ts": () => import("../convex/summaries"),
-	"./retrieval.ts": () => import("../convex/retrieval"),
-	"./routeEvaluations.ts": () => import("../convex/routeEvaluations"),
+	"./_generated/server.js": async () => serverFunctions,
+	"./workspaces.ts": async () => workspaces,
+	"./conversations.ts": async () => conversations,
+	"./runs.ts": async () => runs,
+	"./checkpoints.ts": async () => checkpoints,
+	"./results.ts": async () => results,
+	"./summaries.ts": async () => summaries,
+	"./retrieval.ts": async () => retrieval,
+	"./routeEvaluations.ts": async () => routeEvaluations,
 };
 
 export async function createConvexFixture(

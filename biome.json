@@ -41,5 +41,20 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "plugins": [
+    "./tools/biome/no-chained-type-assertions.grit",
+    "./tools/biome/no-conditional-empty-object-spread.grit",
+    "./tools/biome/no-generic-record-functions.grit",
+    "./tools/biome/no-generic-unknown-record.grit",
+    "./tools/biome/no-import-types.grit",
+    "./tools/biome/no-inline-imports.grit",
+    "./tools/biome/no-local-vitest-mocks.grit",
+    "./tools/biome/no-object-parameters.grit",
+    "./tools/biome/no-reflect-apply.grit",
+    "./tools/biome/no-reflect-get.grit",
+    "./tools/biome/no-shape-symbol-names.grit",
+    "./tools/biome/no-unknown-type-aliases.grit",
+    "./tools/biome/no-vitest-global-mutation.grit"
+  ]
 }

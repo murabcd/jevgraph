@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { Edge } from "@xyflow/react";
 import {
 	canConnectNodes,
 	duplicateModelNode,
+	type FlowEdge,
 	type FlowNode,
 	graphSnapshot,
 	nodeStepLabels,
@@ -22,7 +22,7 @@ import { configuredJevQuestion } from "./jev-question-fixture";
 import { quality } from "./routing-evidence-fixture";
 import { connectedWorkflowGraph } from "./workflow-graph";
 
-function roundTripGraph(nodes: FlowNode[], edges: Edge[]) {
+function roundTripGraph(nodes: FlowNode[], edges: FlowEdge[]) {
 	return restoreGraph(
 		parseGraphJson(JSON.stringify(graphSnapshot(nodes, edges))),
 	);
@@ -40,24 +40,18 @@ function node(
 		data: {
 			kind,
 			active: false,
-			...(kind === "input" ? { fields: [] } : {}),
-			...(kind === "jev"
-				? {
-						questions: [configuredJevQuestion()],
-					}
-				: {}),
-			...(kind === "openai"
-				? {
-						model: "gpt-6-luna",
-						maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
-					}
-				: {}),
-			...(kind === "google"
-				? {
-						model: "gemini-3.8-flash",
-						maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
-					}
-				: {}),
+			...(kind === "input" && { fields: [] }),
+			...(kind === "jev" && {
+				questions: [configuredJevQuestion()],
+			}),
+			...(kind === "openai" && {
+				model: "gpt-6-luna",
+				maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+			}),
+			...(kind === "google" && {
+				model: "gemini-3.8-flash",
+				maxOutputTokens: DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+			}),
 		},
 	};
 }
@@ -284,7 +278,9 @@ describe("editable chatflow graph", () => {
 				},
 			},
 		];
-		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
+		const edges: FlowEdge[] = [
+			{ id: "entry", source: "input", target: "model" },
+		];
 		const routes = routesFromGraph(nodes, edges);
 		expect(routes?.nodes[0]).toEqual({
 			id: "input",
@@ -313,7 +309,9 @@ describe("editable chatflow graph", () => {
 
 	test("compiles Gemini reasoning defaults for a connected Model", () => {
 		const nodes = [node("input", "input", 0), node("model", "google", 1)];
-		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
+		const edges: FlowEdge[] = [
+			{ id: "entry", source: "input", target: "model" },
+		];
 		expect(routesFromGraph(nodes, edges)?.nodes[1]).toMatchObject({
 			kind: "model",
 			model: "gemini-3.8-flash",
@@ -328,7 +326,7 @@ describe("editable chatflow graph", () => {
 			node("judge", "jev", 2),
 			node("final", "google", 3),
 		];
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{ id: "entry", source: "input", target: "first" },
 			{ id: "next", source: "first", sourceHandle: "next", target: "judge" },
 		];
@@ -375,7 +373,7 @@ describe("editable chatflow graph", () => {
 			node("backup", "google", 2),
 			node("another", "openai", 3),
 		];
-		const occupied: Edge[] = [
+		const occupied: FlowEdge[] = [
 			{ id: "entry", source: "input", target: "primary" },
 			{
 				id: "backup-edge",
@@ -405,7 +403,7 @@ describe("editable chatflow graph", () => {
 			{ role: "user", content: "Example request" },
 			{ role: "assistant", content: "Example response" },
 		];
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{ id: "entry", source: "input", target: "first" },
 			{ id: "next", source: "first", sourceHandle: "next", target: "judge" },
 			{
@@ -447,7 +445,9 @@ describe("editable chatflow graph", () => {
 
 	test("keeps Start as the required chatflow entry", () => {
 		const nodes = [node("input", "input", 0), node("model", "openai", 1)];
-		const edges: Edge[] = [{ id: "entry", source: "input", target: "model" }];
+		const edges: FlowEdge[] = [
+			{ id: "entry", source: "input", target: "model" },
+		];
 		const withStart = routesFromGraph(nodes, edges);
 		expect(withStart?.nodes[0]?.kind).toBe("input");
 		const removed = removeGraphNode(nodes, edges, "input");
@@ -468,7 +468,7 @@ describe("editable chatflow graph", () => {
 			node("join", "jev", 3),
 			node("final", "openai", 4),
 		];
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{ id: "first-entry", source: "input", target: "first" },
 			{ id: "second-entry", source: "input", target: "second" },
 			{
@@ -512,7 +512,7 @@ describe("editable chatflow graph", () => {
 			node("final", "openai", 3),
 		];
 		nodes[2].data.maxRepeats = 2;
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{ id: "entry", source: "input", target: "draft" },
 			{ id: "check", source: "draft", sourceHandle: "next", target: "judge" },
 			{
@@ -546,7 +546,7 @@ describe("editable chatflow graph", () => {
 			node("judge", "jev", 1),
 			node("model", "openai", 2),
 		];
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{ id: "entry", source: "input", target: "judge" },
 			{
 				id: "choice-1",
@@ -582,7 +582,7 @@ describe("editable chatflow graph", () => {
 				option.id === "choice-1" ? { ...option, label: "Cheap" } : option,
 			),
 		};
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{
 				id: "choice-1",
 				source: "judge",
@@ -603,7 +603,7 @@ describe("editable chatflow graph", () => {
 		const previous = configuredJevQuestion("choice");
 		if (previous.type !== "choice") throw new Error("Expected Choice");
 		previous.options[0].id = "yes";
-		const edges: Edge[] = [
+		const edges: FlowEdge[] = [
 			{ id: "entry", source: "input", target: "judge" },
 			{
 				id: "choice-yes",

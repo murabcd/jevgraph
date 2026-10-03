@@ -516,19 +516,17 @@ export async function executeWorkflow({
 				lineage: [...inputs, output],
 				edges: next,
 				output,
-				...(next.length === 0
-					? {
-							terminal: {
-								target: {
-									nodeId: usedTarget.nodeId,
-									provider: usedTarget.provider,
-									model: usedTarget.model,
-								},
-								response: attempt.response,
-							},
-						}
-					: {}),
-				...(usedFallback ? { fallback: usedFallback } : {}),
+				...(next.length === 0 && {
+					terminal: {
+						target: {
+							nodeId: usedTarget.nodeId,
+							provider: usedTarget.provider,
+							model: usedTarget.model,
+						},
+						response: attempt.response,
+					},
+				}),
+				...(usedFallback && { fallback: usedFallback }),
 			};
 		};
 		const results = await mapConcurrent(

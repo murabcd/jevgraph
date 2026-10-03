@@ -1,4 +1,4 @@
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldLegend } from "@/components/ui/field";
 import { SelectionRow } from "@/flow/selection-row";
 import type { StartField } from "@/lib/routing";
 import { startFieldTypes } from "./start-field-types";
@@ -17,9 +17,12 @@ export function StartVariableBinding({
 
 	return (
 		<Field>
-			<FieldLabel className="text-xs text-muted-foreground">
+			<FieldLegend
+				variant="label"
+				className="mb-0 text-xs text-muted-foreground"
+			>
 				Select variables
-			</FieldLabel>
+			</FieldLegend>
 			<div className="grid gap-2">
 				{fields.map((field) => {
 					const active = selectedNames.has(field.name);

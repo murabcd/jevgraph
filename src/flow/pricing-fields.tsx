@@ -1,4 +1,10 @@
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+	Field,
+	FieldGroup,
+	FieldLabel,
+	FieldLegend,
+	FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SelectionRow } from "@/flow/selection-row";
 import type { PublishedPricing } from "@/lib/model-pricing";
@@ -32,8 +38,10 @@ export function PricingFields({
 				{published ? "Custom rates" : "Estimate cost with supplied rates"}
 			</SelectionRow>
 			{value && (
-				<>
-					<FieldLabel className="text-xs">Rates (USD / 1M tokens)</FieldLabel>
+				<FieldSet className="gap-3">
+					<FieldLegend variant="label" className="mb-0 text-xs">
+						Rates (USD / 1M tokens)
+					</FieldLegend>
 					<FieldGroup className="grid grid-cols-2 gap-3">
 						{(
 							[
@@ -68,7 +76,7 @@ export function PricingFields({
 							</Field>
 						))}
 					</FieldGroup>
-				</>
+				</FieldSet>
 			)}
 		</FieldGroup>
 	);

@@ -95,6 +95,7 @@ Run commands from the repository root.
 | `bun run check:lat` | Validate knowledge-graph structure and references. |
 | `bun run check:konsistent` | Validate cross-file structural conventions. |
 | `bun run lint` | Run read-only Biome linting. |
+| `bun run lint:plugins` | Run the custom Biome quality rules without formatting or built-in lint checks. |
 | `bun run check:fix` / `bun run lint:fix` / `bun run format` | Intentionally rewrite files with Biome. |
 
 Follow [README.md](README.md) and [`.env.example`](.env.example) for initial Convex and auth setup. A static-only deployment has no local API; both development and preview mount it through `vite.config.ts`. Adding a deployment path requires an explicit server runtime rather than assuming the UI bundle can execute provider calls.
@@ -110,6 +111,8 @@ Preserve consistency with existing form layouts, selection controls, spacing, ty
 ## Code Quality
 
 Avoid `any` unless it is necessary and locally justified. Before guessing an external API shape, inspect the installed dependency types and use exported types. Avoid inline runtime imports and `import("pkg").Type` in type positions; use top-level imports and `import type` declarations. Do not use casts or suppressed diagnostics to conceal a broken contract.
+
+Use the canonical custom Biome rules in `tools/biome/` during quality reviews. `bun run lint`, `bun run check`, and `bun run lint:plugins` load the same rules from `biome.json` across authored JavaScript and TypeScript, including tests; generated bindings are excluded. Fix violations at their ownership boundary rather than suppressing rules. The rules reject chained assertions, reflective calls, broad object parameters, generic unknown records and record guards, aliases hiding unknown, structure-only symbol names, empty-object conditional spreads, inline imports, import types, local Vitest mocks, and Vitest global mutation.
 
 Do not add generic `isRecord` or `asRecord` helpers or rename the same generic guard. Keep trusted values typed from their source. If trusted data becomes `unknown`, fix the upstream type flow. Parse truly unknown external, persisted, or SDK data once at its boundary with a named schema that describes the contract, then pass the concrete domain type downstream.
 

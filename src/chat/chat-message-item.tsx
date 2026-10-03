@@ -1,6 +1,8 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
+import { Streamdown } from "streamdown";
 import type { ChatTurn } from "@/chat/types";
 import { WorkflowUsage } from "@/chat/workflow-usage";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Badge } from "@/components/ui/badge";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
@@ -9,15 +11,6 @@ import {
 	MessageFooter,
 } from "@/components/ui/message";
 import { MessageScrollerItem } from "@/components/ui/message-scroller";
-
-const Streamdown = lazy(() =>
-	import("streamdown").then((module) => ({ default: module.Streamdown })),
-);
-const Shimmer = lazy(() =>
-	import("@/components/ai-elements/shimmer").then((module) => ({
-		default: module.Shimmer,
-	})),
-);
 
 function AssistantContent({ message }: { message: ChatTurn }) {
 	if (!message.content) {

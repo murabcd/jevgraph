@@ -17,7 +17,8 @@
     "typecheck": "tsc -b && tsc --noEmit -p convex",
     "test": "bun test",
     "preview": "vite preview",
-    "eval": "bun server/evaluation/cli.ts"
+    "eval": "bun server/evaluation/cli.ts",
+    "lint:plugins": "biome lint --only=plugin ."
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.79",

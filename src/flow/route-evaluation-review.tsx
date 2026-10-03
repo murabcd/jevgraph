@@ -51,7 +51,7 @@ export function RouteEvaluationReview({
 	const evaluation = useQuery(api.routeEvaluations.latest, {
 		conversationId,
 		nodeId,
-		...(selectedRunId ? { runId: selectedRunId } : {}),
+		...(selectedRunId && { runId: selectedRunId }),
 	});
 
 	if (!evaluation && !records?.length) return null;

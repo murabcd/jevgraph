@@ -218,7 +218,7 @@ export function createContextRetriever(
 				end,
 				rank,
 				selected: selected.has(id),
-				...(trace.reranking === "completed" ? grades[id] : {}),
+				...(trace.reranking === "completed" && grades[id]),
 			}),
 		);
 		return {

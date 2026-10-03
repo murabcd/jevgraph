@@ -110,19 +110,16 @@ async function runModel(
 			cache,
 		),
 		maxOutputTokens: target.maxOutputTokens,
-		...(reasoningEffort && reasoningEffort !== "max"
-			? { reasoning: reasoningEffort }
-			: {}),
-		...(provider === "openai"
-			? {
-					providerOptions: {
-						openai: {
-							...(reasoningEffort === "max" ? { reasoningEffort: "max" } : {}),
-							...(cache ? { promptCacheOptions: { mode: "explicit" } } : {}),
-						} satisfies OpenAIResponsesProviderOptions,
-					},
-				}
-			: {}),
+		...(reasoningEffort &&
+			reasoningEffort !== "max" && { reasoning: reasoningEffort }),
+		...(provider === "openai" && {
+			providerOptions: {
+				openai: {
+					...(reasoningEffort === "max" && { reasoningEffort: "max" }),
+					...(cache && { promptCacheOptions: { mode: "explicit" } }),
+				} satisfies OpenAIResponsesProviderOptions,
+			},
+		}),
 		abortSignal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
 		maxRetries: 0,
 	});

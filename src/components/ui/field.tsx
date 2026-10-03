@@ -1,4 +1,3 @@
-// biome-ignore-all lint/a11y/useSemanticElements: shadcn Field uses a generic group for controls in horizontal and vertical layouts.
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 import { useMemo } from "react";
@@ -51,7 +50,7 @@ function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 const fieldVariants = cva(
-	"group/field flex w-full gap-2 data-[invalid=true]:text-destructive",
+	"group/field flex min-w-0 w-full gap-2 data-[invalid=true]:text-destructive",
 	{
 		variants: {
 			orientation: {
@@ -72,10 +71,9 @@ function Field({
 	className,
 	orientation = "vertical",
 	...props
-}: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+}: React.ComponentProps<"fieldset"> & VariantProps<typeof fieldVariants>) {
 	return (
-		<div
-			role="group"
+		<fieldset
 			data-slot="field"
 			data-orientation={orientation}
 			className={cn(fieldVariants({ orientation }), className)}

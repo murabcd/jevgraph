@@ -1,0 +1,8 @@
+language js(typescript, jsx)
+
+or {
+	`vi.stubGlobal($args)`,
+	`vi.spyOn($args)`
+} as $mockMutation where {
+	register_diagnostic(span=$mockMutation, message="Avoid vi.stubGlobal() and vi.spyOn(). Prefer explicit dependency seams, test helpers, or injected boundary mocks.", severity="error")
+}

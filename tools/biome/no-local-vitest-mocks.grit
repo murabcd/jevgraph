@@ -1,0 +1,13 @@
+language js(typescript, jsx)
+
+or {
+	`vi.mock("../src/hooks/$path", $factory)`,
+	`vi.mock("../src/components/$path", $factory)`,
+	`vi.mock("@/hooks/$path", $factory)`,
+	`vi.mock("@/components/$path", $factory)`,
+	`vi.mock("@workspace/ui/components/$path", $factory)`,
+	`vi.mock("@workspace/ui/hooks/$path", $factory)`,
+	`vi.mock("@workspace/ui/lib/$path", $factory)`
+} as $mock where {
+	register_diagnostic(span=$mock, message="Avoid mocking local components, hooks, or shared UI modules. Test user-visible behavior with real app code and shared test providers instead.", severity="error")
+}

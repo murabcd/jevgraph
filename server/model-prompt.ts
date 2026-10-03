@@ -86,7 +86,7 @@ export function modelPrompt(
 		}
 	}
 	return {
-		...(instructions ? { instructions } : {}),
+		...(instructions && { instructions }),
 		messages: [
 			...prefix.messages,
 			...messages.slice(0, -1),

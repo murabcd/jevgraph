@@ -1,7 +1,6 @@
 import {
 	Background,
 	ConnectionLineType,
-	type Edge,
 	type NodeChange,
 	type OnNodesChange,
 	ReactFlow,
@@ -38,6 +37,7 @@ import {
 import {
 	type CreatableNodeKind,
 	canConnectNodes,
+	type FlowEdge,
 	type FlowNode,
 	reachesNode,
 } from "@/flow/graph";
@@ -200,7 +200,7 @@ export function RoutingCanvas({
 					</TooltipContent>
 				</Tooltip>
 			</Card>
-			<ReactFlow<CanvasNode, Edge>
+			<ReactFlow<CanvasNode, FlowEdge>
 				nodes={displayNodes}
 				edges={displayEdges}
 				nodeTypes={nodeTypes}

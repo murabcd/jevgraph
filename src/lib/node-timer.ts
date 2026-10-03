@@ -39,9 +39,9 @@ export function settledNodeTimers(
 		timers[call.nodeId] = {
 			nodeId: call.nodeId,
 			durationMs: (current?.durationMs ?? 0) + (call.durationMs ?? 0),
-			...(current?.durationIncomplete || call.durationMs === undefined
-				? { durationIncomplete: true }
-				: {}),
+			...((current?.durationIncomplete || call.durationMs === undefined) && {
+				durationIncomplete: true,
+			}),
 			attempts: (current?.attempts ?? 0) + 1,
 			status: call.status,
 		};
@@ -57,7 +57,7 @@ export function applyNodeTimerEvent(
 	if (event.type === "node-start")
 		return {
 			nodeId: event.nodeId,
-			...(current?.durationIncomplete ? { durationIncomplete: true } : {}),
+			...(current?.durationIncomplete && { durationIncomplete: true }),
 			durationMs: current?.durationMs ?? 0,
 			attempts: (current?.attempts ?? 0) + 1,
 			status: "running",
@@ -65,7 +65,7 @@ export function applyNodeTimerEvent(
 		};
 	return {
 		...event.timing,
-		...(current?.durationIncomplete ? { durationIncomplete: true } : {}),
+		...(current?.durationIncomplete && { durationIncomplete: true }),
 		durationMs: (current?.durationMs ?? 0) + event.timing.durationMs,
 		attempts:
 			current?.status === "running"
