@@ -30,15 +30,7 @@ import type { SessionMemory, SummaryStore } from "./session-memory.ts";
 export type ContextProviders = {
 	retrieval?: {
 		retrieve: ContextRetriever;
-		embed: (
-			nodeId: string,
-			...input: Parameters<RetrievalRequest["embed"]>
-		) => ReturnType<RetrievalRequest["embed"]>;
-		rerank: (
-			nodeId: string,
-			...input: Parameters<RetrievalRequest["rerank"]>
-		) => ReturnType<RetrievalRequest["rerank"]>;
-	};
+	} & Pick<RetrievalRequest, "embed" | "rerank">;
 	filter?: ContextFilter;
 	automatic?: {
 		summarize: (request: SummaryRequest) => Promise<SummaryResult>;
@@ -127,7 +119,7 @@ export async function prepareNodeContext(
 									},
 									undefined,
 									ledger.nextId(),
-									() => retrieval.embed(node.id, values),
+									() => retrieval.embed(values),
 								),
 							rerank: (request) =>
 								ledger.run(
@@ -139,7 +131,7 @@ export async function prepareNodeContext(
 									},
 									undefined,
 									ledger.nextId(),
-									() => retrieval.rerank(node.id, request),
+									() => retrieval.rerank(request),
 								),
 						})
 				: undefined,

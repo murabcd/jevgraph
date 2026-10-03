@@ -394,7 +394,7 @@ test("unsupported pairs, duplicate pairs, empty task criteria and old model list
 });
 
 test("invalid task assessments retain paid usage as a failed call", async () => {
-	const ledger = new ProviderLedger(() => {});
+	const ledger = new ProviderLedger({ onRecorded: () => {} });
 	await expect(
 		assessRoutingTask(
 			request,

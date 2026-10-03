@@ -1,4 +1,5 @@
 import { publishedRates } from "../src/lib/model-pricing.ts";
+import type { RouteStreamEvent } from "../src/lib/routing.ts";
 import {
 	estimateCost,
 	type Pricing,
@@ -18,14 +19,25 @@ export class ProviderLedger {
 	private evidence: ProviderEvidence;
 	private journal?: WorkflowJournal;
 
-	constructor(
-		onRecorded: () => void,
-		evidence: ProviderEvidence = new ProviderEvidence(),
-		journal?: WorkflowJournal,
-	) {
+	private onTiming: (
+		event: Extract<RouteStreamEvent, { type: "node-start" | "timing" }>,
+	) => void;
+
+	constructor({
+		onRecorded,
+		evidence = new ProviderEvidence(),
+		journal,
+		onTiming = () => {},
+	}: {
+		onRecorded: () => void;
+		evidence?: ProviderEvidence;
+		journal?: WorkflowJournal;
+		onTiming?: ProviderLedger["onTiming"];
+	}) {
 		this.journal = journal;
 		this.onRecorded = onRecorded;
 		this.evidence = evidence;
+		this.onTiming = onTiming;
 		if (journal) {
 			this.calls.push(...journal.state.calls);
 			this.sequence = journal.state.sequence;
@@ -61,6 +73,7 @@ export class ProviderLedger {
 		this.started++;
 		await this.journal?.beforeCall({ ...identity, id: callId }, this.sequence);
 		const began = performance.now();
+		this.onTiming({ type: "node-start", nodeId: identity.nodeId });
 		let usage: TokenUsage | undefined;
 		let model = identity.model;
 		let error: string | undefined;
@@ -79,12 +92,13 @@ export class ProviderLedger {
 			);
 			throw caught;
 		} finally {
+			const durationMs = Math.max(0, Math.round(performance.now() - began));
 			const call: ProviderCall = {
 				...identity,
 				model,
 				id: callId,
 				status,
-				durationMs: Math.round(performance.now() - began),
+				durationMs,
 				usage,
 				estimatedCostUsd: estimateCost(
 					usage,
@@ -94,6 +108,14 @@ export class ProviderLedger {
 				error,
 			};
 			this.calls.push(call);
+			this.onTiming({
+				type: "timing",
+				timing: {
+					nodeId: call.nodeId,
+					durationMs,
+					status: call.status,
+				},
+			});
 			this.onRecorded();
 			await this.journal?.afterCall(call);
 		}

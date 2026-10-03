@@ -9,7 +9,7 @@ The browser owns graph editing and conversation display; the server owns executi
 - [src/lib/routing.ts](../src/lib/routing.ts) owns the single workflow request schema, node and edge contracts, and stream types.
 - [src/flow/graph.ts](../src/flow/graph.ts) compiles canvas nodes and edges and projects editable configuration. [src/flow/use-routing-graph.ts](../src/flow/use-routing-graph.ts) owns graph edits.
 - [server/workflow.ts](../server/workflow.ts) schedules stages, joins parallel results, bounds repeats, and emits progress. [server/model-failover.ts](../server/model-failover.ts) limits an explicit backup model to one attempt.
-- [[server/provider-ledger.ts]] owns provider call identities, the shared call budget, completed and failed usage, and preparation cost. [[server/node-context.ts]] binds node context policies to accounted providers and model cost projections outside the graph scheduler.
+- [[server/provider-ledger.ts]] owns provider call identities, the shared call budget, durable reservations, start/timing events, evidence capture, completed and failed usage, acknowledgment, and preparation cost. [[server/node-context.ts]] binds node context policies to accounted providers and model cost projections outside the graph scheduler.
 - [[src/lib/workflow-journal.ts]] owns bounded checkpoint state and recovery requests; [[server/workflow-journal.ts]] acknowledges provider attempts and node results, and [[convex/checkpoints.ts]] fences authenticated storage and recovery claims.
 - [server/api.ts](../server/api.ts) owns the local API and direct provider calls.
 - [src/lib/context.ts](../src/lib/context.ts) and [server/context.ts](../server/context.ts) own node context policies, representations, and selection traces. See [[context]].

@@ -37,7 +37,6 @@ import {
 import type { ConvexPersistence } from "./convex-persistence.ts";
 import { evaluateJev } from "./jev-evaluation.ts";
 import { modelPrompt } from "./model-prompt.ts";
-import { emitStartTiming, measureNode } from "./node-timing.ts";
 import {
 	languageModelFor,
 	type ProviderFetch,
@@ -212,7 +211,6 @@ async function executeRoute(
 	}: RouteExecution,
 	routes: WorkflowRoutes,
 ) {
-	emitStartTiming(emit);
 	const response = await executeWorkflow({
 		routes,
 		messages,
@@ -233,62 +231,33 @@ async function executeRoute(
 		contextProviders: {
 			retrieval: {
 				retrieve,
-				embed: (nodeId, values) =>
-					measureNode(
-						nodeId,
-						() => embedContext(values, { keys, signal, providerFetch }),
-						emit,
-					),
-				rerank: (nodeId, request) =>
-					measureNode(
-						nodeId,
-						() => rerankContext(request, { keys, signal, providerFetch }),
-						emit,
-					),
+				embed: (values) =>
+					embedContext(values, { keys, signal, providerFetch }),
+				rerank: (request) =>
+					rerankContext(request, { keys, signal, providerFetch }),
 			},
 			automatic: {
 				summarize: (request) =>
-					measureNode(
-						request.nodeId,
-						() => summarizeContext(request, { keys, signal, providerFetch }),
-						emit,
-					),
+					summarizeContext(request, { keys, signal, providerFetch }),
 				assess: (request) =>
-					measureNode(
-						request.nodeId,
-						() => assessContext(request, { keys, signal, providerFetch }),
-						emit,
-					),
+					assessContext(request, { keys, signal, providerFetch }),
 			},
 			filter: (request) =>
-				measureNode(
-					request.nodeId,
-					() => filterContext(request, { keys, signal, providerFetch }),
-					emit,
-				),
+				filterContext(request, { keys, signal, providerFetch }),
 		},
-		evaluate: (nodeId, question, state) =>
-			measureNode(
-				nodeId,
-				() => {
-					if (!keys.TYPESAFE_API_KEY)
-						throw new Error("TYPESAFE_API_KEY is not configured");
-					return classify(
-						state,
-						keys.TYPESAFE_API_KEY,
-						question,
-						signal,
-						providerFetch,
-					);
-				},
-				emit,
-			),
-		runModel: (request) =>
-			measureNode(
-				request.target.nodeId,
-				() => runModel(request, { keys, signal, providerFetch }),
-				emit,
-			),
+		evaluate: (_nodeId, question, state) => {
+			if (!keys.TYPESAFE_API_KEY)
+				throw new Error("TYPESAFE_API_KEY is not configured");
+			return classify(
+				state,
+				keys.TYPESAFE_API_KEY,
+				question,
+				signal,
+				providerFetch,
+			);
+		},
+		runModel: (request) => runModel(request, { keys, signal, providerFetch }),
+		onTiming: emit,
 		onDelta: (text) => emit({ type: "delta", text }),
 		onRoute: (route) => emit({ type: "route", route }),
 		onSnapshot,

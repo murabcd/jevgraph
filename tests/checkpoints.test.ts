@@ -207,7 +207,11 @@ test("provider and node attempt budgets survive worker restart", async () => {
 		async () => {},
 		new ProviderEvidence(),
 	);
-	const ledger = new ProviderLedger(() => {}, new ProviderEvidence(), journal);
+	const ledger = new ProviderLedger({
+		onRecorded: () => {},
+		evidence: new ProviderEvidence(),
+		journal,
+	});
 	await expect(journal.beginStep()).rejects.toThrow("node attempt budget");
 	await expect(
 		ledger.run(
@@ -247,7 +251,11 @@ test("a concurrent invalid checkpoint poisons earlier reservations before they c
 		},
 		new ProviderEvidence(),
 	);
-	const ledger = new ProviderLedger(() => {}, new ProviderEvidence(), journal);
+	const ledger = new ProviderLedger({
+		onRecorded: () => {},
+		evidence: new ProviderEvidence(),
+		journal,
+	});
 	let paid = 0;
 	const pending = ledger.run(
 		{

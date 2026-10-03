@@ -17,6 +17,7 @@ import {
 	type NodeOutput,
 	type RouteResult,
 	type RouteSelectionResult,
+	type RouteStreamEvent,
 	type RouteTrace,
 	type RoutingMetadata,
 	resolveStartVariables,
@@ -98,6 +99,9 @@ type Execution = {
 	onRoute: (route: RouteSelectionResult) => void;
 	onProgress: (trace: RouteTrace) => void;
 	onSnapshot?: (trace: RouteTrace) => void;
+	onTiming?: (
+		event: Extract<RouteStreamEvent, { type: "node-start" | "timing" }>,
+	) => void;
 	signal?: AbortSignal;
 	journal?: WorkflowJournal;
 };
@@ -177,6 +181,7 @@ export async function executeWorkflow({
 	onRoute,
 	onProgress,
 	onSnapshot,
+	onTiming,
 	signal,
 	journal,
 }: Execution): Promise<Omit<RouteResult, "latencyMs">> {
@@ -197,7 +202,12 @@ export async function executeWorkflow({
 	const traversedEdges: WorkflowEdge[] = [];
 	const decisions: WorkflowDecision[] = [];
 	const outputs: NodeOutput[] = [];
-	const ledger = new ProviderLedger(() => report(), providerEvidence, journal);
+	const ledger = new ProviderLedger({
+		onRecorded: () => report(),
+		evidence: providerEvidence,
+		journal,
+		onTiming,
+	});
 	const calls = ledger.calls;
 	const contexts: NodeContextTrace[] = journal?.state.contexts ?? [];
 	const modelPlans: ModelPlan[] = journal?.state.modelPlans ?? [];
@@ -573,6 +583,10 @@ export async function executeWorkflow({
 		report();
 		return advance(layerIndex + 1, pass);
 	};
+	onTiming?.({
+		type: "timing",
+		timing: { nodeId: "input", durationMs: 0, status: "completed" },
+	});
 	await advance(0, 0);
 	if (!exhausted && terminals.length !== 1)
 		throw new Error(
