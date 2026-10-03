@@ -64,7 +64,7 @@ function LastTurnPanel({
 					className="min-h-0 flex-1"
 					viewportClassName="scroll-fade-b"
 				>
-					<div className="px-4 pb-4">
+					<div className="wrap-anywhere px-4 pb-4">
 						{data.timing && (
 							<p className="mb-4 text-xs text-muted-foreground tabular-nums">
 								<NodeTimerLabel timer={data.timing} details />

@@ -31,8 +31,10 @@ export function EvidenceSelector({
 		<Select<string> value={value} onValueChange={onChange}>
 			<SelectTrigger id={id} className="w-full">
 				<SelectValue>
-					{sources.find((source) => source.id === value)?.label ??
-						"Select recorded evidence"}
+					<span className="truncate">
+						{sources.find((source) => source.id === value)?.label ??
+							"Select recorded evidence"}
+					</span>
 				</SelectValue>
 			</SelectTrigger>
 			<SelectContent>

@@ -68,8 +68,10 @@ export function RouteEvaluationReview({
 				onValueChange={setSelectedRunId}
 			>
 				<SelectTrigger id={id} className="w-full">
-					<SelectValue className="truncate">
-						{selected ? recordLabel(selected) : "Select an answer to review"}
+					<SelectValue>
+						<span className="truncate">
+							{selected ? recordLabel(selected) : "Select an answer to review"}
+						</span>
 					</SelectValue>
 				</SelectTrigger>
 				<SelectContent>
@@ -95,7 +97,7 @@ export function RouteEvaluationReview({
 		.parse(JSON.parse(evaluation.report));
 
 	return (
-		<div className="my-4 grid gap-3 text-sm">
+		<div className="my-4 grid grid-cols-1 gap-3 text-sm">
 			{selector}
 			<h3 className="font-medium">
 				Answer review · {modelConfigurationKey(evaluation)} ·{" "}

@@ -20,7 +20,7 @@ export function NodeRunDetails({
 	modelPlans?: ModelPlan[];
 }) {
 	return (
-		<div className="grid gap-4">
+		<div className="grid grid-cols-1 gap-4">
 			<ModelPlanDetails plans={modelPlans} />
 			{decisions && (
 				<details className="rounded-lg border p-3 text-xs">
@@ -142,7 +142,7 @@ export function NodeRunDetails({
 										: ` · relevance ${Math.round(chunk.probability * 100)}%`}
 								</span>
 								{chunk.preview && (
-									<pre className="whitespace-pre-wrap wrap-break-word font-sans leading-5">
+									<pre className="whitespace-pre-wrap wrap-anywhere font-sans leading-5">
 										{chunk.preview}
 										{chunk.previewTruncated ? "\n… [excerpt]" : ""}
 									</pre>

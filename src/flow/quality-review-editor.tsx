@@ -61,7 +61,7 @@ export function QualityReviewEditor({
 		}
 	};
 	return (
-		<fieldset disabled={pending} className="grid gap-3">
+		<fieldset disabled={pending} className="grid min-w-0 grid-cols-1 gap-3">
 			<p className="text-xs text-muted-foreground">
 				Execution: {artifact.status} · evidence: {artifact.coverage}. Incomplete
 				evidence cannot approve automatic routing.
