@@ -178,6 +178,47 @@ test("Russian HTTP flow stops on Jev failure even when a clarification output is
 	expect(events.some((event) => event.type === "delta")).toBe(false);
 });
 
+for (const model of ["jev-1.13.0", "jev-unpriced"]) {
+	test(`invalid SDK evaluation retains reported usage and model ${model}`, async () => {
+		let requests = 0;
+		const { result, error } = await runHttp(
+			jevRoutes({ errorOutputId: "question/operator" }),
+			async () => {
+				requests++;
+				return Response.json({
+					model,
+					answers: {
+						question: {
+							type: "choice",
+							choice: "Доставка",
+							probabilities: { Доставка: 0.8, Оператор: 0.1 },
+							confidence: 0.9,
+						},
+					},
+					usage: { input_tokens: 100, output_tokens: 20 },
+				});
+			},
+		);
+		expect(error).toBeUndefined();
+		expect(requests).toBe(1);
+		expect(result?.text).toBe("Оператор");
+		expect(result?.jevSteps[0].status).toBe("provider-error");
+		expect(result?.calls[0]).toMatchObject({
+			status: "failed",
+			model,
+			usage: { inputTokens: 100, outputTokens: 20 },
+		});
+		expect(result?.usage.complete).toBe(true);
+		if (model === "jev-unpriced") {
+			expect(result?.calls[0].estimatedCostUsd).toBeUndefined();
+			expect(result?.usage.costComplete).toBe(false);
+		} else {
+			expect(result?.calls[0].estimatedCostUsd).toBeCloseTo(0.0000042, 12);
+			expect(result?.usage.costComplete).toBe(true);
+		}
+	});
+}
+
 test("Russian HTTP flow preserves the original uncertain choice while taking its fallback", async () => {
 	const { result } = await runHttp(jevRoutes(), async () =>
 		Response.json({

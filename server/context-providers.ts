@@ -1,6 +1,5 @@
 import {
 	type Experimental_EvaluationQuestion,
-	experimental_evaluate,
 	generateText,
 	NoObjectGeneratedError,
 	Output,
@@ -13,11 +12,8 @@ import type {
 	SummaryResult,
 } from "./automatic-context.ts";
 import type { ContextFilter, RelevanceResult } from "./context.ts";
-import {
-	evaluationModelFor,
-	languageModelFor,
-	type ProviderAccess,
-} from "./provider-access.ts";
+import { evaluateJev } from "./jev-evaluation.ts";
+import { languageModelFor, type ProviderAccess } from "./provider-access.ts";
 import {
 	evaluationUsage,
 	languageModelUsage,
@@ -184,16 +180,7 @@ async function evaluateContextQuestions(
 	},
 	access: ProviderAccess,
 ): Promise<RelevanceResult> {
-	const result = await experimental_evaluate({
-		model: evaluationModelFor(access),
-		state,
-		questions,
-		abortSignal: AbortSignal.any([
-			access.signal,
-			AbortSignal.timeout(timeoutMs),
-		]),
-		maxRetries: 0,
-	});
+	const result = await evaluateJev({ state, questions }, access, timeoutMs);
 	const probabilities: Record<string, number> = {};
 	for (const [key, id] of ids) {
 		const answer = result.answers[key];

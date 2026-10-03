@@ -72,7 +72,7 @@ export async function assessRoutingTask(
 				const probabilities = routingProbabilities(result, questions, eligible);
 				return { ...result, probabilities };
 			} catch (error) {
-				throw new ProviderUsageError(error, result.usage);
+				throw new ProviderUsageError(error, result.usage, result.model);
 			}
 		},
 	);

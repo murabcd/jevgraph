@@ -73,6 +73,7 @@ export class ProviderLedger {
 		} catch (caught) {
 			status = "failed";
 			usage = caught instanceof ProviderUsageError ? caught.usage : undefined;
+			if (caught instanceof ProviderUsageError) model = caught.model ?? model;
 			error = this.evidence.redact(
 				caught instanceof Error ? caught.message : "Provider call failed",
 			);

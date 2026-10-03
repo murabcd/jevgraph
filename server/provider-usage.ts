@@ -15,11 +15,13 @@ export function languageModelUsage(
 
 export class ProviderUsageError extends Error {
 	readonly usage: TokenUsage | undefined;
-	constructor(cause: unknown, usage: TokenUsage | undefined) {
+	readonly model: string | undefined;
+	constructor(cause: unknown, usage: TokenUsage | undefined, model?: string) {
 		super(cause instanceof Error ? cause.message : "Provider call failed", {
 			cause,
 		});
 		this.usage = usage;
+		this.model = model;
 	}
 }
 

@@ -171,6 +171,25 @@ test("frozen cases reject version drift and include all selected history in case
 		}),
 	});
 	const input = frozenCaseSchema.parse(JSON.parse(run.input));
+	const key = await frozenCaseKey(input);
+	expect(
+		await frozenCaseKey({
+			...input,
+			history: { ...input.history, conversationId: "another-conversation" },
+		}),
+	).toBe(key);
+	expect(
+		await frozenCaseKey({
+			...input,
+			history: { ...input.history, limited: true },
+		}),
+	).not.toBe(key);
+	expect(
+		await frozenCaseKey({
+			...input,
+			messages: [{ role: "user", content: "Different question" }],
+		}),
+	).not.toBe(key);
 	expect(() =>
 		assertCurrentCase({
 			...input,

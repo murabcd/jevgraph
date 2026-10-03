@@ -41,7 +41,14 @@ export function canonicalEvaluationInput(
 export function frozenCaseKey(input: FrozenCase) {
 	const canonical = frozenCaseSchema.parse(input);
 	return contentHash(
-		JSON.stringify({ ...canonical, ...canonicalEvaluationInput(canonical) }),
+		JSON.stringify({
+			...canonicalEvaluationInput(canonical),
+			versions: canonical.versions,
+			history: {
+				sources: canonical.history.sources,
+				limited: canonical.history.limited,
+			},
+		}),
 	);
 }
 

@@ -1,13 +1,10 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import {
-	type Experimental_EvaluationQuestion,
-	embedMany,
-	experimental_evaluate,
-} from "ai";
+import { type Experimental_EvaluationQuestion, embedMany } from "ai";
 import { z } from "zod";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "../src/lib/retrieval.ts";
 import { JEV_MODEL_ID } from "../src/lib/routing.ts";
-import { evaluationModelFor, type ProviderAccess } from "./provider-access.ts";
+import { evaluateJev } from "./jev-evaluation.ts";
+import type { ProviderAccess } from "./provider-access.ts";
 import { evaluationUsage } from "./provider-usage.ts";
 import type {
 	EmbeddingResult,
@@ -59,13 +56,11 @@ export async function rerankContext(
 				"Direct evidence needed to answer or perform the task.",
 			],
 		};
-	const result = await experimental_evaluate({
-		model: evaluationModelFor(access),
-		state: JSON.stringify(request),
-		questions,
-		maxRetries: 0,
-		abortSignal: AbortSignal.any([access.signal, AbortSignal.timeout(15000)]),
-	});
+	const result = await evaluateJev(
+		{ state: JSON.stringify(request), questions },
+		access,
+		15000,
+	);
 	const confidence = confidencesSchema.safeParse(
 		result.providerMetadata?.typesafe?.confidence,
 	).data;

@@ -1,5 +1,5 @@
 import type { OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
-import { experimental_evaluate, streamText } from "ai";
+import { streamText } from "ai";
 import { z } from "zod";
 import type { ContextDocument } from "../src/lib/context.ts";
 import { resolveContextDocuments } from "../src/lib/context.ts";
@@ -35,10 +35,10 @@ import {
 	summarizeContext,
 } from "./context-providers.ts";
 import type { ConvexPersistence } from "./convex-persistence.ts";
+import { evaluateJev } from "./jev-evaluation.ts";
 import { modelPrompt } from "./model-prompt.ts";
 import { emitStartTiming, measureNode } from "./node-timing.ts";
 import {
-	evaluationModelFor,
 	languageModelFor,
 	type ProviderFetch,
 	type ProviderKeys,
@@ -91,20 +91,16 @@ async function classify(
 	providerFetch?: ProviderFetch,
 ): Promise<JevEvaluation> {
 	const start = performance.now();
-	const evaluationModel = evaluationModelFor({
-		keys: { TYPESAFE_API_KEY: key },
-		signal,
-		providerFetch,
-	});
-	const result = await experimental_evaluate({
-		model: evaluationModel,
-		state,
-		questions: Object.fromEntries(
-			questions.map((question) => [question.id, questionForJev(question)]),
-		),
-		abortSignal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
-		maxRetries: 0,
-	});
+	const result = await evaluateJev(
+		{
+			state,
+			questions: Object.fromEntries(
+				questions.map((question) => [question.id, questionForJev(question)]),
+			),
+		},
+		{ keys: { TYPESAFE_API_KEY: key }, signal, providerFetch },
+		10000,
+	);
 	const confidence = result.providerMetadata?.typesafe?.confidence;
 	const confidences = jevConfidenceSchema.safeParse(confidence).data;
 	try {
@@ -120,7 +116,11 @@ async function classify(
 			usage: evaluationUsage(result.usage),
 		};
 	} catch (error) {
-		throw new ProviderUsageError(error, evaluationUsage(result.usage));
+		throw new ProviderUsageError(
+			error,
+			evaluationUsage(result.usage),
+			result.response.modelId,
+		);
 	}
 }
 
