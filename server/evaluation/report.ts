@@ -4,6 +4,10 @@ import {
 	frozenCaseKey,
 } from "../../src/lib/evaluation-case.ts";
 import {
+	effectiveModelConfiguration,
+	modelConfigurationKey,
+} from "../../src/lib/model-configuration.ts";
+import {
 	reviewSources,
 	validateQualityReview,
 } from "../../src/lib/quality-review.ts";
@@ -190,7 +194,11 @@ export async function evaluationReport(
 		const node = trial.record.routes.nodes.find(
 			(node) => node.id === dataset.evaluationNodeId,
 		);
-		if (node?.kind !== "model" || node.model !== trial.candidate)
+		if (
+			node?.kind !== "model" ||
+			modelConfigurationKey(effectiveModelConfiguration(node)) !==
+				trial.candidate
+		)
 			throw new Error("Candidate identity differs from the registered graph");
 		const keys = identities.get(item.id) ?? new Set<string>();
 		const caseKey = keysByTrial.get(trial)?.caseKey;

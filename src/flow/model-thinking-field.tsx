@@ -23,13 +23,11 @@ function effortLabel(value: string | null) {
 export function ModelThinkingField({
 	id,
 	model,
-	efforts = model.reasoning.efforts,
 	value,
 	onChange,
 }: {
 	id: string;
 	model: TextModel;
-	efforts?: readonly ReasoningEffort[];
 	value: ReasoningEffort;
 	onChange: (effort: ReasoningEffort) => void;
 }) {
@@ -45,7 +43,7 @@ export function ModelThinkingField({
 				value={value}
 				onValueChange={(value) => {
 					const parsed = reasoningEffortSchema.safeParse(value);
-					if (parsed.success && efforts.includes(parsed.data))
+					if (parsed.success && model.reasoning.efforts.includes(parsed.data))
 						onChange(parsed.data);
 				}}
 			>
@@ -54,7 +52,7 @@ export function ModelThinkingField({
 				</SelectTrigger>
 				<SelectContent alignItemWithTrigger={false}>
 					<SelectGroup>
-						{efforts.map((effort) => (
+						{model.reasoning.efforts.map((effort) => (
 							<SelectItem key={effort} value={effort}>
 								{effortLabel(effort)}
 							</SelectItem>

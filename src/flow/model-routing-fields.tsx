@@ -9,10 +9,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { ModelOption } from "@/flow/model-option";
+import { ModelRoutingCandidates } from "@/flow/model-routing-candidates";
 import { SelectionRow } from "@/flow/selection-row";
 import type { ModelRouting } from "@/lib/model-routing";
-import { textModels } from "@/lib/models";
+import type { ReasoningEffort } from "@/lib/models";
 
 export function ModelRoutingFields({
 	id,
@@ -20,14 +20,15 @@ export function ModelRoutingFields({
 	onChange,
 	maxOutputTokens,
 	modelId,
+	reasoningEffort,
 }: {
 	id: string;
 	value?: ModelRouting;
 	onChange: (value: ModelRouting | undefined) => void;
 	maxOutputTokens: number;
 	modelId: string;
+	reasoningEffort: ReasoningEffort;
 }) {
-	const selectedModels = new Set(value?.models);
 	return (
 		<FieldGroup className="gap-3">
 			<SelectionRow
@@ -44,7 +45,10 @@ export function ModelRoutingFields({
 										minimumPassRate: 0.95,
 										maximumLatencyMs: 20000,
 									},
-									models: [modelId],
+									minimumConfidence: 0.7,
+									candidates: [
+										{ model: modelId, reasoningEffort, criteria: "" },
+									],
 									expectedOutputTokens: Math.min(
 										256,
 										Number.isFinite(maxOutputTokens)
@@ -59,7 +63,7 @@ export function ModelRoutingFields({
 			>
 				<span className="flex items-center gap-2">
 					<Sparkles className="size-4 shrink-0" />
-					Evaluate and route models
+					Evaluate and route models and reasoning
 				</span>
 			</SelectionRow>
 			{value && (
@@ -82,17 +86,17 @@ export function ModelRoutingFields({
 								<SelectValue>
 									{() =>
 										value.mode === "evaluate"
-											? "Evaluate selected model"
-											: "Route using reviewed results"
+											? "Evaluate selected configuration"
+											: "Route by task and reviewed results"
 									}
 								</SelectValue>
 							</SelectTrigger>
 							<SelectContent alignItemWithTrigger={false}>
 								<SelectItem value="evaluate">
-									Evaluate selected model
+									Evaluate selected configuration
 								</SelectItem>
 								<SelectItem value="automatic">
-									Route using reviewed results
+									Route by task and reviewed results
 								</SelectItem>
 							</SelectContent>
 						</Select>
@@ -153,27 +157,36 @@ export function ModelRoutingFields({
 							/>
 						</Field>
 					))}
-					<FieldGroup className="gap-2">
-						<span className="text-xs text-muted-foreground">
-							Allowed models
-						</span>
-						{textModels.map((model) => (
-							<SelectionRow
-								key={model.id}
-								selected={selectedModels.has(model.id)}
-								onSelectedChange={(selected) =>
-									onChange({
-										...value,
-										models: selected
-											? [...value.models, model.id]
-											: value.models.filter((id) => id !== model.id),
-									})
-								}
-							>
-								<ModelOption model={model} />
-							</SelectionRow>
-						))}
-					</FieldGroup>
+					<ModelRoutingCandidates
+						id={id}
+						value={value.candidates}
+						onChange={(candidates) => onChange({ ...value, candidates })}
+					/>
+					<Field>
+						<FieldLabel
+							htmlFor={`${id}-routing-confidence`}
+							className="text-xs text-muted-foreground"
+						>
+							Minimum task suitability (%)
+						</FieldLabel>
+						<Input
+							id={`${id}-routing-confidence`}
+							inputMode="decimal"
+							value={
+								Number.isFinite(value.minimumConfidence)
+									? value.minimumConfidence * 100
+									: ""
+							}
+							onChange={(event) =>
+								onChange({
+									...value,
+									minimumConfidence: event.target.value.trim()
+										? Number(event.target.value) / 100
+										: NaN,
+								})
+							}
+						/>
+					</Field>
 					<Field>
 						<FieldLabel
 							htmlFor={`${id}-expected-output`}

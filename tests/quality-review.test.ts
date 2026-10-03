@@ -27,7 +27,14 @@ const routes = workflowRoutesSchema.parse({
 			routing: {
 				mode: "evaluate",
 				quality: { ...quality, criteria },
-				models: ["gpt-6-luna"],
+				minimumConfidence: 0.7,
+				candidates: [
+					{
+						model: "gpt-6-luna",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+				],
 				expectedOutputTokens: 100,
 				expectedRequests: 1,
 			},

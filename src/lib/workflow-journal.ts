@@ -46,6 +46,7 @@ export const pendingCallSchema = providerCallSchema.pick({
 	purpose: true,
 	provider: true,
 	model: true,
+	reasoningEffort: true,
 });
 export type PendingCall = z.infer<typeof pendingCallSchema>;
 export const workflowJournalSchema = z

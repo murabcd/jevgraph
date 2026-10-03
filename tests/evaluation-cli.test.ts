@@ -50,7 +50,17 @@ test("evaluation CLI uses each suite's selected candidate and rejects disallowed
 									provider: model.provider,
 									model: model.id,
 									reasoningEffort: model.reasoning.defaultEffort,
-									routing: { ...node.routing, models: [model.id] },
+									routing: {
+										...node.routing,
+										minimumConfidence: 0.7,
+										candidates: [
+											{
+												model: model.id,
+												reasoningEffort: "medium",
+												criteria: "Answer questions from the selected policy",
+											},
+										],
+									},
 								}
 							: node,
 					),
@@ -63,7 +73,7 @@ test("evaluation CLI uses each suite's selected candidate and rejects disallowed
 			expect(validated.code).toBe(0);
 			expect(validated.stdout).toContain(dataset.version);
 			const args = ["run", "--dataset", path, "--live", "--out", out];
-			for (const options of [[], ["--candidates", model.id]]) {
+			for (const options of [[], ["--candidates", `${model.id}@medium`]]) {
 				const result = await cli([...args, ...options]);
 				expect(result.code).toBe(1);
 				expect(result.stderr).toContain(
@@ -72,7 +82,11 @@ test("evaluation CLI uses each suite's selected candidate and rejects disallowed
 			}
 			const other = textModels.find((item) => item.id !== model.id);
 			if (!other) throw new Error("Fixture needs an alternative candidate");
-			const rejected = await cli([...args, "--candidates", other.id]);
+			const rejected = await cli([
+				...args,
+				"--candidates",
+				`${other.id}@medium`,
+			]);
 			expect(rejected.code).toBe(1);
 			expect(rejected.stderr).toContain("allowed model");
 			expect(await Bun.file(out).exists()).toBe(false);

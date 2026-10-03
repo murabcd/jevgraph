@@ -1,28 +1,26 @@
 import { z } from "zod";
-import { reasoningEfforts, textModels } from "./models.ts";
+import {
+	MAX_MODEL_CONFIGURATIONS,
+	modelConfigurationKey,
+	modelConfigurationSchema,
+} from "./model-configuration.ts";
 import { qualityPolicySchema, routeEvidenceSchema } from "./route-evidence.ts";
 
-const modelEfforts = new Map(
-	textModels.map((model) => [model.id, new Set(model.reasoning.efforts)]),
-);
-
-export function routingReasoningEfforts(models: string[]) {
-	return reasoningEfforts.filter((effort) =>
-		models.every((id) => modelEfforts.get(id)?.has(effort)),
-	);
-}
-
+export const routingCandidateSchema = modelConfigurationSchema.safeExtend({
+	criteria: z.string().trim().min(1).max(500),
+});
 export const modelRoutingSchema = z.strictObject({
 	mode: z.enum(["evaluate", "automatic"]),
 	quality: qualityPolicySchema,
-	models: z
-		.array(z.string())
+	minimumConfidence: z.number().finite().min(0.5).max(1),
+	candidates: z
+		.array(routingCandidateSchema)
 		.min(1)
-		.max(2)
+		.max(MAX_MODEL_CONFIGURATIONS)
 		.refine(
-			(models) =>
-				new Set(models).size === models.length &&
-				models.every((id) => textModels.some((model) => model.id === id)),
+			(values) =>
+				new Set(values.map(modelConfigurationKey)).size === values.length,
+			"Configurations must be unique",
 		),
 	expectedOutputTokens: z.number().int().min(1).max(8192),
 	expectedRequests: z.number().int().min(1).max(20),
@@ -36,8 +34,7 @@ export const cacheModeSchema = z.enum([
 	"implicit",
 ]);
 export type CacheMode = z.infer<typeof cacheModeSchema>;
-export const modelQuoteSchema = z.strictObject({
-	model: z.string(),
+export const modelQuoteSchema = modelConfigurationSchema.safeExtend({
 	provider: z.enum(["openai", "google"]),
 	inputTokens: z.number().int().min(0),
 	prefixTokens: z.number().int().min(0),
@@ -47,6 +44,7 @@ export const modelQuoteSchema = z.strictObject({
 	estimatedCostUsd: z.number().finite().min(0).optional(),
 	estimatedTotalUsd: z.number().finite().min(0).optional(),
 	evidence: routeEvidenceSchema.optional(),
+	taskProbability: z.number().finite().min(0).max(1).optional(),
 	estimatedRouteCostUsd: z.number().finite().min(0).optional(),
 	estimatedCostPerPassUsd: z.number().finite().min(0).optional(),
 	excluded: z
@@ -60,6 +58,7 @@ export const modelQuoteSchema = z.strictObject({
 			"latency",
 			"incomplete-cost",
 			"different-cases",
+			"task",
 		])
 		.optional(),
 });
@@ -68,10 +67,11 @@ export const modelPlanSchema = z.strictObject({
 	nodeId: z.string(),
 	callId: z.string(),
 	selectedModel: z.string(),
+	selectedReasoningEffort: modelConfigurationSchema.shape.reasoningEffort,
 	mode: z.enum(["evaluate", "automatic"]),
 	expectedRequests: z.number().int().min(1).max(20),
 	preparationCostUsd: z.number().finite().min(0).optional(),
 	estimation: z.literal("utf8-estimate"),
-	candidates: z.array(modelQuoteSchema).min(1).max(2),
+	candidates: z.array(modelQuoteSchema).min(1).max(MAX_MODEL_CONFIGURATIONS),
 });
 export type ModelPlan = z.infer<typeof modelPlanSchema>;

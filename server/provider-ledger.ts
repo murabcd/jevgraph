@@ -48,7 +48,10 @@ export class ProviderLedger {
 	}
 
 	async run<T extends { usage?: TokenUsage; model?: string }>(
-		identity: Pick<ProviderCall, "nodeId" | "purpose" | "provider" | "model">,
+		identity: Pick<
+			ProviderCall,
+			"nodeId" | "purpose" | "provider" | "model" | "reasoningEffort"
+		>,
 		pricing: Pricing | undefined,
 		callId: string,
 		run: () => Promise<T>,

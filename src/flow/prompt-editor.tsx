@@ -47,19 +47,15 @@ import {
 	DEFAULT_CONTEXT_POLICY,
 	retainBoundInstructions,
 } from "@/lib/context";
+import { effectiveModelConfiguration } from "@/lib/model-configuration";
 import { publishedPricing } from "@/lib/model-pricing";
-import {
-	type ModelRouting,
-	modelRoutingSchema,
-	routingReasoningEfforts,
-} from "@/lib/model-routing";
+import { type ModelRouting, modelRoutingSchema } from "@/lib/model-routing";
 import { textModels } from "@/lib/models";
 import {
 	MAX_PROMPT_LENGTH,
 	type ModelPromptMessage,
 	maxOutputTokensSchema,
 	modelPromptMessagesSchema,
-	modelReasoningEffort,
 	type StartField,
 } from "@/lib/routing";
 import { type Pricing, pricingSchema } from "@/lib/usage";
@@ -115,9 +111,9 @@ export function PromptEditor({
 	);
 	const [reasoningDraft, setReasoningDraft] = useState(() => {
 		const model = textModels.find((item) => item.id === modelId);
-		if (routing) return reasoningEffort ?? "medium";
 		return model
-			? modelReasoningEffort(model.provider, model.id, reasoningEffort)
+			? effectiveModelConfiguration({ model: model.id, reasoningEffort })
+					.reasoningEffort
 			: undefined;
 	});
 	const [error, setError] = useState("");
@@ -126,9 +122,6 @@ export function PromptEditor({
 	);
 	const [pricingDraft, setPricingDraft] = useState(pricing);
 	const [routingDraft, setRoutingDraft] = useState(routing);
-	const allowedEfforts = routingDraft
-		? routingReasoningEfforts(routingDraft.models)
-		: undefined;
 	const selectedModel = textModels.find((model) => model.id === draftModel);
 	return (
 		<Sheet
@@ -203,20 +196,18 @@ export function PromptEditor({
 								</Select>
 							</Field>
 						)}
-						<ModelRoutingFields
-							id={id}
-							value={routingDraft}
-							modelId={selectedModel?.id ?? "gpt-6-luna"}
-							maxOutputTokens={Number(outputTokensDraft)}
-							onChange={(routing) => {
-								setRoutingDraft(routing);
-								const efforts = routing
-									? routingReasoningEfforts(routing.models)
-									: selectedModel?.reasoning.efforts;
-								if (reasoningDraft && !efforts?.includes(reasoningDraft))
-									setReasoningDraft("medium");
-							}}
-						/>
+						{selectedModel && (
+							<ModelRoutingFields
+								id={id}
+								value={routingDraft}
+								modelId={selectedModel.id}
+								maxOutputTokens={Number(outputTokensDraft)}
+								reasoningEffort={
+									reasoningDraft ?? selectedModel.reasoning.defaultEffort
+								}
+								onChange={setRoutingDraft}
+							/>
+						)}
 						<Field>
 							<FieldLabel
 								htmlFor={`${id}-max-output`}
@@ -236,7 +227,6 @@ export function PromptEditor({
 							<ModelThinkingField
 								id={id}
 								model={selectedModel}
-								efforts={allowedEfforts}
 								value={reasoningDraft ?? selectedModel.reasoning.defaultEffort}
 								onChange={setReasoningDraft}
 							/>
@@ -317,9 +307,7 @@ export function PromptEditor({
 							}
 							if (
 								reasoningDraft === undefined ||
-								!(allowedEfforts ?? selectedModel.reasoning.efforts).includes(
-									reasoningDraft,
-								)
+								!selectedModel.reasoning.efforts.includes(reasoningDraft)
 							) {
 								setError("Choose a supported reasoning effort.");
 								return;
@@ -349,10 +337,14 @@ export function PromptEditor({
 								(parsedRouting.data &&
 									(parsedRouting.data.expectedOutputTokens > parsed.data ||
 										(parsedRouting.data.mode === "evaluate" &&
-											!parsedRouting.data.models.includes(draftModel))))
+											!parsedRouting.data.candidates.some(
+												(candidate) =>
+													candidate.model === draftModel &&
+													candidate.reasoningEffort === reasoningDraft,
+											))))
 							) {
 								setError(
-									"Check selected models, review criteria, 5–100 distinct cases, 50–100% pass rate, latency 100–120,000 ms, expected output within the output limit, and 1–20 requests. Evaluation requires the selected model in the allowed list.",
+									"Check model and reasoning configurations, task criteria, 50–100% task suitability, review criteria, 5–100 distinct cases, 50–100% pass rate, latency 100–120,000 ms, expected output within the output limit, and 1–20 requests. Evaluation requires the selected model and reasoning configuration in the allowed list.",
 								);
 								return;
 							}

@@ -38,7 +38,19 @@ const routes = workflowRoutesSchema.parse({
 			routing: {
 				mode: "evaluate",
 				quality,
-				models: ["gpt-6-luna", "gemini-3.8-flash"],
+				minimumConfidence: 0.7,
+				candidates: [
+					{
+						model: "gpt-6-luna",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+					{
+						model: "gemini-3.8-flash",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+				],
 				expectedOutputTokens: 100,
 				expectedRequests: 1,
 			},
@@ -103,7 +115,11 @@ test("registration freezes saved history and replay preserves case identity whil
 		runId: registered.runId,
 		conversationId: fixture.workspace.conversationId,
 		requestId: crypto.randomUUID(),
-		candidate: { nodeId: "answer", model: "gemini-3.8-flash" },
+		candidate: {
+			nodeId: "answer",
+			model: "gemini-3.8-flash",
+			reasoningEffort: "medium",
+		},
 	});
 	expect(candidate.messages).toEqual(registered.input.messages);
 	expect(await routeEvidenceKey(candidate.routes, "answer")).toBe(
@@ -134,9 +150,13 @@ test("registration freezes saved history and replay preserves case identity whil
 			runId: registered.runId,
 			conversationId: candidate.conversationId,
 			requestId: crypto.randomUUID(),
-			candidate: { nodeId: "answer", model: "unsupported" },
+			candidate: {
+				nodeId: "answer",
+				model: "unsupported",
+				reasoningEffort: "medium",
+			},
 		}),
-	).rejects.toThrow("allowed model");
+	).rejects.toThrow("Unsupported model");
 });
 
 test("frozen cases reject version drift and include all selected history in case identity", async () => {

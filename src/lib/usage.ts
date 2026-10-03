@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { reasoningEfforts } from "./models.ts";
 
 const rateSchema = z.number().finite().min(0).max(10000);
 export const pricingSchema = z.strictObject({
@@ -38,9 +39,11 @@ export const providerCallSchema = z.strictObject({
 		"summary",
 		"embedding",
 		"rerank",
+		"routing",
 	]),
 	provider: z.enum(["openai", "google", "jev"]),
 	model: z.string(),
+	reasoningEffort: z.enum(reasoningEfforts).optional(),
 	status: z.enum(["completed", "failed"]),
 	durationMs: z.number().finite().min(0).optional(),
 	usage: tokenUsageSchema.optional(),

@@ -1,3 +1,4 @@
+import { modelConfigurationKey } from "../src/lib/model-configuration.ts";
 import type { RouteEvidence } from "../src/lib/route-evidence.ts";
 import {
 	modelTarget,
@@ -6,12 +7,14 @@ import {
 } from "../src/lib/routing.ts";
 import { planModel } from "./model-planner.ts";
 import { prepareNodeContext } from "./node-context.ts";
+import { assessRoutingTask, type RoutingEvaluator } from "./task-router.ts";
 
 /** Qualify before paid preparation, then quote the actual effective context. */
 export async function prepareModelExecution(
 	request: Parameters<typeof prepareNodeContext>[0] & {
 		node: Extract<WorkflowRoutes["nodes"][number], { kind: "model" }>;
 		evidence: RouteEvidence[];
+		evaluate: RoutingEvaluator;
 	},
 	environment: Parameters<typeof prepareNodeContext>[1],
 ) {
@@ -38,26 +41,54 @@ export async function prepareModelExecution(
 				callId,
 			)
 		: undefined;
-	const contextModels = preflight
-		? new Set(
-				preflight.plan.candidates
-					.filter(
-						(candidate) =>
-							!candidate.excluded &&
-							(node.routing?.mode === "automatic" ||
-								candidate.model === node.model),
-					)
-					.map((candidate) => candidate.model),
+	const eligibleKeys = new Set(
+		preflight?.plan.candidates
+			.filter(
+				(candidate) =>
+					!candidate.excluded &&
+					(node.routing?.mode === "automatic" ||
+						(candidate.model === preflight.plan.selectedModel &&
+							candidate.reasoningEffort ===
+								preflight.plan.selectedReasoningEffort)),
 			)
-		: availableModels;
-	const context = await prepareNodeContext(request, {
-		...environment,
-		availableModels: contextModels,
-	});
+			.map(modelConfigurationKey),
+	);
+	const contextNode = node.routing
+		? {
+				...node,
+				routing: {
+					...node.routing,
+					candidates: node.routing.candidates.filter((candidate) =>
+						eligibleKeys.has(modelConfigurationKey(candidate)),
+					),
+				},
+			}
+		: node;
+	const context = await prepareNodeContext(
+		{
+			...request,
+			node: contextNode,
+		},
+		environment,
+	);
 	const effectiveTarget = { ...target, prompt: context.instructions };
+	const planning = { target: effectiveTarget, context, variables, evidence };
+	const assessment =
+		node.routing?.mode === "automatic" && preflight
+			? await assessRoutingTask(
+					planning,
+					preflight.plan.candidates,
+					ledger,
+					request.evaluate,
+					environment.signal,
+				)
+			: undefined;
 	const planned = node.routing
 		? planModel(
-				{ target: effectiveTarget, context, variables, evidence },
+				{
+					...planning,
+					assessment,
+				},
 				memory,
 				availableModels,
 				callId,

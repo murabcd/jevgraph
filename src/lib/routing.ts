@@ -12,11 +12,8 @@ import {
 	MAX_JEV_QUESTIONS,
 	type resolveJevAnswer,
 } from "./jev-question.ts";
-import {
-	modelPlanSchema,
-	modelRoutingSchema,
-	routingReasoningEfforts,
-} from "./model-routing.ts";
+import { effectiveModelConfiguration } from "./model-configuration.ts";
+import { modelPlanSchema, modelRoutingSchema } from "./model-routing.ts";
 import {
 	type Provider,
 	providers,
@@ -52,18 +49,6 @@ export const modelPromptMessagesSchema = z
 export type ModelPromptMessage = z.infer<typeof modelPromptMessageSchema>;
 export const maxOutputTokensSchema = z.number().int().min(1).max(8192);
 export const reasoningEffortSchema = z.enum(reasoningEfforts);
-
-export function modelReasoningEffort(
-	provider: Provider,
-	model: string,
-	effort?: ReasoningEffort,
-): ReasoningEffort | undefined {
-	const reasoning = textModel(provider, model)?.reasoning;
-	if (!reasoning) return undefined;
-	return effort !== undefined && reasoning.efforts.includes(effort)
-		? effort
-		: reasoning.defaultEffort;
-}
 
 function validModelReasoning(
 	provider: Provider,
@@ -182,23 +167,22 @@ export type WorkflowEdge = z.infer<typeof workflowEdgeSchema>;
 function validModelNode(
 	node: Extract<WorkflowNode, { kind: "model" }>,
 ): boolean {
-	if (!textModel(node.provider, node.model)) return false;
-	if (!node.routing)
-		return validModelReasoning(node.provider, node.model, node.reasoningEffort);
+	if (
+		!textModel(node.provider, node.model) ||
+		!validModelReasoning(node.provider, node.model, node.reasoningEffort)
+	)
+		return false;
+	if (!node.routing) return true;
 	return (
 		(node.routing.mode !== "evaluate" ||
-			(node.routing.models.includes(node.model) &&
-				validModelReasoning(
-					node.provider,
-					node.model,
-					node.reasoningEffort,
-				))) &&
+			node.routing.candidates.some(
+				(candidate) =>
+					candidate.model === node.model &&
+					candidate.reasoningEffort ===
+						effectiveModelConfiguration(node).reasoningEffort,
+			)) &&
 		node.routing.expectedOutputTokens <=
-			(node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS) &&
-		(node.reasoningEffort === undefined ||
-			routingReasoningEfforts(node.routing.models).includes(
-				node.reasoningEffort,
-			))
+			(node.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS)
 	);
 }
 
@@ -608,7 +592,8 @@ export function routesUseJev(routes: WorkflowRoutes): boolean {
 		(node) =>
 			node.kind === "jev" ||
 			(node.kind === "model" &&
-				(node.context?.relevance !== undefined ||
+				(node.routing?.mode === "automatic" ||
+					node.context?.relevance !== undefined ||
 					node.context?.automatic !== undefined ||
 					node.context?.retrieval !== undefined)),
 	);

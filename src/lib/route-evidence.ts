@@ -2,6 +2,11 @@ import { z } from "zod";
 import { contentHash } from "./content-identity.ts";
 import type { ContextDocument } from "./context.ts";
 import { EVALUATION_VERSIONS } from "./evaluation-version.ts";
+import {
+	effectiveModelConfiguration,
+	modelConfigurationKey,
+	modelConfigurationSchema,
+} from "./model-configuration.ts";
 import type { RouteTrace, WorkflowRoutes } from "./routing.ts";
 import { totalUsage } from "./usage.ts";
 
@@ -22,8 +27,7 @@ export const qualityPolicySchema = z.strictObject({
 	maximumLatencyMs: z.number().int().min(100).max(120000),
 });
 export type QualityPolicy = z.infer<typeof qualityPolicySchema>;
-export const routeEvidenceSchema = z.strictObject({
-	model: z.string(),
+export const routeEvidenceSchema = modelConfigurationSchema.safeExtend({
 	attempts: z.number().int().min(1),
 	cases: z.number().int().min(1),
 	caseDistribution: z.string().max(20000),
@@ -33,6 +37,7 @@ export const routeEvidenceSchema = z.strictObject({
 	p95LatencyMs: z.number().finite().min(0),
 	meanCostUsd: z.number().finite().min(0).optional(),
 	meanGenerationCostUsd: z.number().finite().min(0).optional(),
+	meanOutputTokens: z.number().finite().min(0).optional(),
 	meanModelAttempts: z.number().finite().min(0),
 	costPerPassUsd: z.number().finite().min(0).optional(),
 });
@@ -41,6 +46,8 @@ export const routeEvaluationSchema = z.strictObject({
 	nodeId: z.string(),
 	key: z.string().length(64),
 	model: z.string(),
+	reasoningEffort: modelConfigurationSchema.shape.reasoningEffort,
+	outputTokens: z.number().int().min(0).optional(),
 	criteria: z.string().min(1).max(2000),
 	latencyMs: z.number().finite().min(0),
 	completed: z.boolean(),
@@ -50,7 +57,7 @@ export const routeEvaluationSchema = z.strictObject({
 });
 export type RouteEvaluation = z.infer<typeof routeEvaluationSchema>;
 
-/** Identifies a complete graph strategy with one model candidate varied. */
+/** Identifies a complete graph strategy with one model/reasoning configuration varied. */
 export async function routeEvidenceKey(
 	routes: WorkflowRoutes,
 	nodeId: string,
@@ -64,6 +71,10 @@ export async function routeEvidenceKey(
 			versions: EVALUATION_VERSIONS,
 			nodeId,
 			criteria: node.routing.quality.criteria,
+			candidates: node.routing.candidates.toSorted((a, b) =>
+				modelConfigurationKey(a).localeCompare(modelConfigurationKey(b)),
+			),
+			minimumConfidence: node.routing.minimumConfidence,
 			nodes: routes.nodes
 				.toSorted((a, b) => a.id.localeCompare(b.id))
 				.map((item) => {
@@ -74,6 +85,7 @@ export async function routeEvidenceKey(
 							...item,
 							provider: undefined,
 							model: undefined,
+							reasoningEffort: undefined,
 							routing: undefined,
 							pricing: undefined,
 						};
@@ -110,7 +122,10 @@ export async function routeEvaluations(
 				routeEvidenceKey(routes, node.id).then((key) => ({
 					nodeId: node.id,
 					key,
-					model: node.model,
+					...effectiveModelConfiguration(node),
+					outputTokens: generation.complete
+						? generation.outputTokens
+						: undefined,
 					criteria,
 					latencyMs,
 					completed,
@@ -131,9 +146,14 @@ export async function routeEvaluations(
 export function summarizeRouteEvidence(
 	rows: (RouteEvaluation & { caseKey: string; passed?: boolean })[],
 ): RouteEvidence[] {
-	const models = new Set(rows.map((row) => row.model));
-	return Array.from(models, (model) => {
-		const samples = rows.filter((row) => row.model === model);
+	const configurations = new Map(
+		rows.map((row) => [
+			modelConfigurationKey(row),
+			{ model: row.model, reasoningEffort: row.reasoningEffort },
+		]),
+	);
+	return Array.from(configurations, ([key, configuration]) => {
+		const samples = rows.filter((row) => modelConfigurationKey(row) === key);
 		const reviewed = samples.filter((row) => row.passed !== undefined);
 		const passed = reviewed.filter((row) => row.passed).length;
 		const latencies = samples
@@ -144,7 +164,13 @@ export function summarizeRouteEvidence(
 		);
 		const total = samples.reduce((sum, row) => sum + (row.costUsd ?? 0), 0);
 		return {
-			model,
+			...configuration,
+			meanOutputTokens:
+				samples.every((row) => row.outputTokens !== undefined) &&
+				samples.some((row) => row.modelAttempts > 0)
+					? samples.reduce((sum, row) => sum + (row.outputTokens ?? 0), 0) /
+						samples.reduce((sum, row) => sum + row.modelAttempts, 0)
+					: undefined,
 			attempts: samples.length,
 			cases: new Set(samples.map((row) => row.caseKey)).size,
 			caseDistribution: JSON.stringify(

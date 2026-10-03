@@ -82,7 +82,7 @@ export function evaluationDatasetFixture() {
 					prompt: "Return the controlled fixture answer.",
 					variables: ["priority"],
 					maxOutputTokens: 1400,
-					reasoningEffort: "low",
+					reasoningEffort: "medium",
 					context: {
 						historyMessages: 10,
 						maxCharacters: 24000,
@@ -92,7 +92,19 @@ export function evaluationDatasetFixture() {
 					},
 					routing: {
 						mode: "evaluate",
-						models: ["gpt-6-luna", "gemini-3.8-flash"],
+						minimumConfidence: 0.7,
+						candidates: [
+							{
+								model: "gpt-6-luna",
+								reasoningEffort: "medium",
+								criteria: "Answer questions from the selected policy",
+							},
+							{
+								model: "gemini-3.8-flash",
+								reasoningEffort: "medium",
+								criteria: "Answer questions from the selected policy",
+							},
+						],
 						quality: {
 							criteria: "Answer meets the configured expectation.",
 							minimumCases: 5,
@@ -151,7 +163,7 @@ export async function evaluationFixture() {
 	const run = evaluationRunSchema.parse({
 		datasetKey: await datasetKey(dataset),
 		startedAt: new Date(now).toISOString(),
-		candidates: ["gpt-6-luna", "gemini-3.8-flash"],
+		candidates: ["gpt-6-luna@medium", "gemini-3.8-flash@medium"],
 		repeats: 1,
 		split: "test",
 		trials: [],

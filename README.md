@@ -23,7 +23,7 @@
 - [AI SDK](https://ai-sdk.dev/docs)
   - Direct providers for text generation and typed Jev evaluations
   - Streamed replies with live execution paths, timing, token usage, and estimated costs
-  - Per-node prompts, reasoning controls, context selection, and model routing based on reviewed results
+  - Per-node prompts, reasoning controls, context selection, and model and reasoning routing based on task criteria and reviewed results
 - [React Flow](https://reactflow.dev)
   - Visual chatflows with branching decisions, parallel paths, joined results, bounded review loops, and explicit backup models
 - [Shadcn/ui](https://ui.shadcn.com)
@@ -40,7 +40,7 @@
 
 ## Model Providers
 
-JevGraph uses [OpenAI](https://openai.com/) and [Google](https://ai.google.dev/) for text generation through their direct [AI SDK](https://ai-sdk.dev/docs) providers. Select the model and reasoning effort in each Model node. [TypeSafe](https://ai-sdk.dev/providers/ai-sdk-providers/typesafe-ai) provides Jev evaluations for decisions and context assessment.
+JevGraph uses [OpenAI](https://openai.com/) and [Google](https://ai.google.dev/) for text generation through their direct [AI SDK](https://ai-sdk.dev/docs) providers. Select the model and reasoning effort in each Model node, or configure allowed model/effort pairs with task criteria. Evaluation mode runs the selected pair; automatic mode uses Jev to assess the current task and chooses among pairs that meet reviewed quality, full-turn latency and cost requirements. Each pair needs its own comparable evidence. [TypeSafe](https://ai-sdk.dev/providers/ai-sdk-providers/typesafe-ai) provides Jev evaluations for decisions and context assessment.
 
 - OpenAI model (`gpt-6-luna`): Text generation with configurable reasoning effort
 - Google model (`gemini-3.8-flash`): Text generation with Low, Medium, and High reasoning settings

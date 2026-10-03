@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { effectiveModelConfiguration } from "../src/lib/model-configuration";
 import { textModel } from "../src/lib/models";
 import {
-	modelReasoningEffort,
 	routeRequestSchema,
 	routesUseJev,
 	workflowRoutesSchema,
@@ -43,9 +43,19 @@ const request = {
 
 describe("chatflow contract", () => {
 	test("uses current model defaults and supported reasoning efforts", () => {
-		expect(modelReasoningEffort("openai", "gpt-6-luna")).toBe("medium");
-		expect(modelReasoningEffort("openai", "gpt-6-luna", "none")).toBe("none");
-		expect(modelReasoningEffort("google", "gemini-3.8-flash")).toBe("medium");
+		expect(
+			effectiveModelConfiguration({ model: "gpt-6-luna" }).reasoningEffort,
+		).toBe("medium");
+		expect(
+			effectiveModelConfiguration({
+				model: "gpt-6-luna",
+				reasoningEffort: "none",
+			}).reasoningEffort,
+		).toBe("none");
+		expect(
+			effectiveModelConfiguration({ model: "gemini-3.8-flash" })
+				.reasoningEffort,
+		).toBe("medium");
 		expect(textModel("google", "gemini-3.8-flash")?.reasoning.efforts).toEqual([
 			"low",
 			"medium",

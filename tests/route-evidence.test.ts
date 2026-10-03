@@ -13,7 +13,11 @@ import {
 } from "../src/lib/route-evidence";
 import { type RouteTrace, workflowRoutesSchema } from "../src/lib/routing";
 import { createConvexFixture } from "./convex-fixture";
-import { approvedEvidence, quality } from "./routing-evidence-fixture";
+import {
+	approvedEvidence,
+	approvedRoutingTask,
+	quality,
+} from "./routing-evidence-fixture";
 
 const routes = workflowRoutesSchema.parse({
 	kind: "workflow",
@@ -35,7 +39,19 @@ const routes = workflowRoutesSchema.parse({
 			routing: {
 				mode: "evaluate",
 				quality,
-				models: ["gpt-6-luna", "gemini-3.8-flash"],
+				minimumConfidence: 0.7,
+				candidates: [
+					{
+						model: "gpt-6-luna",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+					{
+						model: "gemini-3.8-flash",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+				],
 				expectedOutputTokens: 100,
 				expectedRequests: 1,
 			},
@@ -62,7 +78,19 @@ const request = {
 		routing: {
 			mode: "automatic" as const,
 			quality,
-			models: ["gpt-6-luna", "gemini-3.8-flash"],
+			minimumConfidence: 0.7,
+			candidates: [
+				{
+					model: "gpt-6-luna",
+					reasoningEffort: "medium",
+					criteria: "Answer questions from the selected policy",
+				},
+				{
+					model: "gemini-3.8-flash",
+					reasoningEffort: "medium",
+					criteria: "Answer questions from the selected policy",
+				},
+			],
 			expectedOutputTokens: 100,
 			expectedRequests: 1,
 		},
@@ -75,7 +103,9 @@ const request = {
 	variables: {},
 	evidence: approvedEvidence,
 };
-const available = new Set(request.target.routing.models);
+const available = new Set(
+	request.target.routing.candidates.map((candidate) => candidate.model),
+);
 
 test("automatic routing requires reviewed comparable cases, complete costs, quality and full-route latency", () => {
 	for (const patch of [
@@ -178,6 +208,7 @@ test("repeated requests do not inflate distinct cases and unknown failed costs r
 		nodeId: "answer",
 		key: "a".repeat(64),
 		model: "gpt-6-luna",
+		reasoningEffort: "medium",
 		criteria: quality.criteria,
 		completed: true,
 		latencyMs: 1000,
@@ -659,9 +690,7 @@ test("preparation economics quotes eligible candidates instead of an unqualified
 				}),
 			},
 		},
-		evaluate: async () => {
-			throw new Error("unreached");
-		},
+		evaluate: approvedRoutingTask,
 		runModel: async ({ target }) => ({
 			model: target.model,
 			text: "Terms",
@@ -678,6 +707,7 @@ test("preparation economics quotes eligible candidates instead of an unqualified
 	expect(result.calls.map((call) => call.purpose)).toEqual([
 		"summary",
 		"context",
+		"routing",
 		"model",
 	]);
 });

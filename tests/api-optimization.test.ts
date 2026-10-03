@@ -63,7 +63,14 @@ test("real SDK adapters optimize Russian context, reuse summaries within a works
 								routing: {
 									mode: "evaluate",
 									quality,
-									models: ["gemini-3.8-flash"],
+									minimumConfidence: 0.7,
+									candidates: [
+										{
+											model: "gemini-3.8-flash",
+											reasoningEffort: "medium",
+											criteria: "Answer questions from the selected policy",
+										},
+									],
 									expectedOutputTokens: 50,
 									expectedRequests: 1,
 								},
@@ -244,7 +251,14 @@ test("OpenAI SDK forwards explicit cache options and stable-prefix breakpoints, 
 								routing: {
 									mode: "evaluate",
 									quality,
-									models: ["gpt-6-luna"],
+									minimumConfidence: 0.7,
+									candidates: [
+										{
+											model: "gpt-6-luna",
+											reasoningEffort: "medium",
+											criteria: "Answer questions from the selected policy",
+										},
+									],
 									expectedOutputTokens: 50,
 									expectedRequests: 2,
 								},

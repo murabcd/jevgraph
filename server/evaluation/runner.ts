@@ -1,6 +1,7 @@
 import { rename, rm, writeFile } from "node:fs/promises";
 import { api } from "../../convex/_generated/api.js";
 import { evaluationCandidate } from "../../src/lib/evaluation-candidate.ts";
+import { modelConfiguration } from "../../src/lib/model-configuration.ts";
 import { readRouteStream } from "../../src/lib/route-stream.ts";
 import { loadRunArtifact } from "../../src/lib/run-artifact-load.ts";
 import { ConvexPersistence } from "../convex-persistence.ts";
@@ -112,7 +113,7 @@ export async function runEvaluation(
 								requestId,
 								candidate: {
 									nodeId: dataset.evaluationNodeId,
-									model: candidate,
+									...modelConfiguration(candidate),
 								},
 							}
 						: {

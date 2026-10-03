@@ -75,11 +75,18 @@ describe("editable chatflow graph", () => {
 					model: "gemini-3.8-flash",
 					active: false,
 					maxOutputTokens: 100,
-					reasoningEffort: "none",
+					reasoningEffort: "low",
 					routing: {
 						mode: "automatic",
 						quality,
-						models: ["gpt-6-luna"],
+						minimumConfidence: 0.7,
+						candidates: [
+							{
+								model: "gpt-6-luna",
+								reasoningEffort: "medium",
+								criteria: "Answer questions from the selected policy",
+							},
+						],
 						expectedOutputTokens: 50,
 						expectedRequests: 2,
 					},
@@ -92,6 +99,7 @@ describe("editable chatflow graph", () => {
 							nodeId: "model",
 							callId: "1",
 							selectedModel: "gpt-6-luna",
+							selectedReasoningEffort: "medium",
 							mode: "automatic",
 							expectedRequests: 2,
 							estimation: "utf8-estimate",
@@ -107,8 +115,17 @@ describe("editable chatflow graph", () => {
 		expect(
 			routesFromGraph(restored.nodes, restored.edges)?.nodes[1],
 		).toMatchObject({
-			reasoningEffort: "none",
-			routing: { models: ["gpt-6-luna"] },
+			reasoningEffort: "low",
+			routing: {
+				minimumConfidence: 0.7,
+				candidates: [
+					{
+						model: "gpt-6-luna",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+				],
+			},
 			context: { automatic: { minimumConfidence: 0.9 } },
 		});
 		expect(

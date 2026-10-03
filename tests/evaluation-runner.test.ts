@@ -32,7 +32,7 @@ async function plan() {
 		startedAt: new Date().toISOString(),
 		split: "all",
 		repeats: 1,
-		candidates: ["gpt-6-luna", "gemini-3.8-flash"],
+		candidates: ["gpt-6-luna@medium", "gemini-3.8-flash@medium"],
 		trials: [],
 	});
 	return { dataset, run };

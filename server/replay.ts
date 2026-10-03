@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { evaluationCandidate } from "../src/lib/evaluation-candidate.ts";
 import { assertCurrentCase } from "../src/lib/evaluation-case.ts";
+import {
+	modelConfigurationKey,
+	modelConfigurationSchema,
+} from "../src/lib/model-configuration.ts";
 import { routeRequestSchema } from "../src/lib/routing.ts";
 import type { ConvexPersistence } from "./convex-persistence.ts";
 
@@ -8,15 +12,14 @@ export const routeReplayRequestSchema = z.strictObject({
 	runId: z.string().min(1).max(100),
 	conversationId: z.string().min(1).max(100),
 	requestId: z.uuid(),
-	candidate: z
-		.strictObject({
+	candidate: modelConfigurationSchema
+		.safeExtend({
 			nodeId: z.string().min(1).max(100),
-			model: z.string().min(1).max(100),
 		})
 		.optional(),
 });
 
-/** Only the selected evaluated model varies; all registered inputs stay frozen. */
+/** Only the selected evaluated model/reasoning pair varies; all registered inputs stay frozen. */
 export async function resolveReplay(
 	persistence: ConvexPersistence,
 	request: z.infer<typeof routeReplayRequestSchema>,
@@ -28,7 +31,7 @@ export async function resolveReplay(
 		? evaluationCandidate(
 				saved.routes,
 				request.candidate.nodeId,
-				request.candidate.model,
+				modelConfigurationKey(request.candidate),
 			)
 		: saved.routes;
 	return routeRequestSchema.parse({

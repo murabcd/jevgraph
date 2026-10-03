@@ -15,7 +15,19 @@ import { approvedEvidence, quality } from "./routing-evidence-fixture";
 const routing: ModelRouting = {
 	mode: "automatic",
 	quality,
-	models: ["gpt-6-luna", "gemini-3.8-flash"],
+	minimumConfidence: 0.7,
+	candidates: [
+		{
+			model: "gpt-6-luna",
+			reasoningEffort: "medium",
+			criteria: "Answer questions from the selected policy",
+		},
+		{
+			model: "gemini-3.8-flash",
+			reasoningEffort: "medium",
+			criteria: "Answer questions from the selected policy",
+		},
+	],
 	expectedOutputTokens: 1,
 	expectedRequests: 1,
 };
@@ -109,7 +121,19 @@ test("changing source or reasoning invalidates cache identity and short prefixes
 	const memory = new SessionMemory();
 	memory.observePrefix(prefixIdentity(target, context).key, 50000, 10000);
 	for (const changed of [
-		{ ...request, target: { ...target, reasoningEffort: "high" as const } },
+		{
+			...request,
+			target: {
+				...target,
+				reasoningEffort: "high" as const,
+				routing: {
+					...routing,
+					candidates: [
+						{ ...routing.candidates[0], reasoningEffort: "high" as const },
+					],
+				},
+			},
+		},
 		{
 			...request,
 			context: {

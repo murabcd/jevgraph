@@ -3,7 +3,6 @@ import {
 	type NodeContextTrace,
 	resolveContextDocuments,
 } from "../src/lib/context.ts";
-import type { JevQuestion } from "../src/lib/jev-question.ts";
 import type { CacheMode, ModelPlan } from "../src/lib/model-routing.ts";
 import { textModels } from "../src/lib/models.ts";
 import {
@@ -41,6 +40,7 @@ import { type ContextProviders, prepareNodeContext } from "./node-context.ts";
 import type { ProviderEvidence } from "./provider-evidence.ts";
 import { ProviderLedger } from "./provider-ledger.ts";
 import { SessionMemory, type SummaryStore } from "./session-memory.ts";
+import type { RoutingEvaluator } from "./task-router.ts";
 import { formattedUpstreamOutputs } from "./upstream-context.ts";
 import type { WorkflowJournal } from "./workflow-journal.ts";
 
@@ -92,11 +92,7 @@ type Execution = {
 	providerEvidence?: ProviderEvidence;
 	evidenceFor?: (key: string) => Promise<RouteEvidence[]>;
 	availableModels?: ReadonlySet<string>;
-	evaluate: (
-		nodeId: string,
-		questions: JevQuestion[],
-		state: string,
-	) => Promise<JevEvaluation>;
+	evaluate: RoutingEvaluator;
 	runModel: (request: WorkflowModelRequest) => Promise<WorkflowResponse>;
 	onDelta: (text: string) => void;
 	onRoute: (route: RouteSelectionResult) => void;
@@ -431,6 +427,7 @@ export async function executeWorkflow({
 							documents,
 							variables: startVariables,
 							evidence,
+							evaluate,
 						},
 						{
 							memory,
@@ -469,6 +466,7 @@ export async function executeWorkflow({
 							purpose: "model",
 							provider: model.provider,
 							model: model.model,
+							reasoningEffort: model.reasoningEffort,
 						},
 						model.pricing,
 						callId,

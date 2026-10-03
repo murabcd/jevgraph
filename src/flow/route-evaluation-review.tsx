@@ -12,6 +12,10 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { QualityReviewForm } from "@/flow/quality-review-form";
+import {
+	MAX_MODEL_CONFIGURATIONS,
+	modelConfigurationKey,
+} from "@/lib/model-configuration";
 import { routeEvidenceSchema } from "@/lib/route-evidence";
 import { formatCostUsd } from "@/lib/usage";
 import { api } from "../../convex/_generated/api";
@@ -28,7 +32,7 @@ const reviewTime = new Intl.DateTimeFormat(undefined, {
 function recordLabel(
 	record: FunctionReturnType<typeof api.routeEvaluations.list>[number],
 ) {
-	return `${reviewTime.format(record.createdAt)} · ${record.model} · ${record.passed === undefined ? "unreviewed" : record.passed ? "passed" : "failed"}`;
+	return `${reviewTime.format(record.createdAt)} · ${modelConfigurationKey(record)} · ${record.passed === undefined ? "unreviewed" : record.passed ? "passed" : "failed"}`;
 }
 
 export function RouteEvaluationReview({
@@ -87,14 +91,14 @@ export function RouteEvaluationReview({
 	if (!evaluation) return <div className="my-4 grid gap-3">{selector}</div>;
 	const report = z
 		.array(routeEvidenceSchema)
-		.max(2)
+		.max(MAX_MODEL_CONFIGURATIONS)
 		.parse(JSON.parse(evaluation.report));
 
 	return (
 		<div className="my-4 grid gap-3 text-sm">
 			{selector}
 			<h3 className="font-medium">
-				Answer review · {evaluation.model} ·{" "}
+				Answer review · {modelConfigurationKey(evaluation)} ·{" "}
 				{evaluation.passed === undefined
 					? evaluation.review
 						? "insufficient evidence"
@@ -127,10 +131,14 @@ export function RouteEvaluationReview({
 				nodeId={nodeId}
 			/>
 			{report.map((model) => (
-				<p key={model.model} className="text-xs text-muted-foreground">
-					{model.model} · {model.cases} distinct cases · {model.reviewed}/
-					{model.attempts} reviewed · {Math.round(model.passRate * 100)}% pass ·
-					p95 {Math.round(model.p95LatencyMs)} ms · cost per pass{" "}
+				<p
+					key={modelConfigurationKey(model)}
+					className="text-xs text-muted-foreground"
+				>
+					{modelConfigurationKey(model)} · {model.cases} distinct cases ·{" "}
+					{model.reviewed}/{model.attempts} reviewed ·{" "}
+					{Math.round(model.passRate * 100)}% pass · p95{" "}
+					{Math.round(model.p95LatencyMs)} ms · cost per pass{" "}
 					{model.costPerPassUsd === undefined
 						? "unknown"
 						: formatCostUsd(model.costPerPassUsd)}

@@ -17,6 +17,7 @@ import {
 	type JevQuestion,
 	stableQuestionOutputIds,
 } from "@/lib/jev-question";
+import { effectiveModelConfiguration } from "@/lib/model-configuration";
 import type { ModelPlan, ModelRouting } from "@/lib/model-routing";
 import type { ReasoningEffort } from "@/lib/models";
 import type { NodeTimer } from "@/lib/node-timer";
@@ -25,7 +26,6 @@ import {
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
 	DEFAULT_OPENAI_MODEL,
 	type ModelPromptMessage,
-	modelReasoningEffort,
 	type StartField,
 	type WorkflowDecision,
 	type WorkflowRoutes,
@@ -118,7 +118,7 @@ export function defaultNodeData(
 		};
 	const model =
 		provider === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_OPENAI_MODEL;
-	const reasoningEffort = modelReasoningEffort(provider, model);
+	const { reasoningEffort } = effectiveModelConfiguration({ model });
 	return {
 		kind: provider,
 		active: false,
@@ -444,13 +444,7 @@ export function routesFromGraph(
 								? { maxRepeats: node.data.maxRepeats }
 								: {}),
 						};
-					const reasoningEffort = node.data.routing
-						? node.data.reasoningEffort
-						: modelReasoningEffort(
-								node.data.kind,
-								node.data.model,
-								node.data.reasoningEffort,
-							);
+					const { reasoningEffort } = effectiveModelConfiguration(node.data);
 					return {
 						id: node.id,
 						kind: "model" as const,

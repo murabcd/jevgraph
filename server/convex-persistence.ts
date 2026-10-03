@@ -8,6 +8,7 @@ import {
 	type FrozenCase,
 	frozenCaseSchema,
 } from "../src/lib/evaluation-case.ts";
+import { MAX_MODEL_CONFIGURATIONS } from "../src/lib/model-configuration.ts";
 import { recordedReviewSchema } from "../src/lib/quality-review.ts";
 import { routeEvidenceSchema } from "../src/lib/route-evidence.ts";
 import {
@@ -160,7 +161,7 @@ export class ConvexPersistence {
 	) {
 		return z
 			.array(routeEvidenceSchema)
-			.max(2)
+			.max(MAX_MODEL_CONFIGURATIONS)
 			.parse(
 				JSON.parse(
 					await this.client.query(api.routeEvaluations.evidence, {

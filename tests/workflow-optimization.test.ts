@@ -7,7 +7,11 @@ import {
 	workflowRoutesSchema,
 } from "../src/lib/routing";
 import { estimateCost } from "../src/lib/usage";
-import { approvedEvidence, quality } from "./routing-evidence-fixture";
+import {
+	approvedEvidence,
+	approvedRoutingTask,
+	quality,
+} from "./routing-evidence-fixture";
 
 const routes: WorkflowRoutes = {
 	kind: "workflow",
@@ -22,7 +26,14 @@ const routes: WorkflowRoutes = {
 			routing: {
 				mode: "automatic",
 				quality,
-				models: ["gemini-3.8-flash"],
+				minimumConfidence: 0.7,
+				candidates: [
+					{
+						model: "gemini-3.8-flash",
+						reasoningEffort: "medium",
+						criteria: "Answer questions from the selected policy",
+					},
+				],
 				expectedOutputTokens: 50,
 				expectedRequests: 1,
 			},
@@ -50,9 +61,7 @@ test.each([false, true])(
 			routes,
 			metadata: {},
 			messages: [{ role: "user", content: "Когда приедет заказ?" }],
-			evaluate: async () => {
-				throw new Error("Not reached");
-			},
+			evaluate: approvedRoutingTask,
 			onDelta: () => {},
 			onProgress: () => {},
 			onRoute: (route) => selections.push(route),
@@ -76,10 +85,11 @@ test.each([false, true])(
 		} else {
 			const result = await run;
 			expect(attempts).toEqual(["gemini-3.8-flash", "gpt-6-luna"]);
-			expect(result.calls.map(({ status }) => status)).toEqual([
-				"failed",
-				"completed",
-			]);
+			expect(
+				result.calls
+					.filter((call) => call.purpose === "model")
+					.map(({ status }) => status),
+			).toEqual(["failed", "completed"]);
 			expect(result.usage.complete).toBe(false);
 			expect(result.modelPlans[0].selectedModel).toBe("gemini-3.8-flash");
 			expect(result.traversedEdges.some(({ id }) => id === "fallback")).toBe(
@@ -104,14 +114,19 @@ test("reasoning and output expectations are validated against all allowed candid
 			node.id === "answer"
 				? {
 						...node,
-						provider: "google",
-						model: "gemini-3.8-flash",
+						provider: "openai",
+						model: "gpt-6-luna",
 						maxOutputTokens: 100,
 						reasoningEffort,
 						routing: {
 							mode: "automatic",
 							quality,
-							models,
+							minimumConfidence: 0.7,
+							candidates: models.map((model) => ({
+								model,
+								reasoningEffort,
+								criteria: "Handle this task",
+							})),
 							expectedOutputTokens,
 							expectedRequests: 1,
 						},
@@ -148,9 +163,7 @@ test("automatic execution clears the previous model's custom rates and preserves
 		routes: configured,
 		metadata: {},
 		messages: [{ role: "user", content: "Когда приедет заказ?" }],
-		evaluate: async () => {
-			throw new Error("Not reached");
-		},
+		evaluate: approvedRoutingTask,
 		onDelta: () => {},
 		onProgress: () => {},
 		onRoute: () => {},
@@ -163,8 +176,8 @@ test("automatic execution clears the previous model's custom rates and preserves
 			return { text: "Уточните номер заказа.", model: target.model, usage };
 		},
 	});
-	expect(result.calls).toHaveLength(1);
-	expect(result.calls[0].estimatedCostUsd).toBe(
+	expect(result.calls).toHaveLength(2);
+	expect(result.calls[1].estimatedCostUsd).toBe(
 		estimateCost(
 			usage,
 			publishedRates("google", "gemini-3.8-flash", usage.inputTokens),

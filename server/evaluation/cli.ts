@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { ConvexHttpClient } from "convex/browser";
 import { evaluationCandidate } from "../../src/lib/evaluation-candidate.ts";
+import { modelConfigurationKey } from "../../src/lib/model-configuration.ts";
 import { mapConcurrent } from "../concurrency.ts";
 import { ConvexPersistence } from "../convex-persistence.ts";
 import { datasetKey, loadEvaluationDataset } from "./dataset.ts";
@@ -57,7 +58,7 @@ function connection() {
 async function main() {
 	if (values.help) {
 		console.log(
-			"bun run eval [validate | run --live --out FILE | collect --input FILE --out FILE | labels --input FILE --out FILE | sources --input FILE --out FILE | report --input FILE [--labels FILE] [--out FILE]] --dataset FILE [--split dev|test|all] [--candidates IDS] [--repeats COUNT]. Candidates default to the dataset's configured evaluation models.",
+			"bun run eval [validate | run --live --out FILE | collect --input FILE --out FILE | labels --input FILE --out FILE | sources --input FILE --out FILE | report --input FILE [--labels FILE] [--out FILE]] --dataset FILE [--split dev|test|all] [--candidates IDS] [--repeats COUNT]. Candidates default to the dataset's configured model@reasoning pairs.",
 		);
 		return;
 	}
@@ -96,7 +97,9 @@ async function main() {
 			datasetKey: await datasetKey(dataset),
 			startedAt: new Date().toISOString(),
 			split: values.split,
-			candidates: values.candidates?.split(",") ?? node.routing.models,
+			candidates:
+				values.candidates?.split(",") ??
+				node.routing.candidates.map(modelConfigurationKey),
 			repeats: Number(values.repeats),
 			trials: [],
 		});

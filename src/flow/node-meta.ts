@@ -32,8 +32,12 @@ export function nodeFooterValue(data: FlowNode["data"]) {
 		return data.questions.length === 1
 			? questionTypeLabels[data.questions[0].type]
 			: `${data.questions.length} questions`;
-	if (data.routing?.mode === "automatic")
-		return data.modelPlans?.at(-1)?.selectedModel ?? "Automatic";
+	if (data.routing?.mode === "automatic") {
+		const plan = data.modelPlans?.at(-1);
+		return plan
+			? `${plan.selectedModel} · ${plan.selectedReasoningEffort}`
+			: "Automatic";
+	}
 	return data.model;
 }
 

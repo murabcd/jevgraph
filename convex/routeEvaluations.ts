@@ -1,5 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { frozenCaseSchema } from "../src/lib/evaluation-case";
+import { reasoningEfforts } from "../src/lib/models";
 import {
 	qualityReviewSchema,
 	reviewSources,
@@ -125,6 +126,9 @@ export const latest = query({
 			review: v.optional(v.string()),
 			followup: v.optional(followupValue),
 			model: v.string(),
+			reasoningEffort: v.union(
+				...reasoningEfforts.map((effort) => v.literal(effort)),
+			),
 			question: v.string(),
 			answer: v.string(),
 			error: v.optional(v.string()),
@@ -186,6 +190,7 @@ export const latest = query({
 			review: row.review,
 			followup: await followupFor(ctx, run),
 			model: row.model,
+			reasoningEffort: row.reasoningEffort,
 			question: question.content,
 			answer: answer.content,
 			error: run.error,
@@ -204,6 +209,9 @@ export const list = query({
 			runId: v.id("runs"),
 			createdAt: v.number(),
 			model: v.string(),
+			reasoningEffort: v.union(
+				...reasoningEfforts.map((effort) => v.literal(effort)),
+			),
 			passed: v.optional(v.boolean()),
 		}),
 	),
@@ -243,6 +251,7 @@ export const list = query({
 							runId: run._id,
 							createdAt: run._creationTime,
 							model: row.model,
+							reasoningEffort: row.reasoningEffort,
 							passed: row.passed,
 						},
 					]

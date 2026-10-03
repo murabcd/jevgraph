@@ -8,6 +8,7 @@ import {
 	questionForJev,
 	resolveJevAnswer,
 } from "../src/lib/jev-question.ts";
+import { effectiveModelConfiguration } from "../src/lib/model-configuration.ts";
 import { textModels } from "../src/lib/models.ts";
 import type { RouteEvidence } from "../src/lib/route-evidence.ts";
 import {
@@ -15,7 +16,6 @@ import {
 	JEV_MODEL_ID,
 	type JevEvaluation,
 	MAX_REQUEST_BYTES,
-	modelReasoningEffort,
 	type RouteStreamEvent,
 	type RouteTrace,
 	type RoutingMetadata,
@@ -138,11 +138,7 @@ async function runModel(
 		signal,
 		providerFetch,
 	});
-	const reasoningEffort = modelReasoningEffort(
-		provider,
-		modelId,
-		target.reasoningEffort,
-	);
+	const { reasoningEffort } = effectiveModelConfiguration(target);
 	const result = streamText({
 		model,
 		...modelPrompt(

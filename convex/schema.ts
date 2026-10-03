@@ -1,6 +1,7 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { reasoningEfforts } from "../src/lib/models";
 import { EMBEDDING_DIMENSIONS } from "../src/lib/retrieval";
 
 export const runStatus = v.union(
@@ -24,6 +25,10 @@ export default defineSchema({
 		caseKey: v.string(),
 		nodeId: v.string(),
 		model: v.string(),
+		reasoningEffort: v.union(
+			...reasoningEfforts.map((effort) => v.literal(effort)),
+		),
+		outputTokens: v.optional(v.number()),
 		criteria: v.string(),
 		latencyMs: v.number(),
 		completed: v.boolean(),

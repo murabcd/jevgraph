@@ -1,3 +1,4 @@
+import { modelConfigurationKey } from "@/lib/model-configuration";
 import type { ModelPlan } from "@/lib/model-routing";
 import { formatCostUsd } from "@/lib/usage";
 
@@ -6,7 +7,7 @@ export function ModelPlanDetails({ plans }: { plans: ModelPlan[] }) {
 		<details key={plan.callId} className="rounded-lg border p-3 text-xs">
 			<summary className="cursor-pointer font-medium">
 				{plan.mode === "evaluate" ? "Evaluation" : "Reviewed routing"} ·{" "}
-				{plan.selectedModel}
+				{plan.selectedModel} · {plan.selectedReasoningEffort}
 			</summary>
 			<div className="mt-3 grid gap-3">
 				<span className="text-muted-foreground">
@@ -14,11 +15,22 @@ export function ModelPlanDetails({ plans }: { plans: ModelPlan[] }) {
 					estimated tokens
 				</span>
 				{plan.candidates.map((quote) => (
-					<div key={quote.model} className="grid gap-1 border-t pt-2">
+					<div
+						key={modelConfigurationKey(quote)}
+						className="grid gap-1 border-t pt-2"
+					>
 						<span className="font-medium">
-							{quote.model}
-							{quote.model === plan.selectedModel ? " · selected" : ""}
+							{modelConfigurationKey(quote)}
+							{quote.model === plan.selectedModel &&
+							quote.reasoningEffort === plan.selectedReasoningEffort
+								? " · selected"
+								: ""}
 						</span>
+						{quote.taskProbability !== undefined && (
+							<span className="text-muted-foreground">
+								Task suitability: {Math.round(quote.taskProbability * 100)}%
+							</span>
+						)}
 						{quote.evidence && (
 							<span className="text-muted-foreground">
 								{quote.evidence.cases} distinct cases ·{" "}
@@ -37,6 +49,7 @@ export function ModelPlanDetails({ plans }: { plans: ModelPlan[] }) {
 							<span className="text-muted-foreground">
 								{
 									{
+										task: "Outside task criteria",
 										unavailable: "Provider unavailable",
 										"unknown-price": "Price unavailable",
 										"missing-evidence": "No reviewed evidence",
