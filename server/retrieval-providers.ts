@@ -1,11 +1,16 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { type Experimental_EvaluationQuestion, embedMany } from "ai";
+import {
+	type Experimental_EvaluationQuestion,
+	embedMany,
+	wrapEmbeddingModel,
+} from "ai";
 import { z } from "zod";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "../src/lib/retrieval.ts";
 import { JEV_MODEL_ID } from "../src/lib/routing.ts";
+import type { TokenUsage } from "../src/lib/usage.ts";
 import { evaluateJev } from "./jev-evaluation.ts";
 import type { ProviderAccess } from "./provider-access.ts";
-import { evaluationUsage } from "./provider-usage.ts";
+import { evaluationUsage, ProviderUsageError } from "./provider-usage.ts";
 import type {
 	EmbeddingResult,
 	RerankResult,
@@ -18,22 +23,43 @@ export async function embedContext(
 ): Promise<EmbeddingResult> {
 	if (!access.keys.OPENAI_API_KEY)
 		throw new Error("Retrieval needs OPENAI_API_KEY");
-	const result = await embedMany({
-		model: createOpenAI({
-			apiKey: access.keys.OPENAI_API_KEY,
-			fetch: access.providerFetch,
-		}).embeddingModel(EMBEDDING_MODEL),
-		values,
-		providerOptions: { openai: { dimensions: EMBEDDING_DIMENSIONS } },
-		maxParallelCalls: 1,
-		maxRetries: 0,
-		abortSignal: AbortSignal.any([access.signal, AbortSignal.timeout(30000)]),
-	});
-	return {
-		embeddings: result.embeddings,
-		model: EMBEDDING_MODEL,
-		usage: { inputTokens: result.usage.tokens, outputTokens: 0 },
-	};
+	const model = createOpenAI({
+		apiKey: access.keys.OPENAI_API_KEY,
+		fetch: access.providerFetch,
+	}).embeddingModel(EMBEDDING_MODEL);
+	let usage: TokenUsage | undefined;
+	try {
+		const result = await embedMany({
+			model: wrapEmbeddingModel({
+				model,
+				middleware: {
+					async wrapEmbed({ doEmbed }) {
+						const result = await doEmbed();
+						usage = evaluationUsage({
+							inputTokens: result.usage?.tokens,
+							outputTokens: 0,
+						});
+						return result;
+					},
+				},
+			}),
+			values,
+			providerOptions: { openai: { dimensions: EMBEDDING_DIMENSIONS } },
+			maxParallelCalls: 1,
+			maxRetries: 0,
+			abortSignal: AbortSignal.any([access.signal, AbortSignal.timeout(30000)]),
+		});
+		return {
+			embeddings: result.embeddings,
+			model: EMBEDDING_MODEL,
+			usage: evaluationUsage({
+				inputTokens: result.usage.tokens,
+				outputTokens: 0,
+			}),
+		};
+	} catch (error) {
+		throw new ProviderUsageError(error, usage, EMBEDDING_MODEL);
+	}
 }
 
 const confidencesSchema = z.record(

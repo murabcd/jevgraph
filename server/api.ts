@@ -124,6 +124,7 @@ async function runModel(
 		maxRetries: 0,
 	});
 	let text = "";
+	let reportedModel = modelId;
 	let usage: TokenUsage | undefined;
 	try {
 		for await (const part of result.fullStream) {
@@ -135,7 +136,10 @@ async function runModel(
 			if (part.type === "finish") {
 				usage = languageModelUsage(part.totalUsage);
 			}
-			if (part.type === "finish-step") usage = languageModelUsage(part.usage);
+			if (part.type === "finish-step") {
+				usage = languageModelUsage(part.usage);
+				reportedModel = part.response.modelId;
+			}
 		}
 		const finishReason = await result.finishReason;
 		if (finishReason !== "stop")
@@ -143,9 +147,9 @@ async function runModel(
 				`The model stream ended without a normal stop (${finishReason})`,
 			);
 		if (!text.trim()) throw new Error("The model returned no text");
-		return { text, model: modelId, usage };
+		return { text, model: reportedModel, usage };
 	} catch (error) {
-		throw new ProviderUsageError(error, usage);
+		throw new ProviderUsageError(error, usage, reportedModel);
 	}
 }
 

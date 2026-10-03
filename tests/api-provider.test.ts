@@ -194,94 +194,130 @@ test("environment values preserve node identities, timing and accounting through
 	expect(artifact.providerEvidence[0].endpoint).toContain("gemini-3.8-flash");
 });
 
-test("Luna Max reaches the Responses API and uses published cache read/write rates", async () => {
-	const requestSchema = z.object({
-		model: z.literal("gpt-6-luna"),
-		reasoning: z.object({ effort: z.literal("max") }),
-	});
-	const fixture = await createApiFixture();
-	const response = await handleApi(
-		new Request("http://localhost/api/route", {
-			method: "POST",
-			headers: fixture.headers,
-			body: JSON.stringify({
-				...fixture.requestFields(),
-				messages: [{ role: "user", content: "Поздоровайся" }],
-				routes: {
-					kind: "workflow",
-					nodes: [
-						{ id: "input", kind: "input", fields: [] },
-						{
-							id: "answer",
-							kind: "model",
-							provider: "openai",
-							model: "gpt-6-luna",
-							reasoningEffort: "max",
-						},
-					],
-					edges: [{ id: "entry", source: "input", target: "answer" }],
-				},
+test.each([
+	{ model: "gpt-6-luna", incomplete: false },
+	{ model: "gpt-6-luna-unpriced-version", incomplete: false },
+	{ model: "gpt-6-luna-unpriced-version", incomplete: true },
+])(
+	"Luna Max records $model (incomplete: $incomplete) through the Responses SDK",
+	async ({ model, incomplete }) => {
+		const requestSchema = z.object({
+			model: z.literal("gpt-6-luna"),
+			reasoning: z.object({ effort: z.literal("max") }),
+		});
+		const fixture = await createApiFixture();
+		const response = await handleApi(
+			new Request("http://localhost/api/route", {
+				method: "POST",
+				headers: fixture.headers,
+				body: JSON.stringify({
+					...fixture.requestFields(),
+					messages: [{ role: "user", content: "Поздоровайся" }],
+					routes: {
+						kind: "workflow",
+						nodes: [
+							{ id: "input", kind: "input", fields: [] },
+							{
+								id: "answer",
+								kind: "model",
+								provider: "openai",
+								model: "gpt-6-luna",
+								reasoningEffort: "max",
+							},
+						],
+						edges: [{ id: "entry", source: "input", target: "answer" }],
+					},
+				}),
 			}),
-		}),
-		{
-			keys: { OPENAI_API_KEY: "test-key" },
-			connect: fixture.connect,
-			providerFetch: async (url, init) => {
-				expect(String(url)).toBe("https://api.openai.com/v1/responses");
-				requestSchema.parse(JSON.parse(String(init?.body)));
-				const events = [
-					{
-						type: "response.created",
-						response: { id: "r1", created_at: 1, model: "gpt-6-luna" },
-					},
-					{
-						type: "response.output_item.added",
-						output_index: 0,
-						item: { id: "m1", type: "message" },
-					},
-					{
-						type: "response.output_text.delta",
-						item_id: "m1",
-						output_index: 0,
-						delta: "Привет",
-					},
-					{
-						type: "response.completed",
-						response: {
-							usage: {
-								input_tokens: 100,
-								output_tokens: 25,
-								input_tokens_details: {
-									cached_tokens: 40,
-									cache_write_tokens: 10,
+			{
+				keys: { OPENAI_API_KEY: "test-key" },
+				connect: fixture.connect,
+				providerFetch: async (url, init) => {
+					expect(String(url)).toBe("https://api.openai.com/v1/responses");
+					requestSchema.parse(JSON.parse(String(init?.body)));
+					const events = [
+						{
+							type: "response.created",
+							response: { id: "r1", created_at: 1, model },
+						},
+						{
+							type: "response.output_item.added",
+							output_index: 0,
+							item: { id: "m1", type: "message" },
+						},
+						{
+							type: "response.output_text.delta",
+							item_id: "m1",
+							output_index: 0,
+							delta: "Привет",
+						},
+						{
+							type: incomplete ? "response.incomplete" : "response.completed",
+							response: {
+								incomplete_details: incomplete
+									? { reason: "max_output_tokens" }
+									: null,
+								usage: {
+									input_tokens: 100,
+									output_tokens: 25,
+									input_tokens_details: {
+										cached_tokens: 40,
+										cache_write_tokens: 10,
+									},
+									output_tokens_details: { reasoning_tokens: 5 },
 								},
-								output_tokens_details: { reasoning_tokens: 5 },
 							},
 						},
-					},
-				];
-				return new Response(
-					events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
-					{ headers: { "Content-Type": "text/event-stream" } },
-				);
+					];
+					return new Response(
+						events
+							.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+							.join(""),
+						{ headers: { "Content-Type": "text/event-stream" } },
+					);
+				},
 			},
-		},
-	);
-	let result: RouteResult | undefined;
-	await readRouteStream(response, (event) => {
-		if (event.type === "done") result = event.route;
-	});
-	expect(result?.text).toBe("Привет");
-	expect(result?.usage).toMatchObject({
-		inputTokens: 100,
-		outputTokens: 25,
-		cachedInputTokens: 40,
-		cacheWriteTokens: 10,
-		reasoningTokens: 5,
-		costComplete: true,
-	});
-	expect(result?.usage.estimatedCostUsd).toBeCloseTo(0.00001915, 10);
-});
+		);
+		let result: RouteResult | undefined;
+		const stream = readRouteStream(response, (event) => {
+			if (event.type === "done") result = event.route;
+		});
+		if (incomplete)
+			await expect(stream).rejects.toThrow("without a normal stop");
+		else await stream;
+		const artifact = await fixture.t.run(async (ctx) => {
+			const run = await ctx.db.query("runs").first();
+			if (!run?.resultFile) throw new Error("Artifact missing");
+			const file = await ctx.storage.get(run.resultFile);
+			if (!file) throw new Error("Artifact bytes missing");
+			return runArtifactSchema.parse(JSON.parse(await file.text()));
+		});
+		expect(artifact.status).toBe(incomplete ? "failed" : "completed");
+		expect(
+			result?.text ?? (artifact.status !== "completed" && artifact.text),
+		).toBe("Привет");
+		const calls =
+			artifact.status === "completed"
+				? artifact.result.calls
+				: artifact.trace.calls;
+		expect(calls).toHaveLength(1);
+		expect(calls[0].model).toBe(model);
+		expect(calls[0].status).toBe(incomplete ? "failed" : "completed");
+		expect(calls[0].usage).toMatchObject({
+			inputTokens: 100,
+			outputTokens: 25,
+			cachedInputTokens: 40,
+			cacheWriteTokens: 10,
+			reasoningTokens: 5,
+		});
+		if (model === "gpt-6-luna")
+			expect(calls[0].estimatedCostUsd).toBeCloseTo(0.00001915, 10);
+		else {
+			expect(calls[0].estimatedCostUsd).toBeUndefined();
+			if (result) expect(result.usage.costComplete).toBe(false);
+		}
+	},
+);
 
 test("split credential echoes never reach chat deltas, final replies or saved run traces", async () => {
 	const fixture = await createApiFixture();

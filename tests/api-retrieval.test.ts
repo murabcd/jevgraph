@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { handleApi } from "../server/api";
+import { ProviderLedger } from "../server/provider-ledger";
+import { embedContext } from "../server/retrieval-providers";
 import { DEFAULT_CONTEXT_POLICY } from "../src/lib/context";
 import {
 	DEFAULT_RETRIEVAL_POLICY,
@@ -8,6 +10,7 @@ import {
 } from "../src/lib/retrieval";
 import { readRouteStream } from "../src/lib/route-stream";
 import type { RouteResult } from "../src/lib/routing";
+import { providerCallSchema } from "../src/lib/usage";
 import { createApiFixture } from "./api-fixture";
 
 const providerBody = z.object({
@@ -179,4 +182,75 @@ test("real AI SDK adapters retrieve, rerank, activate instructions, account usag
 	]);
 	expect(embeddingCalls).toBe(3);
 	expect(reranks).toBe(2);
+});
+
+test.each([{ reported: true }, { reported: false }])(
+	"embedding count validation retains paid usage (reported: $reported)",
+	async ({ reported }) => {
+		const ledger = new ProviderLedger({ onRecorded: () => {} });
+		let requests = 0;
+		await expect(
+			ledger.run(
+				{
+					nodeId: "answer",
+					purpose: "embedding",
+					provider: "openai",
+					model: "text-embedding-3-small",
+				},
+				undefined,
+				ledger.nextId(),
+				() =>
+					embedContext(["selected passage"], {
+						keys: { OPENAI_API_KEY: "embedding-fixture" },
+						signal: new AbortController().signal,
+						providerFetch: async () => {
+							requests++;
+							return Response.json({
+								data: [],
+								usage: reported ? { prompt_tokens: 50 } : null,
+							});
+						},
+					}),
+			),
+		).rejects.toThrow("Expected 1 embeddings");
+		expect(requests).toBe(1);
+		expect(ledger.calls[0].status).toBe("failed");
+		if (reported) {
+			expect(ledger.calls[0].usage).toEqual({
+				inputTokens: 50,
+				outputTokens: 0,
+			});
+			expect(ledger.calls[0].estimatedCostUsd).toBeGreaterThan(0);
+		} else expect(ledger.calls[0].usage?.inputTokens).toBeUndefined();
+		expect(providerCallSchema.safeParse(ledger.calls[0]).success).toBe(true);
+	},
+);
+
+test("successful embeddings without reported usage stay unknown and serializable", async () => {
+	const result = await embedContext(["selected passage"], {
+		keys: { OPENAI_API_KEY: "embedding-fixture" },
+		signal: new AbortController().signal,
+		providerFetch: async () =>
+			Response.json({
+				data: [
+					{
+						embedding: Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1),
+					},
+				],
+			}),
+	});
+	expect(result.usage?.inputTokens).toBeUndefined();
+	const ledger = new ProviderLedger({ onRecorded: () => {} });
+	await ledger.run(
+		{
+			nodeId: "answer",
+			purpose: "embedding",
+			provider: "openai",
+			model: "text-embedding-3-small",
+		},
+		undefined,
+		ledger.nextId(),
+		async () => result,
+	);
+	expect(providerCallSchema.safeParse(ledger.calls[0]).success).toBe(true);
 });

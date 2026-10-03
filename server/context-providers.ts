@@ -1,11 +1,7 @@
-import {
-	type Experimental_EvaluationQuestion,
-	generateText,
-	NoObjectGeneratedError,
-	Output,
-} from "ai";
+import { type Experimental_EvaluationQuestion, generateText, Output } from "ai";
 import { contextSummariesSchema } from "../src/lib/context.ts";
 import { DEFAULT_OPENAI_MODEL, JEV_MODEL_ID } from "../src/lib/routing.ts";
+import type { TokenUsage } from "../src/lib/usage.ts";
 import type {
 	ContextAssessmentRequest,
 	SummaryRequest,
@@ -37,6 +33,8 @@ export async function summarizeContext(
 	request: SummaryRequest,
 	access: ProviderAccess,
 ): Promise<SummaryResult> {
+	let usage: TokenUsage | undefined;
+	let model: string | undefined;
 	try {
 		const result = await generateText({
 			model: languageModelFor("openai", DEFAULT_OPENAI_MODEL, access),
@@ -48,24 +46,22 @@ export async function summarizeContext(
 			providerOptions: { openai: { promptCacheOptions: { mode: "explicit" } } },
 			abortSignal: AbortSignal.any([access.signal, AbortSignal.timeout(30000)]),
 			maxRetries: 0,
+			onStepEnd(step) {
+				usage = languageModelUsage(step.usage);
+				model = step.response.modelId;
+			},
 		});
-		const usage = languageModelUsage(result.usage);
-		try {
-			return {
-				summaries: result.output,
-				model: result.response.modelId ?? DEFAULT_OPENAI_MODEL,
-				usage,
-			};
-		} catch (error) {
-			throw new ProviderUsageError(error, usage);
-		}
-	} catch (error) {
-		if (NoObjectGeneratedError.isInstance(error))
-			throw new ProviderUsageError(
-				error,
-				error.usage ? languageModelUsage(error.usage) : undefined,
+		if (result.finishReason !== "stop")
+			throw new Error(
+				`The summary ended without a normal stop (${result.finishReason})`,
 			);
-		throw error;
+		return {
+			summaries: result.output,
+			model: result.response.modelId,
+			usage,
+		};
+	} catch (error) {
+		throw new ProviderUsageError(error, usage, model);
 	}
 }
 

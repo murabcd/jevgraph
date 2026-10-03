@@ -160,7 +160,7 @@ export async function chooseContextRepresentations(
 			const cached = await memory.summarize(
 				contentFingerprint(
 					JSON.stringify([
-						"summaries:v2",
+						"summaries:v3",
 						DEFAULT_OPENAI_MODEL,
 						"none",
 						chunk.kind,
